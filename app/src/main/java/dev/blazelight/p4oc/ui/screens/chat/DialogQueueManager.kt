@@ -71,11 +71,10 @@ class DialogQueueManager(
     }
 
     fun enqueuePermission(permission: Permission) {
-        // Add to callID map for inline rendering
-        permission.callID?.let { callId ->
-            _pendingPermissionsByCallId.update { it + (callId to permission) }
-        }
+        _pendingPermissionsByCallId.update { it + (permission.pendingPermissionKey() to permission) }
     }
+
+    private fun Permission.pendingPermissionKey(): String = callID ?: "permission:$id"
 
     fun setPermissionsByCallId(permissions: Map<String, Permission>) {
         _pendingPermissionsByCallId.value = permissions

@@ -226,6 +226,40 @@ class PartMapperTest {
     }
 
     @Test
+    fun `maps file source strings without json escapes`() {
+        val dto = PartDto(
+            id = "part-source",
+            sessionID = "sess-1",
+            messageID = "msg-1",
+            type = "file",
+            mime = "text/plain",
+            filename = "quoted.txt",
+            url = "file://quoted.txt",
+            source = buildJsonObject {
+                put("type", "file")
+                put("path", "src/\"quoted\".txt")
+                put(
+                    "text",
+                    buildJsonObject {
+                        put("value", "hello \"world\"\nnext")
+                        put("start", 1)
+                        put("end", 2)
+                    }
+                )
+            }
+        )
+
+        val part = PartMapper.mapToDomain(dto)
+
+        assertTrue(part is Part.File)
+        val source = (part as Part.File).source
+        assertTrue(source is FilePartSource.FileSource)
+        val fileSource = source as FilePartSource.FileSource
+        assertEquals("src/\"quoted\".txt", fileSource.path)
+        assertEquals("hello \"world\"\nnext", fileSource.text.value)
+    }
+
+    @Test
     fun `maps patch part`() {
         val dto = PartDto(
             id = "part-4",
@@ -345,6 +379,27 @@ class MessageMapperTest {
         assertEquals("/home/user", assistant.path!!.cwd)
         assertEquals("/home", assistant.path!!.root)
         assertEquals("end_turn", assistant.finish)
+    }
+
+    @Test
+    fun `maps api error primitive strings without json escapes`() {
+        val dto = MessageErrorDto(
+            name = "APIError",
+            data = buildJsonObject {
+                put("message", "Bad \"request\"\nRetry")
+                put("statusCode", 429)
+                put("isRetryable", true)
+                put("responseBody", "{\"error\":\"slow down\"}")
+            }
+        )
+
+        val error = messageMapper.mapApiErrorToDomain(dto)
+
+        assertNotNull(error)
+        assertEquals("Bad \"request\"\nRetry", error!!.message)
+        assertEquals(429, error.statusCode)
+        assertTrue(error.isRetryable)
+        assertEquals("{\"error\":\"slow down\"}", error.responseBody)
     }
 
     @Test

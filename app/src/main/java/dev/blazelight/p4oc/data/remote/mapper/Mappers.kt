@@ -11,6 +11,7 @@ import kotlinx.serialization.json.JsonPrimitive
 import kotlinx.serialization.json.buildJsonObject
 import kotlinx.serialization.json.contentOrNull
 import kotlinx.serialization.json.decodeFromJsonElement
+import kotlinx.serialization.json.intOrNull
 
 // ============================================================================
 // Project Mapper
@@ -92,6 +93,13 @@ object SessionMapper {
 // Message Mapper
 // ============================================================================
 
+private fun JsonObject.stringValue(key: String): String? = (this[key] as? JsonPrimitive)?.contentOrNull
+
+private fun JsonObject.intValue(key: String): Int? = (this[key] as? JsonPrimitive)?.intOrNull
+
+private fun JsonObject.booleanValue(key: String): Boolean =
+    (this[key] as? JsonPrimitive)?.contentOrNull?.toBooleanStrictOrNull() ?: false
+
 class MessageMapper constructor(
     private val json: Json
 ) {
@@ -146,12 +154,12 @@ class MessageMapper constructor(
         val data = dto.data
         return MessageError(
             name = dto.name,
-            message = data?.get("message")?.toString()?.removeSurrounding("\""),
-            statusCode = data?.get("statusCode")?.toString()?.toIntOrNull(),
-            isRetryable = data?.get("isRetryable")?.toString()?.toBooleanStrictOrNull() ?: false,
-            providerID = data?.get("providerID")?.toString()?.removeSurrounding("\""),
+            message = data?.stringValue("message"),
+            statusCode = data?.intValue("statusCode"),
+            isRetryable = data?.booleanValue("isRetryable") ?: false,
+            providerID = data?.stringValue("providerID"),
             responseHeaders = null,
-            responseBody = data?.get("responseBody")?.toString()?.removeSurrounding("\"")
+            responseBody = data?.stringValue("responseBody")
         )
     }
 
@@ -159,10 +167,10 @@ class MessageMapper constructor(
         if (dto.name != "APIError") return null
         val data = dto.data ?: return null
         return ApiError(
-            message = data["message"]?.toString()?.removeSurrounding("\"") ?: "",
-            statusCode = data["statusCode"]?.toString()?.toIntOrNull(),
-            isRetryable = data["isRetryable"]?.toString()?.toBooleanStrictOrNull() ?: false,
-            responseBody = data["responseBody"]?.toString()?.removeSurrounding("\"")
+            message = data.stringValue("message") ?: "",
+            statusCode = data.intValue("statusCode"),
+            isRetryable = data.booleanValue("isRetryable"),
+            responseBody = data.stringValue("responseBody")
         )
     }
 
@@ -344,9 +352,9 @@ object PartMapper {
     )
 
     private fun mapAgentSourceToDomain(source: JsonObject): AgentPartSource? {
-        val value = source["value"]?.toString()?.removeSurrounding("\"") ?: return null
-        val start = source["start"]?.toString()?.toIntOrNull() ?: return null
-        val end = source["end"]?.toString()?.toIntOrNull() ?: return null
+        val value = source.stringValue("value") ?: return null
+        val start = source.intValue("start") ?: return null
+        val end = source.intValue("end") ?: return null
         return AgentPartSource(value, start, end)
     }
 
@@ -354,22 +362,22 @@ object PartMapper {
         if (dto.name != "APIError") return null
         val data = dto.data ?: return null
         return ApiError(
-            message = data["message"]?.toString()?.removeSurrounding("\"") ?: "",
-            statusCode = data["statusCode"]?.toString()?.toIntOrNull(),
-            isRetryable = data["isRetryable"]?.toString()?.toBooleanStrictOrNull() ?: false,
-            responseBody = data["responseBody"]?.toString()?.removeSurrounding("\"")
+            message = data.stringValue("message") ?: "",
+            statusCode = data.intValue("statusCode"),
+            isRetryable = data.booleanValue("isRetryable"),
+            responseBody = data.stringValue("responseBody")
         )
     }
 
     private fun mapFileSourceToDomain(source: JsonObject): FilePartSource? {
-        val typeValue = source["type"]?.toString()?.removeSurrounding("\"") ?: return null
+        val typeValue = source.stringValue("type") ?: return null
         val textObj = source["text"] as? JsonObject ?: return null
         val text = FilePartSourceText(
-            value = textObj["value"]?.toString()?.removeSurrounding("\"") ?: "",
-            start = textObj["start"]?.toString()?.toIntOrNull() ?: 0,
-            end = textObj["end"]?.toString()?.toIntOrNull() ?: 0
+            value = textObj.stringValue("value") ?: "",
+            start = textObj.intValue("start") ?: 0,
+            end = textObj.intValue("end") ?: 0
         )
-        val path = source["path"]?.toString()?.removeSurrounding("\"") ?: ""
+        val path = source.stringValue("path") ?: ""
 
         return when (typeValue) {
             "file" -> FilePartSource.FileSource(text = text, path = path)
@@ -379,10 +387,10 @@ object PartMapper {
                 val endObj = rangeObj?.get("end") as? JsonObject
                 val range = if (startObj != null && endObj != null) {
                     SymbolRange(
-                        startLine = startObj["line"]?.toString()?.toIntOrNull() ?: 0,
-                        startCharacter = startObj["character"]?.toString()?.toIntOrNull() ?: 0,
-                        endLine = endObj["line"]?.toString()?.toIntOrNull() ?: 0,
-                        endCharacter = endObj["character"]?.toString()?.toIntOrNull() ?: 0
+                        startLine = startObj.intValue("line") ?: 0,
+                        startCharacter = startObj.intValue("character") ?: 0,
+                        endLine = endObj.intValue("line") ?: 0,
+                        endCharacter = endObj.intValue("character") ?: 0
                     )
                 } else {
                     SymbolRange(0, 0, 0, 0)
@@ -391,8 +399,8 @@ object PartMapper {
                     text = text,
                     path = path,
                     range = range,
-                    name = source["name"]?.toString()?.removeSurrounding("\"") ?: "",
-                    kind = source["kind"]?.toString()?.toIntOrNull() ?: 0
+                    name = source.stringValue("name") ?: "",
+                    kind = source.intValue("kind") ?: 0
                 )
             }
             else -> null

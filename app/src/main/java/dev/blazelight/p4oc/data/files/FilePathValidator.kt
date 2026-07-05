@@ -15,6 +15,10 @@ internal object FilePathValidator {
             return if (allowRoot) Result.success("") else invalid("Root file path is not allowed for mutations")
         }
 
+        if (!allowRoot && path != trimmed) {
+            return invalid("Leading or trailing whitespace is not allowed in file paths")
+        }
+
         if (trimmed.startsWith("~")) {
             return invalid("Home-relative file paths are not allowed")
         }

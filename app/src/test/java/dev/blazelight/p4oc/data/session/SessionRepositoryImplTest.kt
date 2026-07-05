@@ -5,6 +5,7 @@ import dev.blazelight.p4oc.domain.model.Message
 import dev.blazelight.p4oc.domain.model.MessageError
 import dev.blazelight.p4oc.domain.model.OpenCodeEvent
 import dev.blazelight.p4oc.domain.model.Part
+import dev.blazelight.p4oc.domain.model.Permission
 import dev.blazelight.p4oc.domain.model.Session
 import dev.blazelight.p4oc.domain.model.SessionStatus
 import dev.blazelight.p4oc.domain.model.TokenUsage
@@ -19,6 +20,7 @@ import kotlinx.coroutines.test.StandardTestDispatcher
 import kotlinx.coroutines.test.advanceTimeBy
 import kotlinx.coroutines.test.advanceUntilIdle
 import kotlinx.coroutines.test.runTest
+import kotlinx.serialization.json.JsonObject
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
 import org.junit.Assert.assertNotNull
@@ -505,6 +507,39 @@ class SessionRepositoryImplTest {
 
         val text = repository.messages(SessionId("s1")).value.single().parts.single() as Part.Text
         assertFalse(text.isStreaming)
+    }
+
+    @Test
+    fun `permission request without callID is still exposed in session UI state`() = runTest {
+        val client = FakeWorkspaceClient().apply {
+            projects = emptyList()
+            setSessions(FakeWorkspaceClient.sessionDto(id = "s1", title = "Session"))
+        }
+        val repository =
+            SessionRepositoryImpl(
+                client,
+                nowMs = { testScheduler.currentTime },
+                dispatcher = StandardTestDispatcher(testScheduler)
+            )
+        repository.refresh()
+
+        val permission = Permission(
+            id = "per_1",
+            type = "bash",
+            patterns = listOf("ls -la"),
+            sessionID = "s1",
+            messageID = "msg-1",
+            callID = null,
+            metadata = JsonObject(emptyMap()),
+            always = emptyList()
+        )
+        repository.acceptEvent(OpenCodeEvent.PermissionRequested(permission))
+
+        val uiState = repository.sessionUiState(SessionId("s1")).value
+        assertTrue(
+            "Permission without callID should still be visible in session state",
+            uiState.pendingPermissionsByCallId.values.any { it.id == "per_1" }
+        )
     }
 
     private fun session(id: String): Session = Session(

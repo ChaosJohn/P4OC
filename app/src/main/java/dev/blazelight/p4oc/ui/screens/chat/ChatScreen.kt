@@ -53,6 +53,9 @@ import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.launch
 import org.koin.androidx.compose.koinViewModel
 
+internal fun pendingPermissionAttentionVersion(pendingPermissionCallIds: Set<String>): String =
+    pendingPermissionCallIds.sorted().joinToString(separator = "\u001F")
+
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun ChatScreen(

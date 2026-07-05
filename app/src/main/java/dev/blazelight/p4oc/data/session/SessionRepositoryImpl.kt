@@ -17,6 +17,7 @@ import dev.blazelight.p4oc.domain.model.Message
 import dev.blazelight.p4oc.domain.model.MessageWithParts
 import dev.blazelight.p4oc.domain.model.OpenCodeEvent
 import dev.blazelight.p4oc.domain.model.Part
+import dev.blazelight.p4oc.domain.model.Permission
 import dev.blazelight.p4oc.domain.model.Session
 import dev.blazelight.p4oc.domain.model.SessionStatus
 import dev.blazelight.p4oc.domain.model.TokenUsage
@@ -35,7 +36,6 @@ import kotlinx.coroutines.async
 import kotlinx.coroutines.awaitAll
 import kotlinx.coroutines.cancel
 import kotlinx.coroutines.coroutineScope
-import kotlinx.coroutines.launch
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
@@ -245,9 +245,9 @@ class SessionRepositoryImpl(
             }
             is OpenCodeEvent.PermissionRequested -> {
                 updateOwnedSession(event.permission.sessionID) { state ->
-                    val callId = event.permission.callID ?: return@updateOwnedSession state
                     state.copy(
-                        pendingPermissionsByCallId = state.pendingPermissionsByCallId + (callId to event.permission)
+                        pendingPermissionsByCallId = state.pendingPermissionsByCallId +
+                            (event.permission.pendingPermissionKey() to event.permission)
                     )
                 }
             }
@@ -708,10 +708,7 @@ class SessionRepositoryImpl(
                 ?: return
         }
         updateSession(sessionId) { state ->
-            val recovered = permissions.mapNotNull { permission ->
-                val callId = permission.callID ?: return@mapNotNull null
-                callId to permission
-            }.toMap()
+            val recovered = permissions.associateBy { permission -> permission.pendingPermissionKey() }
             state.copy(pendingPermissionsByCallId = recovered)
         }
     }
@@ -892,6 +889,8 @@ class SessionRepositoryImpl(
             Result.failure(e)
         }
     }
+
+    private fun Permission.pendingPermissionKey(): String = callID ?: "permission:$id"
 
     private companion object {
         const val FRESHNESS_MS = 30_000L

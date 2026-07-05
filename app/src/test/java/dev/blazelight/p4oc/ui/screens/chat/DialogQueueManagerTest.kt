@@ -19,7 +19,6 @@ import kotlinx.serialization.json.buildJsonObject
 import org.junit.After
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertNull
-import org.junit.Assert.assertTrue
 import org.junit.Before
 import org.junit.Test
 
@@ -53,14 +52,14 @@ class DialogQueueManagerTest {
     }
 
     @Test
-    fun enqueuePermission_withNullCallIdDoesNotAddAnything() {
+    fun enqueuePermission_withNullCallIdAddsPermissionBySyntheticKey() {
         val handle = SavedStateHandle()
         val manager = manager(handle)
         val permission = permission(id = "p1", callId = null)
 
         manager.enqueuePermission(permission)
 
-        assertTrue(manager.pendingPermissionsByCallId.value.isEmpty())
+        assertEquals(permission, manager.pendingPermissionsByCallId.value["permission:p1"])
     }
 
     @Test
