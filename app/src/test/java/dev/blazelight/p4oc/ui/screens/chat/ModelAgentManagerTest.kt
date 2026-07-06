@@ -19,6 +19,7 @@ import io.mockk.unmockkObject
 import kotlinx.coroutines.ExperimentalCoroutinesApi
 import kotlinx.coroutines.flow.flowOf
 import kotlinx.coroutines.test.advanceUntilIdle
+import kotlinx.coroutines.test.runCurrent
 import kotlinx.coroutines.test.runTest
 import org.junit.After
 import org.junit.Assert.*
@@ -87,7 +88,7 @@ class ModelAgentManagerTest {
     }
 
     @Test
-    fun `loadAgents selects build agent by default`() = runTest {
+    fun `loadAgents selects first primary agent from server order`() = runTest {
         val agents = listOf(
             makeAgent("code", mode = "primary"),
             makeAgent("build", mode = "primary"),
@@ -99,7 +100,7 @@ class ModelAgentManagerTest {
         manager.loadAgents()
         advanceUntilIdle()
 
-        assertEquals("build", manager.selectedAgent.value)
+        assertEquals("code", manager.selectedAgent.value)
     }
 
     @Test
@@ -255,6 +256,154 @@ class ModelAgentManagerTest {
     }
 
     @Test
+    fun `loadModels prefers server default over app recent model`() = runTest {
+        val recentModel = ModelInput(providerID = "anthropic", modelID = "claude-3")
+        every { settingsDataStore.recentModels } returns flowOf(listOf(recentModel))
+
+        val providersResponse = ProvidersResponseDto(
+            all = listOf(
+                ProviderDto(
+                    id = "anthropic",
+                    name = "Anthropic",
+                    source = "env",
+                    models = mapOf(
+                        "claude-3" to makeModel("claude-3", "anthropic")
+                    )
+                ),
+                ProviderDto(
+                    id = "openai",
+                    name = "OpenAI",
+                    source = "env",
+                    models = mapOf(
+                        "gpt-4" to makeModel("gpt-4", "openai")
+                    )
+                )
+            ),
+            default = mapOf("openai" to "gpt-4"),
+            connected = listOf("anthropic", "openai")
+        )
+        coEvery { api.getProviders() } returns providersResponse
+
+        val manager = ModelAgentManager(connectionManager, settingsDataStore, this)
+        advanceUntilIdle()
+
+        manager.loadModels()
+        advanceUntilIdle()
+
+        assertEquals(ModelInput(providerID = "openai", modelID = "gpt-4"), manager.selectedModel.value)
+    }
+
+    @Test
+    fun `loadModels keeps explicit user selected model when still available`() = runTest {
+        val selectedModel = ModelInput(providerID = "anthropic", modelID = "claude-3")
+        val providersResponse = ProvidersResponseDto(
+            all = listOf(
+                ProviderDto(
+                    id = "anthropic",
+                    name = "Anthropic",
+                    source = "env",
+                    models = mapOf(
+                        "claude-3" to makeModel("claude-3", "anthropic")
+                    )
+                ),
+                ProviderDto(
+                    id = "openai",
+                    name = "OpenAI",
+                    source = "env",
+                    models = mapOf(
+                        "gpt-4" to makeModel("gpt-4", "openai")
+                    )
+                )
+            ),
+            default = mapOf("openai" to "gpt-4"),
+            connected = listOf("anthropic", "openai")
+        )
+        coEvery { api.getProviders() } returns providersResponse
+
+        val manager = ModelAgentManager(connectionManager, settingsDataStore, this)
+        manager.selectModel(selectedModel)
+        advanceUntilIdle()
+
+        manager.loadModels()
+        advanceUntilIdle()
+
+        assertEquals(selectedModel, manager.selectedModel.value)
+    }
+
+    @Test
+    fun `loadModels reconciles unavailable explicit model to server default`() = runTest {
+        val staleModel = ModelInput(providerID = "anthropic", modelID = "claude-3")
+        val providersResponse = ProvidersResponseDto(
+            all = listOf(
+                ProviderDto(
+                    id = "openai",
+                    name = "OpenAI",
+                    source = "env",
+                    models = mapOf(
+                        "gpt-4" to makeModel("gpt-4", "openai")
+                    )
+                )
+            ),
+            default = mapOf("openai" to "gpt-4"),
+            connected = listOf("openai")
+        )
+        coEvery { api.getProviders() } returns providersResponse
+
+        val manager = ModelAgentManager(connectionManager, settingsDataStore, this)
+        manager.selectModel(staleModel)
+        advanceUntilIdle()
+
+        manager.loadModels()
+        advanceUntilIdle()
+
+        assertEquals(ModelInput(providerID = "openai", modelID = "gpt-4"), manager.selectedModel.value)
+    }
+
+    @Test
+    fun `loadModels does not infer reasoning effort from first available variant without explicit default`() = runTest {
+        every { settingsDataStore.recentModels } returns flowOf(emptyList())
+
+        val providersResponse = ProvidersResponseDto(
+            all = listOf(
+                ProviderDto(
+                    id = "anthropic",
+                    name = "Anthropic",
+                    source = "env",
+                    models = mapOf(
+                        "claude-3" to ModelDto(
+                            id = "claude-3",
+                            providerId = "anthropic",
+                            name = "Claude 3",
+                            variants = kotlinx.serialization.json.JsonObject(
+                                mapOf(
+                                    "low" to kotlinx.serialization.json.JsonObject(emptyMap()),
+                                    "high" to kotlinx.serialization.json.JsonObject(emptyMap())
+                                )
+                            )
+                        )
+                    )
+                )
+            ),
+            default = mapOf("anthropic" to "claude-3"),
+            connected = listOf("anthropic")
+        )
+        coEvery { api.getProviders() } returns providersResponse
+
+        val manager = ModelAgentManager(connectionManager, settingsDataStore, this)
+        advanceUntilIdle()
+
+        manager.loadModels()
+        advanceUntilIdle()
+
+        assertEquals(ModelInput(providerID = "anthropic", modelID = "claude-3"), manager.selectedModel.value)
+        assertNull(
+            "A provider/model default is not a reasoning-effort default; absent explicit upstream/user effort, " +
+                "do not silently choose the first representable variant.",
+            manager.currentReasoningEffort()
+        )
+    }
+
+    @Test
     fun `loadModels selects default model when no recent`() = runTest {
         every { settingsDataStore.recentModels } returns flowOf(emptyList())
 
@@ -284,6 +433,57 @@ class ModelAgentManagerTest {
         assertNotNull(selected)
         assertEquals("openai", selected!!.providerID)
         assertEquals("gpt-4", selected.modelID)
+    }
+
+    @Test
+    fun `active model change updates selection when no agent or explicit model override`() = runTest {
+        val coordinator = ModelSelectionCoordinator()
+        val manager = ModelAgentManager(connectionManager, settingsDataStore, backgroundScope, null, coordinator)
+        advanceUntilIdle()
+        runCurrent()
+
+        val publishedModel = ModelInput(providerID = "anthropic", modelID = "claude-3")
+        coordinator.publishActiveModel(publishedModel)
+        runCurrent()
+
+        assertEquals(publishedModel, manager.selectedModel.value)
+    }
+
+    @Test
+    fun `active model change does not replace explicit user selection`() = runTest {
+        val coordinator = ModelSelectionCoordinator()
+        val manager = ModelAgentManager(connectionManager, settingsDataStore, backgroundScope, null, coordinator)
+        val explicitModel = ModelInput(providerID = "openai", modelID = "gpt-4")
+        manager.selectModel(explicitModel)
+        advanceUntilIdle()
+        runCurrent()
+
+        coordinator.publishActiveModel(ModelInput(providerID = "anthropic", modelID = "claude-3"))
+        runCurrent()
+
+        assertEquals(explicitModel, manager.selectedModel.value)
+    }
+
+    @Test
+    fun `active model change does not replace agent model selection`() = runTest {
+        val coordinator = ModelSelectionCoordinator()
+        val agents = listOf(
+            makeAgent(
+                "code",
+                mode = "primary",
+                model = ModelRefDto(providerID = "openai", modelID = "gpt-4")
+            )
+        )
+        coEvery { api.getAgents() } returns agents
+        val manager = ModelAgentManager(connectionManager, settingsDataStore, backgroundScope, null, coordinator)
+        manager.loadAgents()
+        advanceUntilIdle()
+        runCurrent()
+
+        coordinator.publishActiveModel(ModelInput(providerID = "anthropic", modelID = "claude-3"))
+        runCurrent()
+
+        assertEquals(ModelInput(providerID = "openai", modelID = "gpt-4"), manager.selectedModel.value)
     }
 
     // ── selectModel ─────────────────────────────────────────────────────────

@@ -16,7 +16,15 @@ import dev.blazelight.p4oc.core.network.ServerConfig
 import dev.blazelight.p4oc.data.files.FileRepository
 import dev.blazelight.p4oc.data.files.FileRepositoryFactory
 import dev.blazelight.p4oc.data.remote.dto.CommandDto
+import dev.blazelight.p4oc.data.remote.dto.MessageInfoDto
+import dev.blazelight.p4oc.data.remote.dto.MessageTimeDto
+import dev.blazelight.p4oc.data.remote.dto.MessageWrapperDto
+import dev.blazelight.p4oc.data.remote.dto.ModelRefDto
+import dev.blazelight.p4oc.data.remote.dto.RevertSessionRequest
 import dev.blazelight.p4oc.data.remote.dto.SendMessageRequest
+import dev.blazelight.p4oc.data.remote.dto.SessionDto
+import dev.blazelight.p4oc.data.remote.dto.SessionRevertDto
+import dev.blazelight.p4oc.data.remote.dto.TimeDto
 import dev.blazelight.p4oc.data.remote.mapper.MessageMapper
 import dev.blazelight.p4oc.data.server.ActiveServerApiProvider
 import dev.blazelight.p4oc.data.session.SessionRepositoryImpl
@@ -59,6 +67,7 @@ import kotlinx.coroutines.test.advanceUntilIdle
 import kotlinx.coroutines.test.resetMain
 import kotlinx.coroutines.test.runTest
 import kotlinx.coroutines.test.setMain
+import kotlinx.serialization.json.Json
 import kotlinx.serialization.json.buildJsonObject
 import okhttp3.ResponseBody.Companion.toResponseBody
 import org.junit.After
@@ -105,7 +114,7 @@ class ChatViewModelTest {
         every { AppLog.e(any(), any<String>(), any()) } returns Unit
 
         connectionManager = mockk()
-        messageMapper = mockk(relaxed = true)
+        messageMapper = MessageMapper(Json { ignoreUnknownKeys = true })
         settingsDataStore = mockk()
         eventSource = mockk()
         events = MutableSharedFlow(extraBufferCapacity = 32)
@@ -307,6 +316,62 @@ class ChatViewModelTest {
         assertFalse(vm.hasUnreadResponse.value)
         assertEquals(SessionPresence.IDLE, vm.sessionConnectionState.value)
     }
+
+    @Test
+    fun sendMessage_undoSlashCommand_revertsToPreviousUserMessageBoundaryWithoutExecutingCommand() =
+        runTest {
+            coEvery { api.getSession("session-1", any()) } returns sessionDto(revertMessageId = "user-2")
+            coEvery { api.getMessages("session-1", any(), any()) } returns listOf(
+                userMessageDto("user-1", createdAt = 1),
+                assistantMessageDto("assistant-1", createdAt = 2),
+                userMessageDto("user-2", createdAt = 3),
+                assistantMessageDto("assistant-2", createdAt = 4),
+            )
+            coEvery { api.revertSession(any(), any(), any()) } returns sessionDto(revertMessageId = "user-1")
+            coEvery { api.executeCommand(any(), any(), any()) } returns assistantMessageDto(
+                "command-response",
+                createdAt = 5
+            )
+            val vm = createViewModel()
+
+            vm.updateInput("/undo")
+            vm.sendMessage()
+            advanceUntilIdle()
+
+            coVerify(exactly = 0) { api.executeCommand(any(), any(), any()) }
+            coVerify(exactly = 1) {
+                api.revertSession("session-1", RevertSessionRequest(messageID = "user-1"), "/test")
+            }
+        }
+
+    @Test
+    fun sendMessage_redoSlashCommandWithActiveRevert_revertsToNextUserMessageBoundaryWithoutExecutingCommand() =
+        runTest {
+            coEvery { api.getSession("session-1", any()) } returns sessionDto(revertMessageId = "user-1")
+            coEvery { api.getMessages("session-1", any(), any()) } returns listOf(
+                userMessageDto("user-1", createdAt = 1),
+                assistantMessageDto("assistant-1", createdAt = 2),
+                userMessageDto("user-2", createdAt = 3),
+                assistantMessageDto("assistant-2", createdAt = 4),
+            )
+            coEvery { api.revertSession(any(), any(), any()) } returns sessionDto(revertMessageId = "user-2")
+            coEvery { api.unrevertSession(any(), any()) } returns sessionDto(revertMessageId = null)
+            coEvery { api.executeCommand(any(), any(), any()) } returns assistantMessageDto(
+                "command-response",
+                createdAt = 5
+            )
+            val vm = createViewModel()
+
+            vm.updateInput("/redo")
+            vm.sendMessage()
+            advanceUntilIdle()
+
+            coVerify(exactly = 0) { api.executeCommand(any(), any(), any()) }
+            coVerify(exactly = 1) {
+                api.revertSession("session-1", RevertSessionRequest(messageID = "user-2"), "/test")
+            }
+            coVerify(exactly = 0) { api.unrevertSession(any(), any()) }
+        }
 
     @Test
     fun sendMessage_clearsInput_andMarksBusyUntilSseStatus() = runTest {
@@ -516,6 +581,60 @@ class ChatViewModelTest {
         assertNull(vm.uiState.value.commandLoadError)
     }
 
+    @Test
+    fun executeCommand_undoPaletteSelection_revertsToPreviousUserMessageBoundaryWithoutExecutingCommandEndpoint() =
+        runTest {
+            coEvery { api.getSession("session-1", any()) } returns sessionDto(revertMessageId = "user-2")
+            coEvery { api.getMessages("session-1", any(), any()) } returns listOf(
+                userMessageDto("user-1", createdAt = 1),
+                assistantMessageDto("assistant-1", createdAt = 2),
+                userMessageDto("user-2", createdAt = 3),
+                assistantMessageDto("assistant-2", createdAt = 4),
+            )
+            coEvery { api.revertSession(any(), any(), any()) } returns sessionDto(revertMessageId = "user-1")
+            coEvery { api.executeCommand(any(), any(), any()) } returns assistantMessageDto(
+                "command-response",
+                createdAt = 5
+            )
+            val vm = createViewModel()
+
+            vm.executeCommand("undo", "")
+            advanceUntilIdle()
+
+            coVerify(exactly = 0) { api.executeCommand(any(), any(), any()) }
+            coVerify(exactly = 1) {
+                api.revertSession("session-1", RevertSessionRequest(messageID = "user-1"), "/test")
+            }
+        }
+
+    @Test
+    fun executeCommand_redoPaletteSelectionWithActiveRevert_usesRevertBoundaryNotCommandEndpoint() =
+        runTest {
+            coEvery { api.getSession("session-1", any()) } returns sessionDto(revertMessageId = "user-1")
+            coEvery { api.getMessages("session-1", any(), any()) } returns listOf(
+                userMessageDto("user-1", createdAt = 1),
+                assistantMessageDto("assistant-1", createdAt = 2),
+                userMessageDto("user-2", createdAt = 3),
+                assistantMessageDto("assistant-2", createdAt = 4),
+            )
+            coEvery { api.revertSession(any(), any(), any()) } returns sessionDto(revertMessageId = "user-2")
+            coEvery { api.unrevertSession(any(), any()) } returns sessionDto(revertMessageId = null)
+            coEvery { api.executeCommand(any(), any(), any()) } returns assistantMessageDto(
+                "command-response",
+                createdAt = 5
+            )
+            val vm = createViewModel()
+
+            vm.executeCommand("redo", "")
+            advanceUntilIdle()
+
+            coVerify(exactly = 0) { api.executeCommand(any(), any(), any()) }
+            coVerify(exactly = 1) {
+                api.revertSession("session-1", RevertSessionRequest(messageID = "user-2"), "/test")
+            }
+            coVerify(exactly = 0) { api.unrevertSession(any(), any()) }
+        }
+
     private fun TestScope.createViewModel(): ChatViewModel {
         sessionRepository = SessionRepositoryImpl(
             workspaceClient,
@@ -562,6 +681,49 @@ class ChatViewModelTest {
 
     private fun ChatViewModel.currentMessages(): List<MessageWithParts> =
         messages.value
+
+    private fun sessionDto(revertMessageId: String? = null): SessionDto {
+        return SessionDto(
+            id = "session-1",
+            projectID = "project-1",
+            directory = "/test",
+            title = "Test Session",
+            version = "1.0",
+            time = TimeDto(created = 1, updated = 2),
+            revert = revertMessageId?.let { SessionRevertDto(messageID = it) },
+        )
+    }
+
+    private fun userMessageDto(id: String, createdAt: Long): MessageWrapperDto {
+        return MessageWrapperDto(
+            info = MessageInfoDto(
+                id = id,
+                sessionID = "session-1",
+                time = MessageTimeDto(created = createdAt),
+                role = "user",
+                agent = "build",
+                model = ModelRefDto(providerID = "provider", modelID = "model"),
+            ),
+            parts = emptyList(),
+        )
+    }
+
+    private fun assistantMessageDto(id: String, createdAt: Long): MessageWrapperDto {
+        return MessageWrapperDto(
+            info = MessageInfoDto(
+                id = id,
+                sessionID = "session-1",
+                time = MessageTimeDto(created = createdAt),
+                role = "assistant",
+                parentID = "",
+                providerID = "provider",
+                modelID = "model",
+                agent = "assistant",
+                mode = "chat",
+            ),
+            parts = emptyList(),
+        )
+    }
 
     private fun assistantMessage(id: String, sessionId: String, createdAt: Long): Message.Assistant {
         return Message.Assistant(

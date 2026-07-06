@@ -24,7 +24,8 @@ class ModelAgentManager(
     private val connectionManager: ConnectionManager,
     private val settingsDataStore: SettingsDataStore,
     private val scope: CoroutineScope,
-    private val sessionId: String? = null
+    private val sessionId: String? = null,
+    modelSelectionCoordinator: ModelSelectionCoordinator? = null
 ) {
     private val _availableAgents = MutableStateFlow<List<AgentDto>>(emptyList())
     val availableAgents: StateFlow<List<AgentDto>> = _availableAgents.asStateFlow()
@@ -42,12 +43,23 @@ class ModelAgentManager(
     val selectedReasoningEffort: StateFlow<String?> = _selectedReasoningEffort.asStateFlow()
 
     private var selectedModelFromAgent = false
+    private var selectedModelExplicitly = false
 
     val favoriteModels: StateFlow<Set<ModelInput>> = settingsDataStore.favoriteModels
         .stateIn(scope, SharingStarted.Eagerly, emptySet())
 
     val recentModels: StateFlow<List<ModelInput>> = settingsDataStore.recentModels
         .stateIn(scope, SharingStarted.Eagerly, emptyList())
+
+    init {
+        modelSelectionCoordinator?.let { coordinator ->
+            scope.launch {
+                coordinator.activeModelChanges.collect { model ->
+                    reconcileActiveModel(model)
+                }
+            }
+        }
+    }
 
     fun loadAgents() {
         scope.launch {
@@ -67,8 +79,7 @@ class ModelAgentManager(
                     val persistedAgent = sessionId?.let { settingsDataStore.getSelectedAgentForSession(it) }
                     val selectedAgent = persistedAgent?.let { agentName ->
                         primaryAgents.find { it.name == agentName }
-                    } ?: primaryAgents.find { it.name == "build" }
-                        ?: primaryAgents.firstOrNull()
+                    } ?: primaryAgents.firstOrNull()
                     selectedAgent?.name?.let { selectAgent(it, persist = false) }
                 }
                 is ApiResult.Error -> {
@@ -97,6 +108,7 @@ class ModelAgentManager(
             modelID = agentModel.modelID
         )
         selectedModelFromAgent = true
+        selectedModelExplicitly = false
     }
 
     fun loadModels() {
@@ -112,21 +124,28 @@ class ModelAgentManager(
                             models.add(providerId to model)
                         }
                     }
-                    val defaultModel = result.data.default.entries.firstOrNull()?.let { (provider, modelId) ->
-                        ModelInput(providerID = provider, modelID = modelId)
-                    }
-                    val lastUsedModel = recentModels.value.firstOrNull()
-                    val selectedModel = if (lastUsedModel != null && models.any {
-                            it.first == lastUsedModel.providerID && it.second.id == lastUsedModel.modelID
+                    val defaultModel = result.data.default.entries
+                        .map { (provider, modelId) -> ModelInput(providerID = provider, modelID = modelId) }
+                        .firstOrNull { candidate ->
+                            models.any { (providerId, model) ->
+                                providerId == candidate.providerID && model.id == candidate.modelID
+                            }
                         }
-                    ) {
-                        lastUsedModel
-                    } else {
-                        defaultModel
+                    val lastUsedModel = recentModels.value.firstOrNull { candidate ->
+                        models.any { (providerId, model) ->
+                            providerId == candidate.providerID && model.id == candidate.modelID
+                        }
                     }
+                    val fallbackModel = defaultModel ?: lastUsedModel
+                    val currentSelectionIsAvailable = _selectedModel.value?.let { selected ->
+                        models.any { (providerId, model) ->
+                            providerId == selected.providerID && model.id == selected.modelID
+                        }
+                    } == true
                     _availableModels.value = models
-                    if (!selectedModelFromAgent) {
-                        _selectedModel.value = selectedModel
+                    if (!selectedModelFromAgent && (!selectedModelExplicitly || !currentSelectionIsAvailable)) {
+                        _selectedModel.value = fallbackModel
+                        selectedModelExplicitly = false
                     }
                 }
                 is ApiResult.Error -> {}
@@ -140,6 +159,7 @@ class ModelAgentManager(
         }
         _selectedModel.value = model
         selectedModelFromAgent = false
+        selectedModelExplicitly = true
         scope.launch {
             settingsDataStore.addRecentModel(model)
         }
@@ -164,6 +184,14 @@ class ModelAgentManager(
         scope.launch {
             settingsDataStore.toggleFavoriteModel(model)
         }
+    }
+
+    private fun reconcileActiveModel(model: ModelInput) {
+        if (selectedModelFromAgent || selectedModelExplicitly) return
+        if (_selectedModel.value != model) {
+            _selectedReasoningEffort.value = null
+        }
+        _selectedModel.value = model
     }
 
     private companion object {

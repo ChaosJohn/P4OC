@@ -26,6 +26,7 @@ import dev.blazelight.p4oc.data.remote.dto.SetActiveModelRequest
 import dev.blazelight.p4oc.ui.components.TuiLoadingScreen
 import dev.blazelight.p4oc.ui.components.TuiSnackbar
 import dev.blazelight.p4oc.ui.components.TuiTopBar
+import dev.blazelight.p4oc.ui.screens.chat.ModelSelectionCoordinator
 import dev.blazelight.p4oc.ui.theme.LocalOpenCodeTheme
 import dev.blazelight.p4oc.ui.theme.SemanticColors
 import dev.blazelight.p4oc.ui.theme.Sizing
@@ -60,7 +61,8 @@ data class ModelControlsState(
 )
 
 class ModelControlsViewModel constructor(
-    private val connectionManager: ConnectionManager
+    private val connectionManager: ConnectionManager,
+    private val modelSelectionCoordinator: ModelSelectionCoordinator = ModelSelectionCoordinator()
 ) : ViewModel() {
 
     private val _state = MutableStateFlow(ModelControlsState())
@@ -122,17 +124,36 @@ class ModelControlsViewModel constructor(
 
     fun selectModel(modelId: String) {
         viewModelScope.launch {
-            _state.update { it.copy(selectedModelId = modelId) }
-            val api = connectionManager.getApi() ?: return@launch
-            // Find the model to get its providerId
-            val model = _state.value.models.find { it.id == modelId } ?: return@launch
+            val previousModelId = _state.value.selectedModelId
+            val api = connectionManager.getApi() ?: run {
+                _state.update { it.copy(selectedModelId = previousModelId, error = "Not connected") }
+                return@launch
+            }
+            val model = _state.value.models.find { it.id == modelId } ?: run {
+                _state.update { it.copy(selectedModelId = previousModelId, error = "Model not available") }
+                return@launch
+            }
             val request = SetActiveModelRequest(
                 model = ModelInput(
                     providerID = model.providerId,
                     modelID = model.id
                 )
             )
-            safeApiCall { api.setActiveModel(request) }
+            when (val result = safeApiCall { api.setActiveModel(request) }) {
+                is ApiResult.Success -> {
+                    if (result.data) {
+                        _state.update { it.copy(selectedModelId = modelId, error = null) }
+                        modelSelectionCoordinator.publishActiveModel(request.model)
+                    } else {
+                        _state.update {
+                            it.copy(selectedModelId = previousModelId, error = "Failed to set active model")
+                        }
+                    }
+                }
+                is ApiResult.Error -> {
+                    _state.update { it.copy(selectedModelId = previousModelId, error = result.message) }
+                }
+            }
         }
     }
 

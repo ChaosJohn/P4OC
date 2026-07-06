@@ -17,6 +17,7 @@ import dev.blazelight.p4oc.data.session.SessionRepositoryImpl
 import dev.blazelight.p4oc.data.session.SessionRepositoryProvider
 import dev.blazelight.p4oc.domain.server.ServerRef
 import dev.blazelight.p4oc.ui.screens.chat.ChatViewModel
+import dev.blazelight.p4oc.ui.screens.chat.ModelSelectionCoordinator
 import dev.blazelight.p4oc.ui.screens.files.FilesViewModel
 import dev.blazelight.p4oc.ui.screens.licenses.LicensesViewModel
 import dev.blazelight.p4oc.ui.screens.projects.ProjectsViewModel
@@ -63,6 +64,7 @@ val appModule = module {
 
     // Tab management (singleton for app lifetime)
     single { TabManager() }
+    single { ModelSelectionCoordinator() }
 }
 
 val networkModule = module {
@@ -99,7 +101,7 @@ val networkModule = module {
 
 val viewModelModule = module {
     viewModelOf(::ServerViewModel)
-    viewModelOf(::ModelControlsViewModel)
+    viewModel { ModelControlsViewModel(get(), get()) }
     viewModelOf(::AgentsConfigViewModel)
     viewModelOf(::VisualSettingsViewModel)
     viewModelOf(::ChatSettingsViewModel)
@@ -107,7 +109,7 @@ val viewModelModule = module {
     viewModelOf(::SettingsViewModel)
     viewModelOf(::NotificationSettingsViewModel)
     viewModelOf(::LicensesViewModel)
-    viewModelOf(::ProviderConfigViewModel)
+    viewModel { ProviderConfigViewModel(get(), get()) }
     viewModelOf(::ProjectsViewModel)
     viewModel { params ->
         WorkspaceViewModel(params.get<WorkspaceRepositoryOwner>())
@@ -120,7 +122,8 @@ val viewModelModule = module {
             params.get(),
             get(),
             get(),
-            get()
+            get(),
+            get<ModelSelectionCoordinator>()
         )
     }
     viewModel { params -> SessionListViewModel(params.get<SessionRepositoryImpl>()) }

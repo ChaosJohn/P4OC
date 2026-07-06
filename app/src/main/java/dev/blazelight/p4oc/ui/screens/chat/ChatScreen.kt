@@ -9,9 +9,9 @@ import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.LazyListState
 import androidx.compose.foundation.lazy.itemsIndexed
-import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
+import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.RectangleShape
@@ -135,23 +135,20 @@ fun ChatScreen(
         ToolWidgetState.fromString(visualSettings.toolWidgetDefaultState)
     }
 
-    val listState = rememberLazyListState()
+    val listState = rememberSaveable(uiState.session?.id, saver = LazyListState.Saver) { LazyListState() }
     var showCommandPalette by remember { mutableStateOf(false) }
     var showTodoTracker by remember { mutableStateOf(false) }
     var showFilePicker by remember { mutableStateOf(false) }
     var showRevertDialog by remember { mutableStateOf<String?>(null) }
 
-    // In-chat search: query + current hit, reset whenever the open session changes.
-    var showSearch by remember(uiState.session?.id) { mutableStateOf(false) }
-    var searchQuery by remember(uiState.session?.id) { mutableStateOf("") }
-    var currentMatchIndex by remember(uiState.session?.id) { mutableStateOf(0) }
+    val scrollRestorationState = rememberSaveable(
+        uiState.session?.id,
+        saver = ChatScrollRestorationState.Saver
+    ) { ChatScrollRestorationState() }
     val messageBlocks = remember(messages) { groupMessagesIntoBlocks(messages) }
-    val searchMatches = remember(messageBlocks, searchQuery) { findChatMatches(messageBlocks, searchQuery) }
-
-    // Scroll UX state: follow new tail content only while the user remains pinned to bottom.
-    var shouldFollowTail by remember(uiState.session?.id) { mutableStateOf(true) }
-    var didInitialTailScroll by remember(uiState.session?.id) { mutableStateOf(false) }
-    var hasNewContentWhileAway by remember(uiState.session?.id) { mutableStateOf(false) }
+    val searchMatches = remember(messageBlocks, scrollRestorationState.searchQuery) {
+        findChatMatches(messageBlocks, scrollRestorationState.searchQuery)
+    }
     val coroutineScope = rememberCoroutineScope()
 
     // Derived state: check if the bottom edge of the last rendered item is visible.
@@ -174,9 +171,9 @@ fun ChatScreen(
     val keyboardController = LocalSoftwareKeyboardController.current
 
     BackHandler {
-        if (showSearch) {
-            showSearch = false
-            searchQuery = ""
+        if (scrollRestorationState.showSearch) {
+            scrollRestorationState.showSearch = false
+            scrollRestorationState.searchQuery = ""
         } else {
             focusManager.clearFocus()
             keyboardController?.hide()
@@ -189,8 +186,7 @@ fun ChatScreen(
         snapshotFlow { listState.isScrollInProgress }
             .collect { isScrolling ->
                 if (!isScrolling) {
-                    shouldFollowTail = isAtBottom
-                    if (isAtBottom) hasNewContentWhileAway = false
+                    scrollRestorationState.onScrollSettled(isAtBottom)
                 }
             }
     }
@@ -210,32 +206,35 @@ fun ChatScreen(
 
     // Scroll on new messages, new parts, or streaming text/reasoning growth.
     LaunchedEffect(messageCount, tailContentVersion, isBusy, pendingQuestionId) {
-        if (didInitialTailScroll && (messages.isNotEmpty() || pendingQuestionId != null)) {
-            if (shouldFollowTail) {
-                listState.scrollChatToBottom()
-            } else {
-                hasNewContentWhileAway = true
-            }
+        if (scrollRestorationState.onTailContentChanged(messages.isNotEmpty() || pendingQuestionId != null)) {
+            listState.scrollChatToBottom()
         }
     }
 
     // Keep the active hit in range when matches change, and scroll it into view.
     LaunchedEffect(searchMatches.size) {
-        if (currentMatchIndex >= searchMatches.size) currentMatchIndex = 0
+        if (scrollRestorationState.currentMatchIndex >= searchMatches.size) {
+            scrollRestorationState.currentMatchIndex = 0
+        }
     }
-    LaunchedEffect(currentMatchIndex, searchMatches) {
-        searchMatches.getOrNull(currentMatchIndex)?.let { match ->
-            shouldFollowTail = false
+    LaunchedEffect(scrollRestorationState.currentMatchIndex, searchMatches) {
+        searchMatches.getOrNull(scrollRestorationState.currentMatchIndex)?.let { match ->
+            scrollRestorationState.shouldFollowTail = false
             listState.scrollToItem(match.blockIndex)
         }
     }
 
     // The loading screen hides the list; once the session content is visible, land at the tail.
     LaunchedEffect(uiState.session?.id, uiState.isLoading, messageCount, pendingQuestionId) {
-        if (!didInitialTailScroll && !uiState.isLoading && (messages.isNotEmpty() || pendingQuestionId != null)) {
-            snapshotFlow { listState.layoutInfo.totalItemsCount }.first { it > 0 }
-            if (shouldFollowTail) listState.scrollChatToBottom()
-            didInitialTailScroll = true
+        val hasRenderableTail = !uiState.isLoading &&
+            (messages.isNotEmpty() || pendingQuestionId != null)
+        when (scrollRestorationState.onContentReady(hasRenderableTail)) {
+            InitialTailDecision.ScrollToTail -> {
+                snapshotFlow { listState.layoutInfo.totalItemsCount }.first { it > 0 }
+                listState.scrollChatToBottom()
+            }
+            InitialTailDecision.KeepRestoredPosition,
+            InitialTailDecision.NoContent -> Unit
         }
     }
 
@@ -248,8 +247,8 @@ fun ChatScreen(
                 onTerminal = onOpenTerminal,
                 onFiles = onOpenFiles,
                 onSearch = {
-                    showSearch = true
-                    currentMatchIndex = 0
+                    scrollRestorationState.showSearch = true
+                    scrollRestorationState.currentMatchIndex = 0
                 },
                 onCommands = {
                     viewModel.refreshCommandsIfNeeded(force = true)
@@ -330,25 +329,27 @@ fun ChatScreen(
                 .fillMaxSize()
                 .padding(padding)
         ) {
-            if (showSearch) {
+            if (scrollRestorationState.showSearch) {
                 ChatSearchBar(
-                    query = searchQuery,
-                    onQueryChange = { searchQuery = it },
+                    query = scrollRestorationState.searchQuery,
+                    onQueryChange = { scrollRestorationState.searchQuery = it },
                     matchCount = searchMatches.size,
-                    currentIndex = currentMatchIndex,
+                    currentIndex = scrollRestorationState.currentMatchIndex,
                     onPrev = {
                         if (searchMatches.isNotEmpty()) {
-                            currentMatchIndex = (currentMatchIndex - 1 + searchMatches.size) % searchMatches.size
+                            scrollRestorationState.currentMatchIndex =
+                                (scrollRestorationState.currentMatchIndex - 1 + searchMatches.size) % searchMatches.size
                         }
                     },
                     onNext = {
                         if (searchMatches.isNotEmpty()) {
-                            currentMatchIndex = (currentMatchIndex + 1) % searchMatches.size
+                            scrollRestorationState.currentMatchIndex =
+                                (scrollRestorationState.currentMatchIndex + 1) % searchMatches.size
                         }
                     },
                     onClose = {
-                        showSearch = false
-                        searchQuery = ""
+                        scrollRestorationState.showSearch = false
+                        scrollRestorationState.searchQuery = ""
                     },
                 )
             }
@@ -407,8 +408,9 @@ fun ChatScreen(
                             }
                         }
                     ) { index, block ->
-                        val isCurrentMatch = showSearch && searchQuery.isNotBlank() &&
-                            searchMatches.getOrNull(currentMatchIndex)?.blockIndex == index
+                        val isCurrentMatch = scrollRestorationState.showSearch &&
+                            scrollRestorationState.searchQuery.isNotBlank() &&
+                            searchMatches.getOrNull(scrollRestorationState.currentMatchIndex)?.blockIndex == index
                         val highlight = if (isCurrentMatch) {
                             Modifier.background(LocalOpenCodeTheme.current.accent.copy(alpha = 0.08f))
                         } else {
@@ -473,11 +475,10 @@ fun ChatScreen(
             // Jump to bottom button - shows when scrolled away from the tail.
             JumpToBottomButton(
                 visible = !isAtBottom,
-                hasNewContent = hasNewContentWhileAway,
+                hasNewContent = scrollRestorationState.hasNewContentWhileAway,
                 onClick = {
                     coroutineScope.launch {
-                        shouldFollowTail = true
-                        hasNewContentWhileAway = false
+                        scrollRestorationState.onJumpToBottom()
                         listState.scrollChatToBottom()
                     }
                 },

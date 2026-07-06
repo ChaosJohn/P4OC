@@ -18,6 +18,7 @@ import dev.blazelight.p4oc.data.remote.dto.ModelInput
 import dev.blazelight.p4oc.data.remote.dto.PartInputDto
 import dev.blazelight.p4oc.data.remote.dto.PermissionResponseRequest
 import dev.blazelight.p4oc.data.remote.dto.QuestionReplyRequest
+import dev.blazelight.p4oc.data.remote.dto.RevertSessionRequest
 import dev.blazelight.p4oc.data.remote.dto.SendMessageRequest
 import dev.blazelight.p4oc.data.remote.mapper.CommandMapper
 import dev.blazelight.p4oc.data.remote.mapper.SessionMapper
@@ -51,8 +52,8 @@ class ChatViewModel constructor(
     private val connectionManager: ConnectionManager,
     private val settingsDataStore: SettingsDataStore,
     private val hapticFeedback: HapticFeedback,
+    private val modelSelectionCoordinator: ModelSelectionCoordinator = ModelSelectionCoordinator()
 ) : ViewModel() {
-
     private val sessionId: String = savedStateHandle.get<String>(Screen.Chat.ARG_SESSION_ID)
         ?: throw IllegalArgumentException("sessionId is required for ChatViewModel")
 
@@ -61,7 +62,13 @@ class ChatViewModel constructor(
 
     // --- Sub-managers ---
     val dialogManager = DialogQueueManager(savedStateHandle, json, viewModelScope)
-    val modelAgentManager = ModelAgentManager(connectionManager, settingsDataStore, viewModelScope, sessionId)
+    val modelAgentManager = ModelAgentManager(
+        connectionManager,
+        settingsDataStore,
+        viewModelScope,
+        sessionId,
+        modelSelectionCoordinator
+    )
     val filePickerManager = FilePickerManager(workspaceClient, viewModelScope, uploadCoordinator, settingsDataStore)
 
     // --- Core state ---
@@ -561,6 +568,14 @@ class ChatViewModel constructor(
     }
 
     fun executeCommand(commandName: String, arguments: String) {
+        when (commandName.trim().lowercase()) {
+            "undo" -> undoSessionCommand()
+            "redo" -> redoSessionCommand()
+            else -> executeServerCommand(commandName, arguments)
+        }
+    }
+
+    private fun executeServerCommand(commandName: String, arguments: String) {
         viewModelScope.launch {
             _uiState.update { it.copy(isSending = true) }
             val request = ExecuteCommandRequest(
@@ -601,9 +616,65 @@ class ChatViewModel constructor(
 
     // --- Revert / Unrevert ---
 
+    private fun undoSessionCommand() {
+        val targetMessageId = previousUserMessageBoundary()
+        if (targetMessageId == null) {
+            _uiState.update { it.copy(error = "Nothing to undo") }
+            return
+        }
+        revertSessionTo(targetMessageId, "undo")
+    }
+
+    private fun redoSessionCommand() {
+        val targetMessageId = nextUserMessageBoundary()
+        if (targetMessageId == null) {
+            _uiState.update { it.copy(error = "Nothing to redo") }
+            return
+        }
+        revertSessionTo(targetMessageId, "redo")
+    }
+
+    private fun previousUserMessageBoundary(): String? {
+        val userMessages = orderedUserMessages()
+        val activeRevertIndex = activeRevertIndex(userMessages) ?: userMessages.size
+        return userMessages.getOrNull(activeRevertIndex - 1)?.id
+    }
+
+    private fun nextUserMessageBoundary(): String? {
+        val userMessages = orderedUserMessages()
+        val activeRevertIndex = activeRevertIndex(userMessages) ?: return null
+        return userMessages.getOrNull(activeRevertIndex + 1)?.id
+    }
+
+    private fun orderedUserMessages(): List<Message.User> = messages.value
+        .mapNotNull { it.message as? Message.User }
+        .sortedBy { it.createdAt }
+
+    private fun activeRevertIndex(userMessages: List<Message.User>): Int? {
+        val activeRevertMessageId = _uiState.value.session?.revert?.messageID ?: return null
+        return userMessages.indexOfFirst { it.id == activeRevertMessageId }.takeIf { it >= 0 }
+    }
+
+    private fun revertSessionTo(messageId: String, action: String) {
+        viewModelScope.launch {
+            _uiState.update { it.copy(isSending = true) }
+            val request = RevertSessionRequest(messageID = messageId)
+            val result = safeApiCall { workspaceClient.revertSession(sessionId, request) }
+            when (result) {
+                is ApiResult.Success -> {
+                    _uiState.update { it.copy(isSending = false) }
+                    loadSession()
+                }
+                is ApiResult.Error -> {
+                    _uiState.update { it.copy(isSending = false, error = "Failed to $action: ${result.message}") }
+                }
+            }
+        }
+    }
+
     fun revertMessage(messageId: String) {
         viewModelScope.launch {
-            val request = dev.blazelight.p4oc.data.remote.dto.RevertSessionRequest(messageID = messageId)
+            val request = RevertSessionRequest(messageID = messageId)
             val result = safeApiCall { workspaceClient.revertSession(sessionId, request) }
             when (result) {
                 is ApiResult.Success -> {

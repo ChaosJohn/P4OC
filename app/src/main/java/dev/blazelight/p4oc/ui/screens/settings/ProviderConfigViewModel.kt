@@ -3,7 +3,9 @@ package dev.blazelight.p4oc.ui.screens.settings
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
 import dev.blazelight.p4oc.core.network.ConnectionManager
+import dev.blazelight.p4oc.data.remote.dto.ModelInput
 import dev.blazelight.p4oc.data.remote.dto.ProviderDto
+import dev.blazelight.p4oc.ui.screens.chat.ModelSelectionCoordinator
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
@@ -21,7 +23,8 @@ data class ProviderConfigUiState(
 )
 
 class ProviderConfigViewModel constructor(
-    private val connectionManager: ConnectionManager
+    private val connectionManager: ConnectionManager,
+    private val modelSelectionCoordinator: ModelSelectionCoordinator = ModelSelectionCoordinator()
 ) : ViewModel() {
 
     private val _uiState = MutableStateFlow(ProviderConfigUiState())
@@ -78,13 +81,24 @@ class ProviderConfigViewModel constructor(
                 val currentConfig = api.getConfig()
                 val newModel = "$providerId/$modelId"
                 val updatedConfig = currentConfig.copy(model = newModel)
-                api.updateConfig(updatedConfig)
-                _uiState.update { it.copy(currentModel = newModel) }
+                val savedConfig = api.updateConfig(updatedConfig)
+                val savedModel = savedConfig.model ?: newModel
+                _uiState.update { it.copy(currentModel = savedModel, error = null) }
+                parseModelInput(savedModel)?.let(modelSelectionCoordinator::publishActiveModel)
             } catch (e: CancellationException) {
                 throw e
             } catch (e: Exception) {
                 _uiState.update { it.copy(error = e.message ?: "Failed to set model") }
             }
         }
+    }
+
+    private fun parseModelInput(value: String): ModelInput? {
+        val separator = value.indexOf('/')
+        if (separator <= 0 || separator == value.lastIndex) return null
+        return ModelInput(
+            providerID = value.substring(0, separator),
+            modelID = value.substring(separator + 1)
+        )
     }
 }
