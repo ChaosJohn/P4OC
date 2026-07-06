@@ -14,7 +14,6 @@ import dev.blazelight.p4oc.core.network.ConnectionManager
 import dev.blazelight.p4oc.core.network.ConnectionState
 import dev.blazelight.p4oc.core.network.safeApiCall
 import dev.blazelight.p4oc.data.remote.dto.ExecuteCommandRequest
-import dev.blazelight.p4oc.data.remote.dto.ModelInput
 import dev.blazelight.p4oc.data.remote.dto.PartInputDto
 import dev.blazelight.p4oc.data.remote.dto.PermissionResponseRequest
 import dev.blazelight.p4oc.data.remote.dto.QuestionReplyRequest
@@ -37,7 +36,6 @@ import kotlinx.coroutines.launch
 import kotlinx.serialization.json.Json
 import java.io.File
 import java.net.URI
-import java.util.UUID
 
 /**
  * Slim coordinator — delegates to sub-managers for message state,
@@ -296,7 +294,6 @@ class ChatViewModel constructor(
                 _hasUnreadResponse.value = !_isActiveTab.value
                 handleResponseCompleted()
             }
-            if (!isBusy) sendQueuedMessageIfAny()
         }
     }
 
@@ -358,81 +355,6 @@ class ChatViewModel constructor(
         val arguments = commandText.substringAfter(" ", "").trim()
         _uiState.update { it.copy(inputText = "") }
         executeCommand(commandName, arguments)
-    }
-
-    fun queueMessage() {
-        val text = _uiState.value.inputText.trim()
-        val attachedFiles = filePickerManager.attachedFiles.value
-        if (text.isEmpty() && attachedFiles.isEmpty()) return
-        if (_uiState.value.queuedMessages.size >= MAX_QUEUED_MESSAGES) {
-            AppLog.w(TAG, "queueMessage: Queue full, ignoring new queued message")
-            return
-        }
-
-        val selectedAgent = modelAgentManager.selectedAgent.value
-        val selectedModel = modelAgentManager.selectedModel.value
-        val selectedVariant = modelAgentManager.currentReasoningEffort()
-
-        _uiState.update {
-            it.copy(
-                inputText = "",
-                queuedMessages = it.queuedMessages + QueuedMessage(
-                    text = text,
-                    attachedFiles = attachedFiles,
-                    agent = selectedAgent,
-                    model = selectedModel,
-                    variant = selectedVariant
-                )
-            )
-        }
-        filePickerManager.clearAttachedFiles()
-        AppLog.d(TAG, "queueMessage: Queued message with ${text.length} chars, ${attachedFiles.size} files")
-    }
-
-    fun cancelQueuedMessage(messageId: String) {
-        _uiState.update { state ->
-            state.copy(queuedMessages = state.queuedMessages.filterNot { it.id == messageId })
-        }
-    }
-
-    private fun sendQueuedMessageIfAny() {
-        val queued = _uiState.value.queuedMessages.firstOrNull() ?: return
-
-        AppLog.d(TAG, "sendQueuedMessageIfAny: Sending queued message")
-        _uiState.update { state ->
-            state.copy(
-                queuedMessages = state.queuedMessages.drop(1),
-                isSending = true
-            )
-        }
-
-        viewModelScope.launch {
-            val parts = buildPartInputs(queued.text, queued.attachedFiles)
-            val request = SendMessageRequest(
-                parts = parts,
-                agent = queued.agent,
-                model = queued.model,
-                variant = queued.variant
-            )
-
-            val result = sessionRepository.sendMessageAsync(SessionId(sessionId), request).await().toApiResult()
-            when (result) {
-                is ApiResult.Success -> {
-                    _uiState.update { it.copy(isSending = false, isBusy = true) }
-                    AppLog.d(TAG, "sendQueuedMessageIfAny: Queued message sent successfully")
-                }
-                is ApiResult.Error -> {
-                    _uiState.update {
-                        it.copy(
-                            isSending = false,
-                            error = "Failed to send queued message: ${result.message}"
-                        )
-                    }
-                    _uiState.update { state -> state.copy(queuedMessages = listOf(queued) + state.queuedMessages) }
-                    filePickerManager.restoreAttachedFiles(queued.attachedFiles)
-                }
-            }
-        }
     }
 
     private fun buildPartInputs(text: String, files: List<SelectedFile>): List<PartInputDto> {
@@ -749,15 +671,5 @@ data class ChatUiState(
     val hasLoadedWorkspaceCommands: Boolean = false,
     val commandLoadError: String? = null,
     val todos: List<Todo> = emptyList(),
-    val isLoadingTodos: Boolean = false,
-    val queuedMessages: List<QueuedMessage> = emptyList()
-)
-
-data class QueuedMessage(
-    val id: String = UUID.randomUUID().toString(),
-    val text: String,
-    val attachedFiles: List<SelectedFile> = emptyList(),
-    val agent: String? = null,
-    val model: ModelInput? = null,
-    val variant: String? = null
+    val isLoadingTodos: Boolean = false
 )

@@ -21,6 +21,7 @@ import androidx.compose.ui.platform.LocalHapticFeedback
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.semantics.Role
 import androidx.compose.ui.text.AnnotatedString
+import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.unit.dp
 import dev.blazelight.p4oc.R
 import dev.blazelight.p4oc.domain.model.*
@@ -41,7 +42,8 @@ fun ChatMessage(
     defaultToolWidgetState: ToolWidgetState = ToolWidgetState.COMPACT,
     pendingPermissionsByCallId: Map<String, Permission> = emptyMap(),
     onRevert: (() -> Unit)? = null,
-    modifier: Modifier = Modifier
+    isQueued: Boolean = false,
+    modifier: Modifier = Modifier,
 ) {
     val message = messageWithParts.message
     val isUser = message is Message.User
@@ -50,7 +52,7 @@ fun ChatMessage(
         modifier = modifier.fillMaxWidth()
     ) {
         if (isUser) {
-            UserMessage(messageWithParts, onRevert = onRevert)
+            UserMessage(messageWithParts, onRevert = onRevert, isQueued = isQueued)
         } else {
             AssistantMessages(
                 messagesWithParts = listOf(messageWithParts),
@@ -101,6 +103,7 @@ fun AssistantMessages(
 private fun UserMessage(
     messageWithParts: MessageWithParts,
     onRevert: (() -> Unit)? = null,
+    isQueued: Boolean = false,
 ) {
     val theme = LocalOpenCodeTheme.current
     val clipboardManager = LocalClipboardManager.current
@@ -151,12 +154,26 @@ private fun UserMessage(
                 0.dp
             }
 
-            StreamingMarkdown(
-                text = text,
+            Column(
                 modifier = Modifier
                     .fillMaxWidth()
                     .padding(end = revertEndInset)
-            )
+            ) {
+                StreamingMarkdown(text = text, modifier = Modifier.fillMaxWidth())
+
+                if (isQueued) {
+                    Text(
+                        text = stringResource(R.string.chat_queued_prefix),
+                        style = MaterialTheme.typography.labelSmall,
+                        fontFamily = FontFamily.Monospace,
+                        color = theme.background,
+                        modifier = Modifier
+                            .padding(top = Spacing.xs)
+                            .background(theme.primary, RectangleShape)
+                            .padding(horizontal = Spacing.xs, vertical = Spacing.hairline)
+                    )
+                }
+            }
 
             onRevert?.let { revert ->
                 Text(

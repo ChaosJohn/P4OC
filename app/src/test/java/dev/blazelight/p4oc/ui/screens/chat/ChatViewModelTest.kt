@@ -431,60 +431,6 @@ class ChatViewModelTest {
         )
     }
 
-    @Test
-    fun queueMessage_appendsToQueue_andClearsInput() = runTest {
-        val vm = createViewModel()
-        vm.updateInput("queued text")
-
-        vm.queueMessage()
-
-        assertEquals("", vm.uiState.value.inputText)
-        assertEquals(listOf("queued text"), vm.uiState.value.queuedMessages.map { it.text })
-    }
-
-    @Test
-    fun queueMessage_preservesFifoOrder() = runTest {
-        val vm = createViewModel()
-
-        vm.updateInput("first")
-        vm.queueMessage()
-        vm.updateInput("second")
-        vm.queueMessage()
-        vm.updateInput("third")
-        vm.queueMessage()
-
-        assertEquals(listOf("first", "second", "third"), vm.uiState.value.queuedMessages.map { it.text })
-    }
-
-    @Test
-    fun queueMessage_capsAtTenEntries() = runTest {
-        val vm = createViewModel()
-
-        repeat(10) { index ->
-            vm.updateInput("queued-$index")
-            vm.queueMessage()
-        }
-        vm.updateInput("overflow")
-        vm.queueMessage()
-
-        assertEquals(10, vm.uiState.value.queuedMessages.size)
-        assertFalse(vm.uiState.value.queuedMessages.any { it.text == "overflow" })
-    }
-
-    @Test
-    fun cancelQueuedMessage_removesMatchingEntry() = runTest {
-        val vm = createViewModel()
-
-        vm.updateInput("first")
-        vm.queueMessage()
-        vm.updateInput("second")
-        vm.queueMessage()
-        val cancelId = vm.uiState.value.queuedMessages.first().id
-
-        vm.cancelQueuedMessage(cancelId)
-
-        assertEquals(listOf("second"), vm.uiState.value.queuedMessages.map { it.text })
-    }
 
     @Test
     fun abortSession_clearsStreamingFlags_andBusyState() = runTest {

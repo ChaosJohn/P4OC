@@ -12,13 +12,10 @@ import androidx.compose.ui.tooling.preview.Preview
 import androidx.compose.ui.tooling.preview.PreviewParameter
 import androidx.compose.ui.tooling.preview.PreviewParameterProvider
 import androidx.compose.ui.unit.dp
-import dev.blazelight.p4oc.data.remote.dto.ModelInput
 import dev.blazelight.p4oc.domain.model.Session
 import dev.blazelight.p4oc.ui.components.TuiLoadingScreen
 import dev.blazelight.p4oc.ui.components.chat.ChatInputBar
-import dev.blazelight.p4oc.ui.components.chat.QueuedMessagesStrip
 import dev.blazelight.p4oc.ui.components.chat.SelectedFile
-import dev.blazelight.p4oc.ui.screens.chat.QueuedMessage
 import dev.blazelight.p4oc.ui.theme.LocalOpenCodeTheme
 import dev.blazelight.p4oc.ui.theme.PocketCodeTheme
 import dev.blazelight.p4oc.ui.theme.Sizing
@@ -260,8 +257,6 @@ private fun ChatInputBarPreview() {
                 isLoading = false,
                 enabled = true,
                 isBusy = true,
-                queuedCount = 2,
-                onQueueMessage = {},
                 onAbort = {},
                 attachedFiles = listOf(
                     SelectedFile("/tmp/log.txt", "log.txt")
@@ -271,25 +266,6 @@ private fun ChatInputBarPreview() {
     }
 }
 
-@Preview(name = "Queued Messages Strip", showBackground = true)
-@Composable
-private fun QueuedMessagesStripPreview() {
-    PocketCodeTheme {
-        Surface(tonalElevation = 3.dp) {
-            QueuedMessagesStrip(
-                queuedMessages = listOf(
-                    QueuedMessage(
-                        text = "Queue this follow-up once the current task finishes",
-                        attachedFiles = listOf(SelectedFile("/tmp/trace.txt", "trace.txt")),
-                        model = ModelInput(providerID = "anthropic", modelID = "claude-sonnet-4")
-                    ),
-                    QueuedMessage(text = "Also summarize the errors")
-                ),
-                onCancel = {}
-            )
-        }
-    }
-}
 
 /**
  * Preview for git status badges

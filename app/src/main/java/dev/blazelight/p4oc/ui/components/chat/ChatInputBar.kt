@@ -63,8 +63,6 @@ fun ChatInputBar(
     enabled: Boolean,
     modifier: Modifier = Modifier,
     isBusy: Boolean = false,
-    queuedCount: Int = 0,
-    onQueueMessage: () -> Unit = {},
     onAbort: () -> Unit = {},
     attachedFiles: List<SelectedFile> = emptyList(),
     onAttachClick: () -> Unit = {},
@@ -108,22 +106,16 @@ fun ChatInputBar(
     // Determine button state
     val currentText = textState.text.toString()
     val hasContent = currentText.isNotBlank() || attachedFiles.isNotEmpty()
-    val queueIsFull = queuedCount >= 10
-    val canSend = hasContent && enabled && !isLoading && !isBusy
-    val canQueue = hasContent && enabled && isBusy && !queueIsFull
+    val canSubmit = hasContent && enabled && !isLoading
     val loadingDescription = stringResource(R.string.cd_loading)
     val sendDescription = stringResource(R.string.chat_action_send)
-    val queueDescription = stringResource(R.string.chat_action_queue)
-    val queueFullDescription = stringResource(R.string.chat_action_queue_full)
     val disconnectedDescription = stringResource(R.string.chat_disabled_disconnected)
     val emptyDescription = stringResource(R.string.chat_disabled_empty)
     val attachDescription = stringResource(R.string.chat_action_attach)
     val stopDescription = stringResource(R.string.chat_action_stop)
     val sendContentDescription = when {
         isLoading -> loadingDescription
-        canSend -> sendDescription
-        canQueue -> queueDescription
-        queueIsFull -> queueFullDescription
+        canSubmit -> sendDescription
         !enabled -> disconnectedDescription
         else -> emptyDescription
     }
@@ -162,13 +154,8 @@ fun ChatInputBar(
 
     fun submitFromEnter(): Boolean = when {
         showSlashCommands -> selectActiveCommand()
-        canSend -> {
+        canSubmit -> {
             onSend()
-            clearInput()
-            true
-        }
-        canQueue -> {
-            onQueueMessage()
             clearInput()
             true
         }
@@ -355,15 +342,12 @@ fun ChatInputBar(
 
                     IconButton(
                         onClick = {
-                            when {
-                                canSend -> onSend()
-                                canQueue -> onQueueMessage()
-                                else -> return@IconButton
-                            }
+                            if (!canSubmit) return@IconButton
+                            onSend()
                             clearInput()
                             focusRequester.requestFocus()
                         },
-                        enabled = canSend || canQueue,
+                        enabled = canSubmit,
                         modifier = Modifier
                             .size(Sizing.iconButtonMd)
                             .semantics { contentDescription = sendContentDescription }
@@ -374,7 +358,7 @@ fun ChatInputBar(
                         } else {
                             Text(
                                 text = "↑",
-                                color = if (canSend || canQueue) theme.accent else theme.textMuted,
+                                color = if (canSubmit) theme.accent else theme.textMuted,
                                 fontFamily = FontFamily.Monospace,
                                 style = MaterialTheme.typography.titleMedium
                             )

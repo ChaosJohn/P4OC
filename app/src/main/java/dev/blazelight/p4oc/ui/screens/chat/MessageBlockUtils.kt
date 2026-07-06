@@ -18,6 +18,7 @@ internal sealed class MessageBlock {
     data class UserBlock(
         val message: MessageWithParts,
         val revertMessageId: String? = null,
+        val isQueued: Boolean = false,
     ) : MessageBlock()
     data class AssistantBlock(val messages: List<MessageWithParts>) : MessageBlock()
 }
@@ -25,9 +26,10 @@ internal sealed class MessageBlock {
 /**
  * Group messages into blocks: user messages standalone, consecutive assistant messages merged.
  */
-internal fun groupMessagesIntoBlocks(messages: List<MessageWithParts>): List<MessageBlock> {
+internal fun groupMessagesIntoBlocks(messages: List<MessageWithParts>, isBusy: Boolean = false): List<MessageBlock> {
     if (messages.isEmpty()) return emptyList()
 
+    val queuedUserMessageIds = queuedUserMessageIds(messages, isBusy)
     val revertTargetsByUserId = revertTargetsByUserId(messages)
     val blocks = mutableListOf<MessageBlock>()
     var i = 0
@@ -36,7 +38,13 @@ internal fun groupMessagesIntoBlocks(messages: List<MessageWithParts>): List<Mes
         val current = messages[i]
 
         if (current.message is Message.User) {
-            blocks.add(MessageBlock.UserBlock(current, revertMessageId = revertTargetsByUserId[current.message.id]))
+            blocks.add(
+                MessageBlock.UserBlock(
+                    message = current,
+                    revertMessageId = revertTargetsByUserId[current.message.id],
+                    isQueued = current.message.id in queuedUserMessageIds,
+                )
+            )
             i++
         } else {
             // Collect consecutive assistant messages
@@ -50,6 +58,30 @@ internal fun groupMessagesIntoBlocks(messages: List<MessageWithParts>): List<Mes
     }
 
     return blocks
+}
+
+private fun queuedUserMessageIds(messages: List<MessageWithParts>, isBusy: Boolean): Set<String> {
+    if (!isBusy) return emptySet()
+
+    val assistantParentIds = messages
+        .mapNotNull { (it.message as? Message.Assistant)?.parentID }
+        .toSet()
+    var hasActiveAssistantBefore = false
+    val queuedIds = mutableSetOf<String>()
+
+    messages.forEach { messageWithParts ->
+        when (val message = messageWithParts.message) {
+            is Message.Assistant -> {
+                if (message.completedAt == null) hasActiveAssistantBefore = true
+            }
+            is Message.User -> {
+                val hasAssistantChild = message.id in assistantParentIds
+                if (hasActiveAssistantBefore && !hasAssistantChild) queuedIds += message.id
+            }
+        }
+    }
+
+    return queuedIds
 }
 
 private fun revertTargetsByUserId(messages: List<MessageWithParts>): Map<String, String> = buildMap {
@@ -84,6 +116,7 @@ internal fun MessageBlockView(
                 onRevert = block.revertMessageId?.let { messageId ->
                     onRevert?.let { revert -> { revert(messageId) } }
                 },
+                isQueued = block.isQueued,
             )
         }
         is MessageBlock.AssistantBlock -> {

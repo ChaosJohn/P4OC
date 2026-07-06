@@ -38,7 +38,6 @@ import dev.blazelight.p4oc.ui.components.chat.ChatInputBar
 import dev.blazelight.p4oc.ui.components.chat.FilePickerDialog
 import dev.blazelight.p4oc.ui.components.chat.JumpToBottomButton
 import dev.blazelight.p4oc.ui.components.chat.ModelAgentSelectorBar
-import dev.blazelight.p4oc.ui.components.chat.QueuedMessagesStrip
 import dev.blazelight.p4oc.ui.components.command.CommandPalette
 import dev.blazelight.p4oc.ui.components.question.InlineQuestionCard
 import dev.blazelight.p4oc.ui.components.status.SessionStatusDot
@@ -145,7 +144,7 @@ fun ChatScreen(
         uiState.session?.id,
         saver = ChatScrollRestorationState.Saver
     ) { ChatScrollRestorationState() }
-    val messageBlocks = remember(messages) { groupMessagesIntoBlocks(messages) }
+    val messageBlocks = remember(messages, uiState.isBusy) { groupMessagesIntoBlocks(messages, uiState.isBusy) }
     val searchMatches = remember(messageBlocks, scrollRestorationState.searchQuery) {
         findChatMatches(messageBlocks, scrollRestorationState.searchQuery)
     }
@@ -274,10 +273,6 @@ fun ChatScreen(
                         .imePadding()
                         .navigationBarsPadding()
                 ) {
-                    QueuedMessagesStrip(
-                        queuedMessages = uiState.queuedMessages,
-                        onCancel = viewModel::cancelQueuedMessage
-                    )
                     ModelAgentSelectorBar(
                         availableAgents = availableAgents,
                         selectedAgent = selectedAgent,
@@ -303,8 +298,6 @@ fun ChatScreen(
                         isLoading = uiState.isSending,
                         enabled = connectionState is ConnectionState.Connected,
                         isBusy = uiState.isBusy,
-                        queuedCount = uiState.queuedMessages.size,
-                        onQueueMessage = viewModel::queueMessage,
                         onAbort = viewModel::abortSession,
                         attachedFiles = attachedFiles,
                         onAttachClick = {
