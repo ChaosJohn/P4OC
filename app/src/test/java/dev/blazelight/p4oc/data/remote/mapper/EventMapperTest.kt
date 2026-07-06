@@ -5,6 +5,7 @@ import dev.blazelight.p4oc.data.remote.dto.EventDataDto
 import dev.blazelight.p4oc.domain.model.Message
 import dev.blazelight.p4oc.domain.model.OpenCodeEvent
 import dev.blazelight.p4oc.domain.model.Part
+import dev.blazelight.p4oc.domain.model.PermissionKind
 import dev.blazelight.p4oc.domain.model.SessionStatus
 import io.mockk.every
 import io.mockk.mockkObject
@@ -150,7 +151,8 @@ class EventMapperTest {
         assertEquals("sess-1", perm.sessionID)
         assertEquals("msg-42", perm.messageID)
         assertEquals("call-99", perm.callID)
-        assertEquals("Execute command: rm -rf /tmp/test", perm.title)
+        assertEquals(PermissionKind.Bash, perm.kind)
+        assertEquals(buildJsonObject { put("key", "value") }, perm.metadata)
         assertEquals(listOf("once"), perm.always)
     }
 
@@ -188,6 +190,8 @@ class EventMapperTest {
         assertEquals("sess-1", perm.sessionID)
         assertEquals("msg-42", perm.messageID)
         assertEquals("call-99", perm.callID)
+        assertEquals(PermissionKind.Bash, perm.kind)
+        assertEquals(buildJsonObject { put("key", "value") }, perm.metadata)
         assertEquals(listOf("npm test"), perm.always)
     }
 

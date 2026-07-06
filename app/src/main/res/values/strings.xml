@@ -407,6 +407,16 @@
     
     <!-- Permission Dialog -->
     <string name="permission_required">Permission Required</string>
+    <string name="permission_action_bash">Execute command</string>
+    <string name="permission_action_edit">Write to file</string>
+    <string name="permission_action_patch">Edit file</string>
+    <string name="permission_action_webfetch">Fetch URL</string>
+    <string name="permission_action_task">Run sub-agent</string>
+    <string name="permission_action_skill">Use skill</string>
+    <string name="permission_action_external_directory">Access external directory</string>
+    <string name="permission_action_doom_loop">Continue execution</string>
+    <string name="permission_action_unknown">%1$s</string>
+    <string name="permission_title_with_pattern">%1$s: %2$s</string>
     
     <!-- Tool Components -->
     <string name="view_full_output">View full output</string>

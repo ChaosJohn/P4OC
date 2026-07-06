@@ -94,10 +94,10 @@ class NotificationEventObserver constructor(
         when (event) {
             is OpenCodeEvent.PermissionRequested -> {
                 if (!cachedSettings.permissionRequests) return
-                AppLog.d(TAG, "Permission requested in background: ${event.permission.title}")
+                AppLog.d(TAG, "Permission requested in background: ${event.permission.type}")
                 notificationHelper.showPermissionNotification(
                     sessionId = event.permission.sessionID,
-                    title = event.permission.title
+                    permission = event.permission
                 )
             }
             is OpenCodeEvent.QuestionAsked -> {

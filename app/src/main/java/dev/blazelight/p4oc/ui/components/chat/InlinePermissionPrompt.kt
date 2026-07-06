@@ -11,6 +11,7 @@ import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.font.FontFamily
 import dev.blazelight.p4oc.R
 import dev.blazelight.p4oc.domain.model.Permission
+import dev.blazelight.p4oc.ui.permission.permissionTitle
 import dev.blazelight.p4oc.ui.theme.LocalOpenCodeTheme
 import dev.blazelight.p4oc.ui.theme.Sizing
 import dev.blazelight.p4oc.ui.theme.Spacing
@@ -48,7 +49,7 @@ fun InlinePermissionPrompt(
                 color = theme.warning
             )
             Text(
-                text = permission.title,
+                text = permissionTitle(permission),
                 style = MaterialTheme.typography.labelMedium.copy(
                     fontFamily = FontFamily.Monospace,
                     fontSize = TuiCodeFontSize.lg

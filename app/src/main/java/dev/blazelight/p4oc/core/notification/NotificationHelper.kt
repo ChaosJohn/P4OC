@@ -11,6 +11,8 @@ import androidx.core.app.NotificationManagerCompat
 import dev.blazelight.p4oc.MainActivity
 import dev.blazelight.p4oc.R
 import dev.blazelight.p4oc.core.log.AppLog
+import dev.blazelight.p4oc.domain.model.Permission
+import dev.blazelight.p4oc.ui.permission.PermissionDisplayFormatter
 
 private const val TAG = "NotificationHelper"
 
@@ -69,7 +71,7 @@ class NotificationHelper constructor(
         }
     }
 
-    fun showPermissionNotification(sessionId: String, title: String) {
+    fun showPermissionNotification(sessionId: String, permission: Permission) {
         val notificationId = permissionNotificationId(sessionId)
         val intent = Intent(context, MainActivity::class.java).apply {
             flags = Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_CLEAR_TOP
@@ -84,9 +86,10 @@ class NotificationHelper constructor(
             PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE
         )
 
+        val title = PermissionDisplayFormatter.title(context, permission)
         val notification = NotificationCompat.Builder(context, CHANNEL_ID)
             .setSmallIcon(R.drawable.ic_launcher_foreground)
-            .setContentTitle("Permission Required")
+            .setContentTitle(context.getString(R.string.notification_permission_required))
             .setContentText(title)
             .setPriority(NotificationCompat.PRIORITY_HIGH)
             .setAutoCancel(true)

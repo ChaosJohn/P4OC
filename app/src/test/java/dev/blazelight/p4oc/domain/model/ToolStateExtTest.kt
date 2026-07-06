@@ -97,4 +97,38 @@ class ToolStateExtTest {
         assertTrue(questionTool.isQuestionTool())
         assertFalse(otherTool.isQuestionTool())
     }
+
+    @Test
+    fun `permission domain does not expose localized display title`() {
+        val permission = Permission(
+            id = "perm-1",
+            type = "bash",
+            patterns = listOf("rm -rf /tmp/test"),
+            sessionID = "sess-1",
+            messageID = "msg-1",
+            callID = "call-1",
+            metadata = buildJsonObject {},
+            always = emptyList()
+        )
+
+        assertEquals("bash", permission.type)
+        assertEquals(listOf("rm -rf /tmp/test"), permission.patterns)
+        assertEquals(PermissionKind.Bash, permission.kind)
+        assertEquals(buildJsonObject {}, permission.metadata)
+        assertEquals(emptyList<String>(), permission.always)
+
+        val localizedTitleSurfaces = permission.javaClass.methods
+            .filter { method ->
+                method.parameterCount == 0 &&
+                    method.returnType == String::class.java &&
+                    method.name in setOf("getTitle", "title", "getDisplayTitle", "displayTitle")
+            }
+
+        assertTrue(
+            "Permission is a domain transport object. Localized/display titles must be derived at the " +
+                "UI/resource boundary, not exposed as String title/displayTitle API from the domain model. Found: " +
+                localizedTitleSurfaces.joinToString { it.name },
+            localizedTitleSurfaces.isEmpty()
+        )
+    }
 }
