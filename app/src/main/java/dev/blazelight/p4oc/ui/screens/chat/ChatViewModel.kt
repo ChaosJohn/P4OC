@@ -33,6 +33,7 @@ import dev.blazelight.p4oc.ui.navigation.Screen
 import dev.blazelight.p4oc.ui.screens.files.upload.UploadCoordinator
 import kotlinx.coroutines.flow.*
 import kotlinx.coroutines.launch
+import kotlinx.serialization.SerializationException
 import kotlinx.serialization.json.Json
 import java.io.File
 import java.net.URI
@@ -70,7 +71,7 @@ class ChatViewModel constructor(
     val filePickerManager = FilePickerManager(workspaceClient, viewModelScope, uploadCoordinator, settingsDataStore)
 
     // --- Core state ---
-    private val _uiState = MutableStateFlow(ChatUiState())
+    private val _uiState = MutableStateFlow(ChatUiState(inputText = restoredInputText()))
     val uiState: StateFlow<ChatUiState> = _uiState.asStateFlow()
     private val _sessionMissing = MutableSharedFlow<Unit>(replay = 1)
     val sessionMissing: SharedFlow<Unit> = _sessionMissing.asSharedFlow()
@@ -142,7 +143,8 @@ class ChatViewModel constructor(
 
     private companion object {
         const val TAG = "ChatViewModel"
-        private const val MAX_QUEUED_MESSAGES = 10
+        private const val KEY_DRAFT_TEXT = "chat_draft_text"
+        private const val KEY_ATTACHED_FILES = "chat_attached_files"
 
         /**
          * Built-in OpenCode commands that aren't returned by the /command API endpoint.
@@ -170,7 +172,49 @@ class ChatViewModel constructor(
         )
     }
 
+    private fun restoredInputText(): String = savedStateHandle.get<String>(KEY_DRAFT_TEXT).orEmpty()
+
+    private fun restoredAttachedFiles(): List<SelectedFile> {
+        val jsonString = savedStateHandle.get<String>(KEY_ATTACHED_FILES) ?: return emptyList()
+        return try {
+            json.decodeFromString<List<SelectedFile>>(jsonString)
+        } catch (e: SerializationException) {
+            AppLog.e(TAG, "Failed to restore attached files", e)
+            savedStateHandle.remove<String>(KEY_ATTACHED_FILES)
+            emptyList()
+        } catch (e: IllegalArgumentException) {
+            AppLog.e(TAG, "Failed to restore attached files", e)
+            savedStateHandle.remove<String>(KEY_ATTACHED_FILES)
+            emptyList()
+        }
+    }
+
+    private fun persistInputText(text: String) {
+        if (text.isEmpty()) {
+            savedStateHandle.remove<String>(KEY_DRAFT_TEXT)
+        } else {
+            savedStateHandle[KEY_DRAFT_TEXT] = text
+        }
+    }
+
+    private fun persistAttachedFiles(files: List<SelectedFile>) {
+        if (files.isEmpty()) {
+            savedStateHandle.remove<String>(KEY_ATTACHED_FILES)
+        } else {
+            savedStateHandle[KEY_ATTACHED_FILES] = json.encodeToString(files)
+        }
+    }
+
+    private fun observeComposerAttachments() {
+        viewModelScope.launch {
+            filePickerManager.attachedFiles.collect(::persistAttachedFiles)
+        }
+    }
+
     init {
+        val restoredFiles = restoredAttachedFiles()
+        if (restoredFiles.isNotEmpty()) filePickerManager.restoreAttachedFiles(restoredFiles)
+        observeComposerAttachments()
         loadSession()
         loadMessages()
         modelAgentManager.loadAgents()
@@ -191,6 +235,7 @@ class ChatViewModel constructor(
     }
 
     fun updateInput(text: String) {
+        persistInputText(text)
         _uiState.update { it.copy(inputText = text) }
     }
 
@@ -316,7 +361,8 @@ class ChatViewModel constructor(
         val selectedAgent = modelAgentManager.selectedAgent.value
         val selectedModel = modelAgentManager.selectedModel.value
         val selectedVariant = modelAgentManager.currentReasoningEffort()
-        _uiState.update { it.copy(inputText = "", isSending = true) }
+        updateInput("")
+        _uiState.update { it.copy(isSending = true) }
         filePickerManager.clearAttachedFiles()
 
         viewModelScope.launch {
@@ -338,10 +384,10 @@ class ChatViewModel constructor(
                     _uiState.update {
                         it.copy(
                             isSending = false,
-                            inputText = text,
                             error = "Failed to send: ${result.message}"
                         )
                     }
+                    updateInput(text)
                     filePickerManager.restoreAttachedFiles(attachedFiles)
                 }
             }
@@ -353,7 +399,7 @@ class ChatViewModel constructor(
         val commandName = commandText.substringBefore(" ").trim()
         if (commandName.isEmpty()) return
         val arguments = commandText.substringAfter(" ", "").trim()
-        _uiState.update { it.copy(inputText = "") }
+        updateInput("")
         executeCommand(commandName, arguments)
     }
 

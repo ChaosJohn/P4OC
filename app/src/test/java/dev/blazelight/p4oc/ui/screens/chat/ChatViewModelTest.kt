@@ -406,6 +406,7 @@ class ChatViewModelTest {
         assertTrue(vm.uiState.value.error?.contains("boom") == true)
     }
 
+
     @Test
     fun sendMessage_sendsBackendFileUrls_forWorkspaceAttachmentsWithSpecialCharacters() = runTest {
         val vm = createViewModel()
@@ -581,7 +582,9 @@ class ChatViewModelTest {
             coVerify(exactly = 0) { api.unrevertSession(any(), any()) }
         }
 
-    private fun TestScope.createViewModel(): ChatViewModel {
+    private fun TestScope.createViewModel(
+        savedStateHandle: SavedStateHandle = SavedStateHandle(mapOf(Screen.Chat.ARG_SESSION_ID to "session-1"))
+    ): ChatViewModel {
         sessionRepository = SessionRepositoryImpl(
             workspaceClient,
             messageMapper,
@@ -589,7 +592,7 @@ class ChatViewModelTest {
         )
         val fileRepository = testFileRepository()
         val vm = ChatViewModel(
-            savedStateHandle = SavedStateHandle(mapOf(Screen.Chat.ARG_SESSION_ID to "session-1")),
+            savedStateHandle = savedStateHandle,
             workspaceClient = workspaceClient,
             sessionRepository = sessionRepository,
             uploadCoordinator = testUploadCoordinator(fileRepository),

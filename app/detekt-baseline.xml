@@ -886,7 +886,6 @@
     <ID>TooManyFunctions:TuiComponents.kt$dev.blazelight.p4oc.ui.components.TuiComponents.kt</ID>
     <ID>TooManyFunctions:WorkspaceClient.kt$WorkspaceClient : SessionWorkspaceClient</ID>
     <ID>UnusedParameter:ChatMessage.kt$onToolAlways: (String) -&gt; Unit</ID>
-    <ID>UnusedPrivateProperty:ChatViewModel.kt$ChatViewModel.Companion$private const val MAX_QUEUED_MESSAGES = 10</ID>
     <ID>UseCheckOrError:ChatViewModel.kt$ChatViewModel$throw IllegalStateException("Cannot attach workspace file without a workspace directory")</ID>
     <ID>UseCheckOrError:ConnectionManager.kt$ConnectionManager$throw IllegalStateException("Not connected to any server")</ID>
     <ID>UseCheckOrError:UploadOrchestratorTest.kt$FakeUploadSource$throw IllegalStateException("no payload for $sourceId")</ID>

@@ -35,7 +35,9 @@ import dev.blazelight.p4oc.ui.theme.LocalOpenCodeTheme
 import dev.blazelight.p4oc.ui.theme.SemanticColors
 import dev.blazelight.p4oc.ui.theme.Sizing
 import dev.blazelight.p4oc.ui.theme.Spacing
+import kotlinx.serialization.Serializable
 
+@Serializable
 data class SelectedFile(
     val path: String,
     val name: String,
