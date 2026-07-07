@@ -314,8 +314,8 @@ fun MainTabScreen(
             // Wrapped in a Box so the New-tab DropdownMenu can anchor to the top-end,
             // which visually aligns it near the + button inside TabBar.
             var newTabMenuExpanded by remember { mutableStateOf(false) }
-            // Snapshot the active tab's workspace key so each menu item inherits it.
-            val activeWorkspaceKey = tabs.firstOrNull { it.id == activeTabId }?.workspaceKey ?: WorkspaceKey.Global
+            // Top-level plus actions are server/global by default; contextual tab actions inherit below.
+            val globalWorkspaceKey = WorkspaceKey.Global
             Box(modifier = Modifier.fillMaxWidth()) {
                 TabBar(
                     tabs = tabs,
@@ -350,7 +350,7 @@ fun MainTabScreen(
                                 newTabMenuExpanded = false
                                 tabManager.createTab(
                                     startRoute = Screen.Sessions.route,
-                                    workspaceKey = activeWorkspaceKey,
+                                    workspaceKey = globalWorkspaceKey,
                                     focus = true,
                                 )
                             },
@@ -394,7 +394,7 @@ fun MainTabScreen(
                                             val ptyId = result.data.id
                                             tabManager.createTab(
                                                 startRoute = Screen.Terminal.createRoute(ptyId),
-                                                workspaceKey = activeWorkspaceKey,
+                                                workspaceKey = globalWorkspaceKey,
                                                 focus = true,
                                             )
                                         }
@@ -492,13 +492,21 @@ fun MainTabScreen(
                                             snackbarHostState.showSnackbar("Not connected to server")
                                             return@launch
                                         }
-                                        val result = safeApiCall { api.createPtySession(CreatePtyRequest()) }
+                                        val workspaceKey = tab.workspaceKey ?: WorkspaceKey.Global
+                                        val result = safeApiCall {
+                                            api.createPtySession(
+                                                CreatePtyRequest(
+                                                    cwd = (workspaceKey as? WorkspaceKey.Directory)?.value,
+                                                    title = terminalTitle(workspaceKey),
+                                                )
+                                            )
+                                        }
                                         when (result) {
                                             is ApiResult.Success -> {
                                                 val ptyId = result.data.id
                                                 tabManager.createTab(
                                                     startRoute = Screen.Terminal.createRoute(ptyId),
-                                                    workspaceKey = tab.workspaceKey ?: WorkspaceKey.Global,
+                                                    workspaceKey = workspaceKey,
                                                     focus = true,
                                                 )
                                             }
@@ -574,6 +582,12 @@ fun MainTabScreen(
         }
     }
 }
+private fun terminalTitle(workspaceKey: WorkspaceKey): String? = when (workspaceKey) {
+    is WorkspaceKey.Directory -> workspaceKey.value.trimEnd('/').substringAfterLast('/').ifBlank { "Terminal" }
+    WorkspaceKey.Global -> null
+    is WorkspaceKey.SessionScoped -> workspaceKey.sessionId.value
+}
+
 private fun workspaceSubtitle(workspaceKey: WorkspaceKey): String = when (workspaceKey) {
     is WorkspaceKey.Directory -> workspaceKey.value
     WorkspaceKey.Global -> "No project context"

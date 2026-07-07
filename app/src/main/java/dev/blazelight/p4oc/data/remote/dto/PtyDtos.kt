@@ -19,10 +19,10 @@ data class PtyDto(
 
 @Serializable
 data class CreatePtyRequest(
-    val command: String = "/bin/bash",
+    val command: String? = null,
     val args: List<String> = emptyList(),
-    val cwd: String = ".",
-    val title: String = "Terminal",
+    val cwd: String? = null,
+    val title: String? = null,
     val env: Map<String, String> = emptyMap()
 )
 
