@@ -2,7 +2,9 @@ package dev.blazelight.p4oc.ui.tabs
 
 import dev.blazelight.p4oc.core.datastore.PersistedTab
 import dev.blazelight.p4oc.core.datastore.PersistedTabState
+import dev.blazelight.p4oc.core.datastore.PersistedWorkspaceKey
 import dev.blazelight.p4oc.domain.server.ServerRef
+import dev.blazelight.p4oc.domain.server.WorkspaceKey
 import dev.blazelight.p4oc.ui.navigation.Screen
 import dev.blazelight.p4oc.ui.navigation.TabChatRouteCodec
 import kotlinx.coroutines.flow.MutableStateFlow
@@ -50,14 +52,17 @@ class TabManager {
      */
     fun createTab(
         startRoute: String = "sessions",
-        workspaceDirectory: String? = null,
+        workspaceKey: WorkspaceKey,
         focus: Boolean = true
-    ): TabInstance {
-        val tab = TabInstance(
-            TabState(workspaceDirectory = workspaceDirectory?.takeIf { it.isNotBlank() }),
+    ): TabInstance = addTab(
+        tab = TabInstance(
+            TabState(workspaceKey = workspaceKey),
             startRoute = startRoute,
-        )
+        ),
+        focus = focus,
+    )
 
+    private fun addTab(tab: TabInstance, focus: Boolean): TabInstance {
         _tabs.update { currentTabs ->
             val newTabs = currentTabs + tab
 
@@ -92,7 +97,7 @@ class TabManager {
 
         if (currentTabs.size == 1) {
             // Last tab - create a fresh replacement
-            val newTab = TabInstance(TabState())
+            val newTab = TabInstance(TabState(workspaceKey = WorkspaceKey.Global))
             _tabs.value = listOf(newTab)
             _activeTabId.value = newTab.id
             return
@@ -150,12 +155,12 @@ class TabManager {
     }
 
     /**
-     * Switch only one tab to a different workspace directory.
+     * Switch only one tab to a different workspace key.
      */
-    fun updateTabWorkspace(tabId: String, directory: String?) {
+    fun updateTabWorkspace(tabId: String, workspaceKey: WorkspaceKey) {
         _tabs.update { tabs ->
             tabs.map { tab ->
-                if (tab.id == tabId) tab.withWorkspaceDirectory(directory) else tab
+                if (tab.id == tabId) tab.withWorkspaceKey(workspaceKey) else tab
             }
         }
     }
@@ -172,7 +177,7 @@ class TabManager {
                     startRoute = persistableStartRoute(tab),
                     sessionId = tab.sessionId,
                     sessionTitle = tab.sessionTitle,
-                    workspaceDirectory = tab.workspaceDirectory,
+                    workspaceKey = tab.workspaceKey?.let(PersistedWorkspaceKey::fromWorkspaceKey),
                 )
             },
         )
@@ -198,7 +203,7 @@ class TabManager {
                     id = persisted.id,
                     sessionId = persisted.sessionId,
                     sessionTitle = persisted.sessionTitle,
-                    workspaceDirectory = persisted.workspaceDirectory,
+                    workspaceKey = persisted.resolvedWorkspaceKey(),
                 ),
                 startRoute = route,
             )

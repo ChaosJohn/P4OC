@@ -35,6 +35,7 @@ import dev.blazelight.p4oc.data.session.presence
 import dev.blazelight.p4oc.domain.model.SessionConnectionState
 import dev.blazelight.p4oc.domain.model.SessionStatus
 import dev.blazelight.p4oc.domain.server.ServerRef
+import dev.blazelight.p4oc.domain.server.WorkspaceKey
 import dev.blazelight.p4oc.domain.session.SessionId
 import dev.blazelight.p4oc.domain.workspace.Workspace
 import dev.blazelight.p4oc.ui.components.TuiAlertDialog
@@ -115,7 +116,7 @@ fun MainTabScreen(
             }
 
             if (!tabManager.hasTabs()) {
-                val initialTab = TabInstance(TabState())
+                val initialTab = TabInstance(TabState(workspaceKey = WorkspaceKey.Global))
                 tabManager.registerTab(initialTab, focus = true)
             }
         }
@@ -136,7 +137,7 @@ fun MainTabScreen(
             tabTitles[tab.id] = getTitleForRoute(
                 route = tab.startRoute,
                 sessionTitle = tab.sessionTitle,
-                workspaceDirectory = tab.workspaceDirectory,
+                workspaceKey = tab.workspaceKey,
             )
             tabIcons[tab.id] = getIconForRoute(tab.startRoute)
         }
@@ -173,9 +174,10 @@ fun MainTabScreen(
             }
 
         tabs.forEach { tab ->
+            val workspaceKey = tab.workspaceKey ?: WorkspaceKey.Global
             val workspace = Workspace(
                 server = ServerRef.fromEndpoint(baseUrl),
-                directory = tab.workspaceDirectory,
+                directory = (workspaceKey as? WorkspaceKey.Directory)?.value,
             )
             val currentOwner = workspaceOwners[tab.id]
             if (currentOwner == null ||
@@ -312,9 +314,8 @@ fun MainTabScreen(
             // Wrapped in a Box so the New-tab DropdownMenu can anchor to the top-end,
             // which visually aligns it near the + button inside TabBar.
             var newTabMenuExpanded by remember { mutableStateOf(false) }
-            // Snapshot the active tab's workspace so each menu item inherits it.
-            // AGENTS.md: workspaceDirectory must come from the active tab — no globals.
-            val activeWorkspaceDirectory = tabs.firstOrNull { it.id == activeTabId }?.workspaceDirectory
+            // Snapshot the active tab's workspace key so each menu item inherits it.
+            val activeWorkspaceKey = tabs.firstOrNull { it.id == activeTabId }?.workspaceKey ?: WorkspaceKey.Global
             Box(modifier = Modifier.fillMaxWidth()) {
                 TabBar(
                     tabs = tabs,
@@ -349,7 +350,7 @@ fun MainTabScreen(
                                 newTabMenuExpanded = false
                                 tabManager.createTab(
                                     startRoute = Screen.Sessions.route,
-                                    workspaceDirectory = activeWorkspaceDirectory,
+                                    workspaceKey = activeWorkspaceKey,
                                     focus = true,
                                 )
                             },
@@ -393,7 +394,7 @@ fun MainTabScreen(
                                             val ptyId = result.data.id
                                             tabManager.createTab(
                                                 startRoute = Screen.Terminal.createRoute(ptyId),
-                                                workspaceDirectory = activeWorkspaceDirectory,
+                                                workspaceKey = activeWorkspaceKey,
                                                 focus = true,
                                             )
                                         }
@@ -458,7 +459,7 @@ fun MainTabScreen(
                                 tabTitles[tab.id] = getTitleForRoute(
                                     route = route,
                                     sessionTitle = tab.sessionTitle,
-                                    workspaceDirectory = tab.workspaceDirectory,
+                                    workspaceKey = tab.workspaceKey,
                                 )
                                 tabIcons[tab.id] = getIconForRoute(route)
                             }
@@ -497,7 +498,7 @@ fun MainTabScreen(
                                                 val ptyId = result.data.id
                                                 tabManager.createTab(
                                                     startRoute = Screen.Terminal.createRoute(ptyId),
-                                                    workspaceDirectory = tab.workspaceDirectory,
+                                                    workspaceKey = tab.workspaceKey ?: WorkspaceKey.Global,
                                                     focus = true,
                                                 )
                                             }
@@ -534,13 +535,13 @@ fun MainTabScreen(
     }
 
     if (showFilesTabPrompt) {
-        val openWorkspaceDirectories = tabs
-            .mapNotNull { it.workspaceDirectory }
+        val openWorkspaceKeys = tabs
+            .mapNotNull { it.workspaceKey }
             .distinct()
-        fun openFilesTab(directory: String?) {
+        fun openFilesTab(workspaceKey: WorkspaceKey) {
             tabManager.createTab(
                 startRoute = Screen.Files.route,
-                workspaceDirectory = directory,
+                workspaceKey = workspaceKey,
                 focus = true,
             )
             showFilesTabPrompt = false
@@ -560,18 +561,23 @@ fun MainTabScreen(
                 title = "Global files",
                 subtitle = "No project context",
                 marker = "◆",
-                onClick = { openFilesTab(null) },
+                onClick = { openFilesTab(WorkspaceKey.Global) },
             )
-            openWorkspaceDirectories.forEach { directory ->
+            openWorkspaceKeys.forEach { workspaceKey ->
                 FilesWorkspaceOption(
-                    title = directory.substringAfterLast('/').ifBlank { directory },
-                    subtitle = directory,
+                    title = workspaceLabel(workspaceKey) ?: "Missing workspace",
+                    subtitle = workspaceSubtitle(workspaceKey),
                     marker = "◇",
-                    onClick = { openFilesTab(directory) },
+                    onClick = { openFilesTab(workspaceKey) },
                 )
             }
         }
     }
+}
+private fun workspaceSubtitle(workspaceKey: WorkspaceKey): String = when (workspaceKey) {
+    is WorkspaceKey.Directory -> workspaceKey.value
+    WorkspaceKey.Global -> "No project context"
+    is WorkspaceKey.SessionScoped -> "Session-scoped workspace"
 }
 
 @Composable

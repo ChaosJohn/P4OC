@@ -24,6 +24,7 @@ import androidx.navigation.navArgument
 import dev.blazelight.p4oc.core.datastore.SettingsDataStore
 import dev.blazelight.p4oc.core.datastore.VisualSettings
 import dev.blazelight.p4oc.domain.model.SessionConnectionState
+import dev.blazelight.p4oc.domain.server.WorkspaceKey
 import dev.blazelight.p4oc.ui.navigation.Screen
 import dev.blazelight.p4oc.ui.screens.chat.ChatScreen
 import dev.blazelight.p4oc.ui.screens.diff.DiffViewerScreen
@@ -178,7 +179,7 @@ fun TabNavHost(
                             val chatRoute = Screen.Chat.createRoute(sessionId)
                             if (directory != workspaceOwner.workspace.directory) {
                                 pendingRoute = chatRoute
-                                tabManager.updateTabWorkspace(tabId, directory)
+                                tabManager.updateTabWorkspace(tabId, directory.toWorkspaceKey())
                             } else {
                                 navController.navigate(chatRoute)
                             }
@@ -188,7 +189,7 @@ fun TabNavHost(
                         val chatRoute = Screen.Chat.createRoute(sessionId)
                         if (directory != workspaceOwner.workspace.directory) {
                             pendingRoute = chatRoute
-                            tabManager.updateTabWorkspace(tabId, directory)
+                            tabManager.updateTabWorkspace(tabId, directory.toWorkspaceKey())
                         } else {
                             navController.navigate(chatRoute)
                         }
@@ -208,7 +209,7 @@ fun TabNavHost(
                     onCreateSessionInWorkspace = { title, directory ->
                         pendingSessionCreate = PendingSessionCreate(title, directory)
                         if (directory != workspaceOwner.workspace.directory) {
-                            tabManager.updateTabWorkspace(tabId, directory)
+                            tabManager.updateTabWorkspace(tabId, directory.toWorkspaceKey())
                         }
                     },
                     autoCreateSession = pendingSessionCreate != null &&
@@ -251,7 +252,7 @@ fun TabNavHost(
                             val chatRoute = Screen.Chat.createRoute(sessionId)
                             if (directory != workspaceOwner.workspace.directory) {
                                 pendingRoute = chatRoute
-                                tabManager.updateTabWorkspace(tabId, directory)
+                                tabManager.updateTabWorkspace(tabId, directory.toWorkspaceKey())
                             } else {
                                 navController.navigate(chatRoute)
                             }
@@ -261,7 +262,7 @@ fun TabNavHost(
                         val chatRoute = Screen.Chat.createRoute(sessionId)
                         if (directory != workspaceOwner.workspace.directory) {
                             pendingRoute = chatRoute
-                            tabManager.updateTabWorkspace(tabId, directory)
+                            tabManager.updateTabWorkspace(tabId, directory.toWorkspaceKey())
                         } else {
                             navController.navigate(chatRoute)
                         }
@@ -282,7 +283,7 @@ fun TabNavHost(
                         pendingSessionCreate = PendingSessionCreate(title, directory)
                         if (directory != workspaceOwner.workspace.directory) {
                             pendingRoute = Screen.SessionsFiltered.createRoute(projectId)
-                            tabManager.updateTabWorkspace(tabId, directory)
+                            tabManager.updateTabWorkspace(tabId, directory.toWorkspaceKey())
                         }
                     },
                     autoCreateSession = pendingSessionCreate != null &&
@@ -342,7 +343,7 @@ fun TabNavHost(
                             // Open in a new tab (default), inheriting the source tab's workspace
                             tabManager.createTab(
                                 startRoute = Screen.Chat.createRoute(subSessionId),
-                                workspaceDirectory = workspaceOwner.workspace.directory,
+                                workspaceKey = workspaceOwner.workspace.key,
                                 focus = true,
                             )
                         } else {
@@ -370,7 +371,7 @@ fun TabNavHost(
                         val filteredRoute = Screen.SessionsFiltered.createRoute(projectId)
                         if (worktree != workspaceOwner.workspace.directory) {
                             pendingRoute = filteredRoute
-                            tabManager.updateTabWorkspace(tabId, worktree)
+                            tabManager.updateTabWorkspace(tabId, worktree.toWorkspaceKey())
                         } else {
                             navController.navigate(filteredRoute)
                         }
@@ -409,7 +410,7 @@ fun TabNavHost(
                         workspaceViewModel = workspaceViewModel,
                         keySuffix = "files",
                     ),
-                    workspaceDirectory = workspaceOwner.workspace.directory,
+                    workspaceKey = workspaceOwner.workspace.key,
                     onFileClick = { path ->
                         navController.navigate(Screen.FileViewer.createRoute(path))
                     },
@@ -653,3 +654,8 @@ private fun filesViewModelForRoute(
     key = "${workspaceViewModel.tabId}:${workspaceViewModel.workspace.key}:$keySuffix",
     parameters = { parametersOf(workspaceViewModel.fileRepository, workspaceViewModel.uploadCoordinator) },
 )
+
+private fun String?.toWorkspaceKey(): WorkspaceKey = this
+    ?.takeIf { it.isNotBlank() }
+    ?.let(WorkspaceKey::Directory)
+    ?: WorkspaceKey.Global

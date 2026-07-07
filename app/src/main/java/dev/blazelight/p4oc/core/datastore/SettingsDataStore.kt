@@ -8,6 +8,8 @@ import androidx.datastore.preferences.preferencesDataStore
 import dev.blazelight.p4oc.core.log.AppLog
 import dev.blazelight.p4oc.core.security.CredentialStore
 import dev.blazelight.p4oc.data.remote.dto.ModelInput
+import dev.blazelight.p4oc.domain.server.WorkspaceKey
+import dev.blazelight.p4oc.domain.session.SessionId
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
@@ -571,10 +573,29 @@ class SettingsDataStore constructor(
     }
 
     private fun parsePersistedTabState(stored: String): PersistedTabState? = try {
-        json.decodeFromString<PersistedTabState>(stored)
+        migrateLegacyPersistedTabState(stored) ?: json.decodeFromString<PersistedTabState>(stored)
     } catch (e: Exception) {
         AppLog.w(TAG, "Ignoring invalid persisted tab state: ${e.message}")
         null
+    }
+
+    private fun migrateLegacyPersistedTabState(stored: String): PersistedTabState? {
+        val legacy = json.decodeFromString<LegacyPersistedTabState>(stored)
+        if (legacy.version >= PersistedTabState.CURRENT_VERSION) return null
+        return PersistedTabState(
+            version = PersistedTabState.CURRENT_VERSION,
+            serverEndpointKey = legacy.serverEndpointKey,
+            activeTabId = legacy.activeTabId,
+            tabs = legacy.tabs.map { tab ->
+                PersistedTab(
+                    id = tab.id,
+                    startRoute = tab.startRoute,
+                    sessionId = tab.sessionId,
+                    sessionTitle = tab.sessionTitle,
+                    workspaceKey = tab.resolvedWorkspaceKey(),
+                )
+            },
+        )
     }
 }
 
@@ -624,8 +645,32 @@ data class PersistedTabState(
     val tabs: List<PersistedTab>,
 ) {
     companion object {
-        const val CURRENT_VERSION = 1
+        const val CURRENT_VERSION = 3
     }
+}
+
+@Serializable
+private data class LegacyPersistedTabState(
+    val version: Int = 1,
+    val serverEndpointKey: String,
+    val activeTabId: String?,
+    val tabs: List<LegacyPersistedTab>,
+)
+
+@Serializable
+private data class LegacyPersistedTab(
+    val id: String,
+    val startRoute: String,
+    val sessionId: String? = null,
+    val sessionTitle: String? = null,
+    val workspaceKey: PersistedWorkspaceKey? = null,
+    val workspaceDirectory: String? = null,
+) {
+    fun resolvedWorkspaceKey(): PersistedWorkspaceKey? = workspaceKey
+        ?: workspaceDirectory
+            ?.takeIf { it.isNotBlank() }
+            ?.let { PersistedWorkspaceKey(PersistedWorkspaceKey.Type.DIRECTORY, it) }
+        ?: if (startRoute == "sessions") PersistedWorkspaceKey(PersistedWorkspaceKey.Type.GLOBAL) else null
 }
 
 @Serializable
@@ -634,8 +679,38 @@ data class PersistedTab(
     val startRoute: String,
     val sessionId: String? = null,
     val sessionTitle: String? = null,
-    val workspaceDirectory: String? = null,
-)
+    val workspaceKey: PersistedWorkspaceKey? = null,
+) {
+    fun resolvedWorkspaceKey(): WorkspaceKey? = workspaceKey?.toWorkspaceKey()
+}
+
+@Serializable
+data class PersistedWorkspaceKey(
+    val type: Type,
+    val value: String? = null,
+) {
+    enum class Type { GLOBAL, DIRECTORY, SESSION_SCOPED }
+
+    fun toWorkspaceKey(): WorkspaceKey = when (type) {
+        Type.GLOBAL -> WorkspaceKey.Global
+        Type.DIRECTORY -> WorkspaceKey.Directory(
+            requireNotNull(value) { "Directory workspace key requires a value" }
+        )
+        Type.SESSION_SCOPED -> WorkspaceKey.SessionScoped(
+            SessionId(
+                requireNotNull(value) { "Session-scoped workspace key requires a value" }
+            )
+        )
+    }
+
+    companion object {
+        fun fromWorkspaceKey(workspaceKey: WorkspaceKey): PersistedWorkspaceKey = when (workspaceKey) {
+            WorkspaceKey.Global -> PersistedWorkspaceKey(Type.GLOBAL)
+            is WorkspaceKey.Directory -> PersistedWorkspaceKey(Type.DIRECTORY, workspaceKey.value)
+            is WorkspaceKey.SessionScoped -> PersistedWorkspaceKey(Type.SESSION_SCOPED, workspaceKey.sessionId.value)
+        }
+    }
+}
 
 data class VisualSettings(
     val fontSize: Int = 14,

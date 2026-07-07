@@ -20,6 +20,7 @@ import androidx.compose.ui.semantics.Role
 import androidx.compose.ui.text.style.TextOverflow
 import dev.blazelight.p4oc.domain.model.SessionConnectionState
 import dev.blazelight.p4oc.domain.model.SessionPresence
+import dev.blazelight.p4oc.domain.server.WorkspaceKey
 import dev.blazelight.p4oc.ui.components.status.SessionStatusDot
 import dev.blazelight.p4oc.ui.theme.LocalOpenCodeTheme
 import dev.blazelight.p4oc.ui.theme.Sizing
@@ -206,16 +207,16 @@ fun getIconForRoute(route: String?): ImageVector {
 fun getTitleForRoute(
     route: String?,
     sessionTitle: String? = null,
-    workspaceDirectory: String? = null,
+    workspaceKey: WorkspaceKey? = null,
 ): String {
     return when {
         route == null -> "Tab"
-        route == "sessions" -> withWorkspaceSuffix("Sessions", workspaceDirectory)
-        route.startsWith("sessions?") -> withWorkspaceSuffix("Sessions", workspaceDirectory)
-        route.startsWith("chat/") -> withWorkspaceSuffix(sessionTitle ?: "Chat", workspaceDirectory)
-        route == "files" -> workspaceBaseName(workspaceDirectory) ?: "Files"
-        route.startsWith("files/") -> workspaceBaseName(workspaceDirectory) ?: "File"
-        route.startsWith("terminal/") -> withWorkspaceSuffix(sessionTitle ?: "Terminal", workspaceDirectory)
+        route == "sessions" -> withWorkspaceSuffix("Sessions", workspaceKey)
+        route.startsWith("sessions?") -> withWorkspaceSuffix("Sessions", workspaceKey)
+        route.startsWith("chat/") -> withWorkspaceSuffix(sessionTitle ?: "Chat", workspaceKey)
+        route == "files" -> workspaceLabel(workspaceKey) ?: "Files"
+        route.startsWith("files/") -> workspaceLabel(workspaceKey) ?: "File"
+        route.startsWith("terminal/") -> withWorkspaceSuffix(sessionTitle ?: "Terminal", workspaceKey)
         route == "settings" -> "Settings"
         route.startsWith("settings/") -> "Settings"
         route == "projects" -> "Projects"
@@ -223,12 +224,14 @@ fun getTitleForRoute(
     }
 }
 
-private fun withWorkspaceSuffix(title: String, workspaceDirectory: String?): String {
-    val workspace = workspaceBaseName(workspaceDirectory) ?: return title
+private fun withWorkspaceSuffix(title: String, workspaceKey: WorkspaceKey?): String {
+    val workspace = workspaceLabel(workspaceKey) ?: return title
     return "$title · $workspace"
 }
 
-private fun workspaceBaseName(workspaceDirectory: String?): String? = workspaceDirectory
-    ?.trimEnd('/')
-    ?.substringAfterLast('/')
-    ?.ifBlank { workspaceDirectory }
+fun workspaceLabel(workspaceKey: WorkspaceKey?): String? = when (workspaceKey) {
+    is WorkspaceKey.Directory -> workspaceKey.value.trimEnd('/').substringAfterLast('/').ifBlank { workspaceKey.value }
+    WorkspaceKey.Global -> "Global"
+    is WorkspaceKey.SessionScoped -> "Session"
+    null -> null
+}

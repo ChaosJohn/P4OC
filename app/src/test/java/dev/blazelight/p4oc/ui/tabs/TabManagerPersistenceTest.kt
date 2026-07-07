@@ -2,7 +2,9 @@ package dev.blazelight.p4oc.ui.tabs
 
 import dev.blazelight.p4oc.core.datastore.PersistedTab
 import dev.blazelight.p4oc.core.datastore.PersistedTabState
+import dev.blazelight.p4oc.core.datastore.PersistedWorkspaceKey
 import dev.blazelight.p4oc.domain.server.ServerRef
+import dev.blazelight.p4oc.domain.server.WorkspaceKey
 import dev.blazelight.p4oc.ui.navigation.Screen
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
@@ -15,8 +17,12 @@ class TabManagerPersistenceTest {
     @Test
     fun `saveState writes versioned tabs with server endpoint key`() {
         val manager = TabManager()
-        val tab = manager.createTab(startRoute = Screen.Sessions.route, focus = true)
-        manager.updateTabWorkspace(tab.id, "/repo/a")
+        val tab = manager.createTab(
+            startRoute = Screen.Sessions.route,
+            workspaceKey = WorkspaceKey.Global,
+            focus = true,
+        )
+        manager.updateTabWorkspace(tab.id, WorkspaceKey.Directory("/repo/a"))
         manager.updateTabSession(tab.id, "s1", "Title")
 
         val saved = manager.saveState(server)!!
@@ -25,7 +31,8 @@ class TabManagerPersistenceTest {
         assertEquals(server.endpointKey, saved.serverEndpointKey)
         assertEquals(tab.id, saved.activeTabId)
         assertEquals("s1", saved.tabs.single().sessionId)
-        assertEquals("/repo/a", saved.tabs.single().workspaceDirectory)
+        assertEquals(PersistedWorkspaceKey.Type.DIRECTORY, saved.tabs.single().workspaceKey?.type)
+        assertEquals("/repo/a", saved.tabs.single().workspaceKey?.value)
     }
 
     @Test
@@ -40,7 +47,7 @@ class TabManagerPersistenceTest {
                     startRoute = Screen.Sessions.route,
                     sessionId = "session with space",
                     sessionTitle = "Chat",
-                    workspaceDirectory = "/repo/a b",
+                    workspaceKey = PersistedWorkspaceKey(PersistedWorkspaceKey.Type.DIRECTORY, "/repo/a b"),
                 ),
             ),
         )
@@ -88,7 +95,11 @@ class TabManagerPersistenceTest {
     @Test
     fun `terminal routes are not persisted as resurrectable tabs`() {
         val manager = TabManager()
-        manager.createTab(startRoute = Screen.Terminal.createRoute("pty-1"), focus = true)
+        manager.createTab(
+            startRoute = Screen.Terminal.createRoute("pty-1"),
+            workspaceKey = WorkspaceKey.Global,
+            focus = true,
+        )
 
         val saved = manager.saveState(server)!!
 

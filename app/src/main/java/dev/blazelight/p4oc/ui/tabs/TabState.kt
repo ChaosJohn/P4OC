@@ -1,6 +1,7 @@
 package dev.blazelight.p4oc.ui.tabs
 
 import dev.blazelight.p4oc.domain.model.SessionConnectionState
+import dev.blazelight.p4oc.domain.server.WorkspaceKey
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
@@ -30,8 +31,8 @@ data class TabState(
      */
     val sessionTitle: String? = null,
 
-    /** Workspace directory owned by this tab. Null means server-global workspace. */
-    val workspaceDirectory: String? = null,
+    /** Workspace key owned by this tab. Null is reserved for legacy recovery. */
+    val workspaceKey: WorkspaceKey? = null,
 
     /** Incremented when workspace changes so navigation graph scoped ViewModels are recreated. */
     val workspaceRevision: Int = 0,
@@ -49,7 +50,8 @@ class TabInstance(
     val id: String get() = state.id
     val sessionId: String? get() = state.sessionId
     val sessionTitle: String? get() = state.sessionTitle
-    val workspaceDirectory: String? get() = state.workspaceDirectory
+    val workspaceKey: WorkspaceKey? get() = state.workspaceKey
+    val workspaceDirectory: String? get() = (state.workspaceKey as? WorkspaceKey.Directory)?.value
     val workspaceRevision: Int get() = state.workspaceRevision
 
     /** Connection state for this tab (only relevant for chat tabs) */
@@ -71,12 +73,11 @@ class TabInstance(
         return withState(state.copy(sessionId = sessionId, sessionTitle = sessionTitle))
     }
 
-    fun withWorkspaceDirectory(directory: String?): TabInstance {
-        val normalized = directory?.takeIf { it.isNotBlank() }
-        if (normalized == state.workspaceDirectory) return this
+    fun withWorkspaceKey(workspaceKey: WorkspaceKey?): TabInstance {
+        if (workspaceKey == state.workspaceKey) return this
         return withState(
             state.copy(
-                workspaceDirectory = normalized,
+                workspaceKey = workspaceKey,
                 workspaceRevision = state.workspaceRevision + 1,
                 sessionId = null,
                 sessionTitle = null,

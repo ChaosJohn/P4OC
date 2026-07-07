@@ -39,6 +39,7 @@ import dev.blazelight.p4oc.core.filetype.FileTypeCategory
 import dev.blazelight.p4oc.core.filetype.FileTypeClassifier
 import dev.blazelight.p4oc.domain.model.FileNode
 import dev.blazelight.p4oc.domain.model.Symbol
+import dev.blazelight.p4oc.domain.server.WorkspaceKey
 import dev.blazelight.p4oc.ui.components.TuiAlertDialog
 import dev.blazelight.p4oc.ui.components.TuiButton
 import dev.blazelight.p4oc.ui.components.TuiConfirmDialog
@@ -57,7 +58,7 @@ import dev.blazelight.p4oc.ui.theme.Spacing
 @Composable
 fun FileExplorerScreen(
     viewModel: FilesViewModel,
-    workspaceDirectory: String?,
+    workspaceKey: WorkspaceKey?,
     onFileClick: (String) -> Unit,
     onNavigateBack: () -> Unit,
     onSwitchWorkspace: () -> Unit = {},
@@ -167,8 +168,13 @@ fun FileExplorerScreen(
                                     color = theme.text,
                                     style = MaterialTheme.typography.titleMedium
                                 )
-                                val workspaceLabel = workspaceDirectory?.trimEnd('/')?.substringAfterLast('/')?.ifBlank { workspaceDirectory }
-                                    ?: stringResource(R.string.files_workspace_global)
+                                val workspaceLabel = when (workspaceKey) {
+                                    WorkspaceKey.Global -> stringResource(R.string.files_workspace_global)
+                                    is WorkspaceKey.Directory -> workspaceKey.value.trimEnd('/').substringAfterLast('/')
+                                        .ifBlank { workspaceKey.value }
+                                    is WorkspaceKey.SessionScoped -> workspaceKey.sessionId.value
+                                    null -> stringResource(R.string.files_workspace_global)
+                                }
                                 Text(
                                     text = workspaceLabel,
                                     maxLines = 1,
