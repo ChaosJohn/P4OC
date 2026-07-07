@@ -582,19 +582,21 @@ class SettingsDataStore constructor(
     private fun migrateLegacyPersistedTabState(stored: String): PersistedTabState? {
         val legacy = json.decodeFromString<LegacyPersistedTabState>(stored)
         if (legacy.version >= PersistedTabState.CURRENT_VERSION) return null
+        val migratedTabs = legacy.tabs.mapNotNull { tab ->
+            val workspaceKey = tab.resolvedWorkspaceKey() ?: return@mapNotNull null
+            PersistedTab(
+                id = tab.id,
+                startRoute = tab.startRoute,
+                sessionId = tab.sessionId,
+                sessionTitle = tab.sessionTitle,
+                workspaceKey = workspaceKey,
+            )
+        }
         return PersistedTabState(
             version = PersistedTabState.CURRENT_VERSION,
             serverEndpointKey = legacy.serverEndpointKey,
-            activeTabId = legacy.activeTabId,
-            tabs = legacy.tabs.map { tab ->
-                PersistedTab(
-                    id = tab.id,
-                    startRoute = tab.startRoute,
-                    sessionId = tab.sessionId,
-                    sessionTitle = tab.sessionTitle,
-                    workspaceKey = tab.resolvedWorkspaceKey(),
-                )
-            },
+            activeTabId = legacy.activeTabId?.takeIf { activeId -> migratedTabs.any { it.id == activeId } },
+            tabs = migratedTabs,
         )
     }
 }

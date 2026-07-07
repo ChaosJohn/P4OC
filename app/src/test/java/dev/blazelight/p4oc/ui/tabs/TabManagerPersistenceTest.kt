@@ -62,6 +62,62 @@ class TabManagerPersistenceTest {
     }
 
     @Test
+    fun `restoreState drops tab with missing workspace key instead of restoring as global`() {
+        val manager = TabManager()
+        val state = PersistedTabState(
+            serverEndpointKey = server.endpointKey,
+            activeTabId = "ambiguous-tab",
+            tabs = listOf(
+                PersistedTab(
+                    id = "ambiguous-tab",
+                    startRoute = Screen.Sessions.route,
+                    workspaceKey = null,
+                ),
+            ),
+        )
+
+        val result = manager.restoreState(state, server)
+
+        assertTrue(result is RestoreResult.Empty)
+        assertFalse(manager.hasTabs())
+    }
+
+    @Test
+    fun `restoreState keeps valid tabs and falls back active tab when ambiguous active tab is dropped`() {
+        val manager = TabManager()
+        val state = PersistedTabState(
+            serverEndpointKey = server.endpointKey,
+            activeTabId = "ambiguous-tab",
+            tabs = listOf(
+                PersistedTab(
+                    id = "ambiguous-tab",
+                    startRoute = Screen.Sessions.route,
+                    workspaceKey = null,
+                ),
+                PersistedTab(
+                    id = "directory-tab",
+                    startRoute = Screen.Sessions.route,
+                    workspaceKey = PersistedWorkspaceKey(PersistedWorkspaceKey.Type.DIRECTORY, "/repo/valid"),
+                ),
+                PersistedTab(
+                    id = "global-tab",
+                    startRoute = Screen.Sessions.route,
+                    workspaceKey = PersistedWorkspaceKey(PersistedWorkspaceKey.Type.GLOBAL),
+                ),
+            ),
+        )
+
+        val result = manager.restoreState(state, server)
+
+        assertTrue(result is RestoreResult.Restored)
+        assertEquals(2, (result as RestoreResult.Restored).count)
+        assertEquals(listOf("directory-tab", "global-tab"), manager.tabs.value.map { it.id })
+        assertEquals("directory-tab", manager.activeTabId.value)
+        assertEquals("/repo/valid", manager.tabs.value[0].workspaceDirectory)
+        assertEquals(WorkspaceKey.Global, manager.tabs.value[1].workspaceKey)
+    }
+
+    @Test
     fun `restoreState rejects mismatched active server without tabs`() {
         val manager = TabManager()
         val state = PersistedTabState(

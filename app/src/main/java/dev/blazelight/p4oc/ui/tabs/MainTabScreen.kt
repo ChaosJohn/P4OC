@@ -174,7 +174,7 @@ fun MainTabScreen(
             }
 
         tabs.forEach { tab ->
-            val workspaceKey = tab.workspaceKey ?: WorkspaceKey.Global
+            val workspaceKey = tab.workspaceKey ?: return@forEach
             val workspace = Workspace(
                 server = ServerRef.fromEndpoint(baseUrl),
                 directory = (workspaceKey as? WorkspaceKey.Directory)?.value,
@@ -492,7 +492,13 @@ fun MainTabScreen(
                                             snackbarHostState.showSnackbar("Not connected to server")
                                             return@launch
                                         }
-                                        val workspaceKey = tab.workspaceKey ?: WorkspaceKey.Global
+                                        val workspaceKey = tab.workspaceKey ?: run {
+                                            AppLog.e(TAG, "Cannot create terminal: tab has no workspace identity")
+                                            snackbarHostState.showSnackbar(
+                                                "Cannot create terminal: workspace is unavailable"
+                                            )
+                                            return@launch
+                                        }
                                         val result = safeApiCall {
                                             api.createPtySession(
                                                 CreatePtyRequest(

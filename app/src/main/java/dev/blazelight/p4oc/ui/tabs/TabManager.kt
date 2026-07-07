@@ -195,6 +195,7 @@ class TabManager {
 
         val restoredTabs = state.tabs.mapNotNull { persisted ->
             if (persisted.id.isBlank()) return@mapNotNull null
+            val workspaceKey = persisted.resolvedWorkspaceKey() ?: return@mapNotNull null
             val route = persisted.sessionId?.let { TabChatRouteCodec.chatRoute(it) }
                 ?: persisted.startRoute.takeIf { it.isNotBlank() }
                 ?: Screen.Sessions.route
@@ -203,7 +204,7 @@ class TabManager {
                     id = persisted.id,
                     sessionId = persisted.sessionId,
                     sessionTitle = persisted.sessionTitle,
-                    workspaceKey = persisted.resolvedWorkspaceKey(),
+                    workspaceKey = workspaceKey,
                 ),
                 startRoute = route,
             )
