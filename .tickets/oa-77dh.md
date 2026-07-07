@@ -1,8 +1,8 @@
 ---
 id: oa-77dh
-status: open
+status: closed
 deps: []
-links: [oa-wxf2, oa-12ui, oa-cplr]
+links: [oa-wxf2, oa-12ui, oa-cplr, oa-tmpy]
 created: 2026-07-05T18:07:13Z
 type: bug
 priority: 1
@@ -39,3 +39,7 @@ Run targeted ChatViewModel/ChatInputBar/FilePicker tests. Smoke test typing a dr
 **2026-07-06T19:23:04Z**
 
 Busy follow-up queue scope was resolved by architecture change rather than persistence: Android-local queuedMessages/queueMessage/sendQueuedMessageIfAny/QueuedMessagesStrip were removed, and busy Send now submits upstream immediately. The visible queued state is derived from upstream transcript messages. Remaining unsent draft/attachment lifecycle persistence is split to oa-cplr.
+
+**2026-07-07T11:19:29Z**
+
+All acceptance criteria are now satisfied by the split implementation: oa-cplr persisted/restored draft text and selected attachment references via the chat SavedStateHandle with session/tab-scoped isolation tests, while oa-tmpy added workspace-scoped restored-attachment validation, unavailable/removable attachment UI state, send blocking before raw failures, and focused missing/inaccessible attachment recovery tests. Android-local busy queued messages were already removed in favor of upstream-submitted follow-ups, with visible queued state derived from transcript messages.

@@ -145,6 +145,8 @@ class ChatViewModel constructor(
         const val TAG = "ChatViewModel"
         private const val KEY_DRAFT_TEXT = "chat_draft_text"
         private const val KEY_ATTACHED_FILES = "chat_attached_files"
+        private const val UNAVAILABLE_ATTACHMENTS_ERROR =
+            "Remove unavailable attachments before sending."
 
         /**
          * Built-in OpenCode commands that aren't returned by the /command API endpoint.
@@ -214,6 +216,7 @@ class ChatViewModel constructor(
     init {
         val restoredFiles = restoredAttachedFiles()
         if (restoredFiles.isNotEmpty()) filePickerManager.restoreAttachedFiles(restoredFiles)
+        if (restoredFiles.isNotEmpty()) validateRestoredAttachments()
         observeComposerAttachments()
         loadSession()
         loadMessages()
@@ -221,6 +224,12 @@ class ChatViewModel constructor(
         modelAgentManager.loadModels()
         observeEvents()
         loadVcsInfo()
+    }
+
+    private fun validateRestoredAttachments() {
+        viewModelScope.launch {
+            filePickerManager.validateAttachedFiles()
+        }
     }
 
     // --- Public API (delegating) ---
@@ -358,38 +367,48 @@ class ChatViewModel constructor(
             return
         }
 
+        _uiState.update { it.copy(isSending = true) }
+        viewModelScope.launch {
+            val validatedFiles = filePickerManager.validateAttachedFiles()
+            if (validatedFiles.any { !it.available }) {
+                _uiState.update { it.copy(error = UNAVAILABLE_ATTACHMENTS_ERROR, isSending = false) }
+                return@launch
+            }
+
+            sendValidatedMessage(text, validatedFiles)
+        }
+    }
+
+    private suspend fun sendValidatedMessage(text: String, attachedFiles: List<SelectedFile>) {
         val selectedAgent = modelAgentManager.selectedAgent.value
         val selectedModel = modelAgentManager.selectedModel.value
         val selectedVariant = modelAgentManager.currentReasoningEffort()
         updateInput("")
-        _uiState.update { it.copy(isSending = true) }
         filePickerManager.clearAttachedFiles()
 
-        viewModelScope.launch {
-            val parts = buildPartInputs(text, attachedFiles)
-            val request = SendMessageRequest(
-                parts = parts,
-                agent = selectedAgent,
-                model = selectedModel,
-                variant = selectedVariant
-            )
+        val parts = buildPartInputs(text, attachedFiles)
+        val request = SendMessageRequest(
+            parts = parts,
+            agent = selectedAgent,
+            model = selectedModel,
+            variant = selectedVariant
+        )
 
-            val result = sessionRepository.sendMessageAsync(SessionId(sessionId), request).await().toApiResult()
-            when (result) {
-                is ApiResult.Success -> {
-                    _uiState.update { it.copy(isSending = false, isBusy = true) }
-                    AppLog.d(TAG, "sendMessage: Async call succeeded, waiting for SSE events")
+        val result = sessionRepository.sendMessageAsync(SessionId(sessionId), request).await().toApiResult()
+        when (result) {
+            is ApiResult.Success -> {
+                _uiState.update { it.copy(isSending = false, isBusy = true) }
+                AppLog.d(TAG, "sendMessage: Async call succeeded, waiting for SSE events")
+            }
+            is ApiResult.Error -> {
+                _uiState.update {
+                    it.copy(
+                        isSending = false,
+                        error = "Failed to send: ${result.message}"
+                    )
                 }
-                is ApiResult.Error -> {
-                    _uiState.update {
-                        it.copy(
-                            isSending = false,
-                            error = "Failed to send: ${result.message}"
-                        )
-                    }
-                    updateInput(text)
-                    filePickerManager.restoreAttachedFiles(attachedFiles)
-                }
+                updateInput(text)
+                filePickerManager.restoreAttachedFiles(attachedFiles)
             }
         }
     }

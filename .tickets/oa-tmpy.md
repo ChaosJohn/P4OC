@@ -1,8 +1,8 @@
 ---
 id: oa-tmpy
-status: open
+status: closed
 deps: []
-links: [oa-cplr]
+links: [oa-cplr, oa-77dh]
 created: 2026-07-06T19:43:41Z
 type: bug
 priority: 2
@@ -31,3 +31,9 @@ Acceptance Criteria:
 Verification:
 Restore a draft with one existing and one missing attachment; confirm the missing one is visibly recoverable/removable and the existing one still sends.
 
+
+## Notes
+
+**2026-07-07T11:18:02Z**
+
+Implemented restored attachment recovery with SelectedFile.available, workspace-scoped parent-directory validation in FilePickerManager, unavailable chip styling/label in ChatInputBar, and send blocking with a concise composer error while unavailable attachments remain. Added focused ChatViewModelDraftPersistenceTest coverage for available restored attachments, missing restored attachments, removal clearing the blocker, and validation failures.

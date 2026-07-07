@@ -16,6 +16,7 @@ import dev.blazelight.p4oc.core.network.ServerConfig
 import dev.blazelight.p4oc.data.files.FileRepository
 import dev.blazelight.p4oc.data.files.FileRepositoryFactory
 import dev.blazelight.p4oc.data.remote.dto.CommandDto
+import dev.blazelight.p4oc.data.remote.dto.FileNodeDto
 import dev.blazelight.p4oc.data.remote.dto.MessageInfoDto
 import dev.blazelight.p4oc.data.remote.dto.MessageTimeDto
 import dev.blazelight.p4oc.data.remote.dto.MessageWrapperDto
@@ -380,9 +381,6 @@ class ChatViewModelTest {
         vm.updateInput("hello")
 
         vm.sendMessage()
-
-        assertEquals("", vm.uiState.value.inputText)
-        // isSending is set to true synchronously before the coroutine launches
         assertTrue(vm.uiState.value.isSending)
 
         advanceUntilIdle()
@@ -412,6 +410,14 @@ class ChatViewModelTest {
         val vm = createViewModel()
         val request = slot<SendMessageRequest>()
         coEvery { api.sendMessageAsync(any(), capture(request), any()) } returns Unit
+        coEvery { api.listFiles("src/My File %/ümlaut/こんにちは", "/test") } returns listOf(
+            FileNodeDto(
+                name = "hash#query?.kt",
+                path = "src/My File %/ümlaut/こんにちは/hash#query?.kt",
+                absolute = "/test/src/My File %/ümlaut/こんにちは/hash#query?.kt",
+                type = "file",
+            )
+        )
         vm.filePickerManager.restoreAttachedFiles(
             listOf(
                 SelectedFile(

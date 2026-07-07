@@ -42,6 +42,7 @@ data class SelectedFile(
     val path: String,
     val name: String,
     val mimeType: String? = null,
+    val available: Boolean = true,
 )
 
 @OptIn(ExperimentalMaterial3Api::class)

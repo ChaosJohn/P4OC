@@ -742,4 +742,5 @@
     <string name="upload_phase_uploading">uploading</string>
     <string name="upload_phase_done">done</string>
     <string name="upload_phase_failed">failed</string>
+    <string name="attachment_unavailable">unavailable</string>
 </resources>

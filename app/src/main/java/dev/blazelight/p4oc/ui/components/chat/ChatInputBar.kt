@@ -177,12 +177,14 @@ fun ChatInputBar(
                         horizontalArrangement = Arrangement.spacedBy(Spacing.md)
                     ) {
                         attachedFiles.forEach { file ->
+                            val chipColor = if (file.available) theme.accent else theme.warning
+                            val chipLabelColor = if (file.available) theme.text else theme.warning
                             Surface(
                                 shape = RectangleShape,
-                                color = theme.accent.copy(alpha = 0.1f),
+                                color = chipColor.copy(alpha = 0.1f),
                                 modifier = Modifier
                                     .height(Sizing.buttonHeightSm)
-                                    .border(Sizing.strokeMd, theme.border, RectangleShape)
+                                    .border(Sizing.strokeMd, chipColor, RectangleShape)
                             ) {
                                 Row(
                                     modifier = Modifier.padding(horizontal = Spacing.mdLg),
@@ -193,11 +195,19 @@ fun ChatInputBar(
                                         file.name,
                                         style = MaterialTheme.typography.bodySmall,
                                         fontFamily = FontFamily.Monospace,
-                                        color = theme.text,
+                                        color = chipLabelColor,
                                         maxLines = 1,
                                         overflow = TextOverflow.Ellipsis,
                                         modifier = Modifier.widthIn(max = Sizing.panelWidthMd)
                                     )
+                                    if (!file.available) {
+                                        Text(
+                                            text = stringResource(R.string.attachment_unavailable),
+                                            style = MaterialTheme.typography.labelSmall,
+                                            fontFamily = FontFamily.Monospace,
+                                            color = theme.warning,
+                                        )
+                                    }
                                     Text(
                                         text = "×",
                                         color = theme.textMuted,

@@ -15,6 +15,7 @@ import dev.blazelight.p4oc.core.network.OpenCodeEventSource
 import dev.blazelight.p4oc.core.network.ServerConfig
 import dev.blazelight.p4oc.data.files.FileRepository
 import dev.blazelight.p4oc.data.files.FileRepositoryFactory
+import dev.blazelight.p4oc.data.remote.dto.FileNodeDto
 import dev.blazelight.p4oc.data.remote.mapper.MessageMapper
 import dev.blazelight.p4oc.data.server.ActiveServerApiProvider
 import dev.blazelight.p4oc.data.session.SessionRepositoryImpl
@@ -27,6 +28,7 @@ import dev.blazelight.p4oc.ui.components.chat.SelectedFile
 import dev.blazelight.p4oc.ui.navigation.Screen
 import dev.blazelight.p4oc.ui.screens.files.upload.UploadCoordinator
 import io.mockk.coEvery
+import io.mockk.coVerify
 import io.mockk.every
 import io.mockk.mockk
 import io.mockk.mockkObject
@@ -39,13 +41,16 @@ import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.flowOf
 import kotlinx.coroutines.test.StandardTestDispatcher
 import kotlinx.coroutines.test.TestDispatcher
+import kotlinx.coroutines.test.TestScope
 import kotlinx.coroutines.test.advanceUntilIdle
 import kotlinx.coroutines.test.resetMain
 import kotlinx.coroutines.test.runTest
 import kotlinx.coroutines.test.setMain
 import kotlinx.serialization.json.Json
+import okhttp3.ResponseBody.Companion.toResponseBody
 import org.junit.After
 import org.junit.Assert.assertEquals
+import org.junit.Assert.assertFalse
 import org.junit.Assert.assertNull
 import org.junit.Assert.assertTrue
 import org.junit.Before
@@ -53,6 +58,8 @@ import org.junit.Rule
 import org.junit.Test
 import org.junit.rules.TestWatcher
 import org.junit.runner.Description
+import retrofit2.HttpException
+import retrofit2.Response
 
 @OptIn(ExperimentalCoroutinesApi::class)
 class ChatViewModelDraftPersistenceTest {
@@ -180,10 +187,119 @@ class ChatViewModelDraftPersistenceTest {
     }
 
     @Test
+    fun createViewModel_restoresAvailableAttachmentAsSendable() = runTest {
+        coEvery { api.listFiles("src", "/test") } returns listOf(
+            FileNodeDto(
+                name = "Main.kt",
+                path = "src/Main.kt",
+                absolute = "/test/src/Main.kt",
+                type = "file",
+            )
+        )
+        coEvery { api.sendMessageAsync(any(), any(), any()) } returns Unit
+        val savedStateHandle = SavedStateHandle(
+            mapOf(
+                Screen.Chat.ARG_SESSION_ID to "session-1",
+                "chat_attached_files" to """[{"path":"src/Main.kt","name":"Main.kt","mimeType":"text/x-kotlin"}]""",
+            )
+        )
+
+        val vm = createViewModel(savedStateHandle)
+        advanceUntilIdle()
+
+        val restored = vm.filePickerManager.attachedFiles.value.single()
+        assertEquals("src/Main.kt", restored.path)
+        assertTrue(restored.available)
+
+        vm.sendMessage()
+        advanceUntilIdle()
+
+        coVerify(exactly = 1) { api.sendMessageAsync("session-1", any(), "/test") }
+    }
+
+    @Test
+    fun createViewModel_marksRestoredMissingAttachmentUnavailableAndBlocksSend() = runTest {
+        coEvery { api.listFiles("src", "/test") } returns emptyList()
+        coEvery { api.sendMessageAsync(any(), any(), any()) } returns Unit
+        val savedStateHandle = SavedStateHandle(
+            mapOf(
+                Screen.Chat.ARG_SESSION_ID to "session-1",
+                "chat_attached_files" to missingAttachmentJson,
+            )
+        )
+
+        val vm = createViewModel(savedStateHandle)
+        advanceUntilIdle()
+
+        val restored = vm.filePickerManager.attachedFiles.value.single()
+        assertEquals("src/Missing.kt", restored.path)
+        assertFalse(restored.available)
+
+        vm.updateInput("please read this")
+        vm.sendMessage()
+        advanceUntilIdle()
+
+        coVerify(exactly = 0) { api.sendMessageAsync(any(), any(), any()) }
+        assertEquals("please read this", vm.uiState.value.inputText)
+        assertEquals(listOf("src/Missing.kt"), vm.filePickerManager.attachedFiles.value.map { it.path })
+    }
+
+    @Test
+    fun detachFile_removingUnavailableRestoredAttachmentClearsSendBlocker() = runTest {
+        coEvery { api.listFiles("src", "/test") } returns emptyList()
+        coEvery { api.sendMessageAsync(any(), any(), any()) } returns Unit
+        val savedStateHandle = SavedStateHandle(
+            mapOf(
+                Screen.Chat.ARG_SESSION_ID to "session-1",
+                "chat_attached_files" to missingAttachmentJson,
+            )
+        )
+        val vm = createViewModel(savedStateHandle)
+        advanceUntilIdle()
+        assertFalse(vm.filePickerManager.attachedFiles.value.single().available)
+
+        vm.filePickerManager.detachFile("src/Missing.kt")
+        vm.updateInput("send without the missing file")
+        vm.sendMessage()
+        advanceUntilIdle()
+
+        assertTrue(vm.filePickerManager.attachedFiles.value.isEmpty())
+        coVerify(exactly = 1) { api.sendMessageAsync("session-1", any(), "/test") }
+    }
+
+    @Test
+    fun createViewModel_marksRestoredAttachmentUnavailableWhenValidationFails() = runTest {
+        coEvery { api.listFiles("src", "/test") } throws HttpException(
+            Response.error<Unit>(403, "forbidden".toResponseBody(null))
+        )
+        val savedStateHandle = SavedStateHandle(
+            mapOf(
+                Screen.Chat.ARG_SESSION_ID to "session-1",
+                "chat_attached_files" to privateAttachmentJson,
+            )
+        )
+
+        val vm = createViewModel(savedStateHandle)
+        advanceUntilIdle()
+
+        val restored = vm.filePickerManager.attachedFiles.value.single()
+        assertEquals("src/Private.kt", restored.path)
+        assertFalse(restored.available)
+    }
+
+    @Test
     fun sendMessage_successClearsPersistedDraftAndAttachments() = runTest {
         val savedStateHandle = SavedStateHandle(mapOf(Screen.Chat.ARG_SESSION_ID to "session-1"))
         val vm = createViewModel(savedStateHandle)
         coEvery { api.sendMessageAsync(any(), any(), any()) } returns Unit
+        coEvery { api.listFiles("src", "/test") } returns listOf(
+            FileNodeDto(
+                name = "Main.kt",
+                path = "src/Main.kt",
+                absolute = "/test/src/Main.kt",
+                type = "file",
+            )
+        )
         vm.updateInput("hello")
         vm.filePickerManager.restoreAttachedFiles(
             listOf(SelectedFile(path = "src/Main.kt", name = "Main.kt", mimeType = "text/x-kotlin"))
@@ -199,8 +315,16 @@ class ChatViewModelDraftPersistenceTest {
         assertNull(savedStateHandle.get<String>("chat_attached_files"))
     }
 
-    private fun createViewModel(
-        savedStateHandle: SavedStateHandle = SavedStateHandle(mapOf(Screen.Chat.ARG_SESSION_ID to "session-1"))
+    private val missingAttachmentJson =
+        """[{"path":"src/Missing.kt","name":"Missing.kt","mimeType":"text/x-kotlin"}]"""
+
+    private val privateAttachmentJson =
+        """[{"path":"src/Private.kt","name":"Private.kt","mimeType":"text/x-kotlin"}]"""
+
+    private fun TestScope.createViewModel(
+        savedStateHandle: SavedStateHandle = SavedStateHandle(
+            mapOf(Screen.Chat.ARG_SESSION_ID to "session-1")
+        )
     ): ChatViewModel {
         sessionRepository = SessionRepositoryImpl(
             workspaceClient,
@@ -216,7 +340,7 @@ class ChatViewModelDraftPersistenceTest {
             connectionManager = connectionManager,
             settingsDataStore = settingsDataStore,
             hapticFeedback = hapticFeedback,
-        )
+        ).also { advanceUntilIdle() }
     }
 
     private fun testFileRepository(): FileRepository = FileRepositoryFactory.create(workspaceClient)

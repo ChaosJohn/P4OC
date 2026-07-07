@@ -121,6 +121,25 @@ class FilePickerManager(
         _attachedFiles.value = emptyList()
     }
 
+    suspend fun validateAttachedFiles(): List<SelectedFile> {
+        val current = _attachedFiles.value
+        if (current.isEmpty()) return current
+
+        val validated = current.map { file ->
+            file.copy(available = isWorkspaceFileAvailable(file.path))
+        }
+        _attachedFiles.value = validated
+        return validated
+    }
+
+    private suspend fun isWorkspaceFileAvailable(path: String): Boolean {
+        val parentPath = path.substringBeforeLast('/', missingDelimiterValue = "")
+        return safeApiCall { workspaceClient.listFiles(parentPath) }
+            .getOrNull()
+            ?.any { it.path == path && it.type == "file" }
+            ?: false
+    }
+
     fun uploadAndAttach(source: UploadSource, sourceIds: List<String>) {
         val currentPath = _pickerCurrentPath.value.ifBlank { null }
         uploadCoordinator.upload(
