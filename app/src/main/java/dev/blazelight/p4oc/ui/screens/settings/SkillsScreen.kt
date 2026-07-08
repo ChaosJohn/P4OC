@@ -10,6 +10,7 @@ import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.RectangleShape
+import androidx.compose.ui.res.pluralStringResource
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.font.FontWeight
 import androidx.lifecycle.ViewModel
@@ -35,20 +36,43 @@ import org.koin.androidx.compose.koinViewModel
 
 data class SkillInfo(
     val name: String,
-    val description: String,
+    val status: String,
+    val errorDetail: String? = null,
     val source: String,
-    val isEnabled: Boolean = true,
     val tools: List<String> = emptyList(),
     val resources: List<String> = emptyList(),
     val prompts: List<String> = emptyList()
-)
+) {
+    val isEnabled: Boolean get() = status == MCP_STATUS_CONNECTED
+}
 
 data class SkillsState(
     val skills: List<SkillInfo> = emptyList(),
     val isLoading: Boolean = false,
-    val error: String? = null,
+    val error: SkillsError? = null,
     val selectedSkill: SkillInfo? = null
 )
+
+data class SkillsError(
+    val kind: SkillsErrorKind,
+    val detail: String? = null,
+)
+
+enum class SkillsErrorKind {
+    NotConnected,
+    ApiError,
+}
+
+internal const val MCP_STATUS_CONNECTED = "connected"
+
+internal fun mcpStatusDescriptionRes(status: String): Int = when (status) {
+    MCP_STATUS_CONNECTED -> R.string.skills_status_connected
+    "disabled" -> R.string.skills_status_disabled
+    "failed" -> R.string.skills_status_failed
+    "needs_auth" -> R.string.skills_status_needs_auth
+    "needs_client_registration" -> R.string.skills_status_needs_client_registration
+    else -> R.string.skills_status_unknown
+}
 
 class SkillsViewModel constructor(
     private val connectionManager: ConnectionManager
@@ -65,27 +89,23 @@ class SkillsViewModel constructor(
         viewModelScope.launch {
             _state.update { it.copy(isLoading = true) }
             val api = connectionManager.getApi() ?: run {
-                _state.update { it.copy(isLoading = false, error = "Not connected") }
+                _state.update {
+                    it.copy(
+                        isLoading = false,
+                        error = SkillsError(SkillsErrorKind.NotConnected),
+                    )
+                }
                 return@launch
             }
             val result = safeApiCall { api.getMcpStatus() }
             when (result) {
                 is ApiResult.Success -> {
                     val skills = result.data.map { (name, status) ->
-                        val description = when {
-                            status.error != null -> status.error
-                            status.status == "connected" -> "Connected"
-                            status.status == "disabled" -> "Disabled"
-                            status.status == "failed" -> "Connection failed"
-                            status.status == "needs_auth" -> "Authentication required"
-                            status.status == "needs_client_registration" -> "Client registration required"
-                            else -> status.status.replaceFirstChar { it.uppercase() }
-                        }
                         SkillInfo(
                             name = name,
-                            description = description,
+                            status = status.status,
+                            errorDetail = status.error,
                             source = "mcp",
-                            isEnabled = status.status == "connected",
                             tools = emptyList(),
                             resources = emptyList(),
                             prompts = emptyList()
@@ -94,7 +114,12 @@ class SkillsViewModel constructor(
                     _state.update { it.copy(skills = skills, isLoading = false) }
                 }
                 is ApiResult.Error -> {
-                    _state.update { it.copy(isLoading = false, error = result.message) }
+                    _state.update {
+                        it.copy(
+                            isLoading = false,
+                            error = SkillsError(SkillsErrorKind.ApiError, result.message),
+                        )
+                    }
                 }
             }
         }
@@ -118,11 +143,17 @@ fun SkillsScreen(
     val state by viewModel.state.collectAsStateWithLifecycle()
     val snackbarHostState = remember { SnackbarHostState() }
 
+    val errorMessage = state.error?.let { error ->
+        when (error.kind) {
+            SkillsErrorKind.NotConnected -> stringResource(R.string.skills_error_not_connected)
+            SkillsErrorKind.ApiError -> error.detail ?: stringResource(R.string.skills_error_generic)
+        }
+    }
     // Show error in snackbar
-    LaunchedEffect(state.error) {
-        state.error?.let { error ->
+    LaunchedEffect(errorMessage) {
+        errorMessage?.let { message ->
             snackbarHostState.showSnackbar(
-                message = error,
+                message = message,
                 duration = SnackbarDuration.Short
             )
             viewModel.clearError()
@@ -310,25 +341,41 @@ private fun SkillCard(
                             )
                         }
                     }
+                    val statusDescription = stringResource(mcpStatusDescriptionRes(skill.status))
                     Text(
-                        text = skill.description,
+                        text = statusDescription,
                         style = MaterialTheme.typography.bodySmall,
                         color = theme.textMuted
                     )
+                    skill.errorDetail?.let { detail ->
+                        Text(
+                            text = detail,
+                            style = MaterialTheme.typography.labelSmall,
+                            color = theme.error
+                        )
+                    }
 
                     if (skill.tools.isNotEmpty() || skill.resources.isNotEmpty()) {
                         Spacer(Modifier.height(Spacing.xs))
                         Row(horizontalArrangement = Arrangement.spacedBy(Spacing.md)) {
                             if (skill.tools.isNotEmpty()) {
                                 Text(
-                                    text = "${skill.tools.size} tools",
+                                    text = pluralStringResource(
+                                        R.plurals.skills_tools_count,
+                                        skill.tools.size,
+                                        skill.tools.size,
+                                    ),
                                     style = MaterialTheme.typography.labelSmall,
                                     color = theme.accent
                                 )
                             }
                             if (skill.resources.isNotEmpty()) {
                                 Text(
-                                    text = "${skill.resources.size} resources",
+                                    text = pluralStringResource(
+                                        R.plurals.skills_resources_count,
+                                        skill.resources.size,
+                                        skill.resources.size,
+                                    ),
                                     style = MaterialTheme.typography.labelSmall,
                                     color = theme.secondary
                                 )
@@ -359,7 +406,10 @@ private fun SkillDetailDialog(
             }
         }
     ) {
-        Text(skill.description)
+        Text(stringResource(mcpStatusDescriptionRes(skill.status)))
+        skill.errorDetail?.let { detail ->
+            Text(detail)
+        }
 
         Row(
             horizontalArrangement = Arrangement.spacedBy(Spacing.md),

@@ -1,6 +1,6 @@
 ---
 id: oa-gtw8
-status: open
+status: closed
 deps: []
 links: [oa-v3js, oa-t3tb, oa-12ui]
 created: 2026-07-05T18:06:47Z
@@ -33,3 +33,9 @@ Acceptance Criteria:
 Verification:
 Run targeted file viewer/editor tests and smoke test editing a file, switching tabs, rotating/recreating, and returning.
 
+
+## Notes
+
+**2026-07-07T21:17:58Z**
+
+Implemented in-app file editor draft preservation using the FilesViewModel SavedStateHandle scope added for oa-tzta. Current source of truth remains FileEditState in FilesViewModel; it is now restored from/persisted to SavedStateHandle per files tab/back-stack entry with path, original content, current draft content, and baseline hash. All FileEditState mutations now go through updateEditState(), keeping transient UI flags and draft content synchronized to SavedStateHandle. Recreating the VM restores dirty drafts as dirty; re-loading the same path preserves a restored dirty draft instead of clobbering it with server content, while saves still use the restored baseline hash for stale-write conflict detection through FileWriteRequest.expectedHash. Added FilesViewModelEditTest coverage for dirty-buffer restoration across VM recreation and same-path load preserving a restored dirty buffer, in addition to existing save/conflict/discard coverage. Verification: ./gradlew :app:testDebugUnitTest --tests dev.blazelight.p4oc.ui.screens.files.FilesViewModelEditTest; ./gradlew :app:compileDebugKotlin; ./gradlew :app:detekt.

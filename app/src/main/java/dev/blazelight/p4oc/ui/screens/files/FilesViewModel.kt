@@ -1,5 +1,6 @@
 package dev.blazelight.p4oc.ui.screens.files
 
+import androidx.lifecycle.SavedStateHandle
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
 import dev.blazelight.p4oc.data.files.FileCapabilities
@@ -22,28 +23,74 @@ import kotlinx.coroutines.launch
 class FilesViewModel constructor(
     private val fileRepository: FileRepository,
     private val uploadCoordinator: UploadCoordinator,
+    private val savedStateHandle: SavedStateHandle = SavedStateHandle(),
 ) : ViewModel() {
 
-    private val _uiState = MutableStateFlow(FilesUiState())
+    private val _uiState = MutableStateFlow(
+        FilesUiState(
+            currentPath = savedStateHandle[KEY_CURRENT_PATH] ?: ROOT_PATH,
+            searchQuery = savedStateHandle[KEY_SEARCH_QUERY] ?: "",
+            isSearchActive = savedStateHandle[KEY_SEARCH_ACTIVE] ?: false,
+            isSymbolMode = savedStateHandle[KEY_SYMBOL_MODE] ?: false,
+            symbolQuery = savedStateHandle[KEY_SYMBOL_QUERY] ?: "",
+        )
+    )
+    private var restoringInitialPath = savedStateHandle.get<String>(KEY_CURRENT_PATH).orEmpty().isNotBlank()
+    private var pendingPathRestoreError: String? = null
     val uiState: StateFlow<FilesUiState> = _uiState.asStateFlow()
 
     private val _symbolResults = MutableStateFlow<List<Symbol>>(emptyList())
     val symbolResults: StateFlow<List<Symbol>> = _symbolResults.asStateFlow()
 
-    private val pathStack = mutableListOf<String>()
+    private val pathStack = savedStateHandle.get<ArrayList<String>>(KEY_PATH_STACK)?.toMutableList() ?: mutableListOf()
     private var loadFilesJob: Job? = null
     private var loadContentJob: Job? = null
     private var saveJob: Job? = null
     private var mutationJob: Job? = null
 
-    private val _editState = MutableStateFlow(FileEditState())
+    private val _editState = MutableStateFlow(restoredEditState())
     val editState: StateFlow<FileEditState> = _editState.asStateFlow()
 
     val uploadState: StateFlow<UploadQueueState> = uploadCoordinator.state
 
     init {
         loadCapabilities()
-        loadFiles(ROOT_PATH)
+        loadFiles(savedStateHandle[KEY_CURRENT_PATH] ?: ROOT_PATH)
+        savedStateHandle.get<String>(KEY_SYMBOL_QUERY)?.takeIf { it.isNotBlank() }?.let(::searchSymbols)
+    }
+
+    private fun restoredEditState(): FileEditState {
+        val path = savedStateHandle.get<String>(KEY_EDIT_PATH) ?: return FileEditState()
+        val originalContent = savedStateHandle[KEY_EDIT_ORIGINAL_CONTENT] ?: ""
+        val currentContent = savedStateHandle[KEY_EDIT_CURRENT_CONTENT] ?: originalContent
+        return FileEditState(
+            path = path,
+            originalContent = originalContent,
+            currentContent = currentContent,
+            isDirty = currentContent != originalContent,
+            contentGeneration = 1,
+            baselineHash = savedStateHandle[KEY_EDIT_BASELINE_HASH],
+        )
+    }
+
+    private fun persistEditState(state: FileEditState) {
+        if (state.path == null) {
+            savedStateHandle.remove<String>(KEY_EDIT_PATH)
+            savedStateHandle.remove<String>(KEY_EDIT_ORIGINAL_CONTENT)
+            savedStateHandle.remove<String>(KEY_EDIT_CURRENT_CONTENT)
+            savedStateHandle.remove<String>(KEY_EDIT_BASELINE_HASH)
+            return
+        }
+        savedStateHandle[KEY_EDIT_PATH] = state.path
+        savedStateHandle[KEY_EDIT_ORIGINAL_CONTENT] = state.originalContent
+        savedStateHandle[KEY_EDIT_CURRENT_CONTENT] = state.currentContent
+        savedStateHandle[KEY_EDIT_BASELINE_HASH] = state.baselineHash
+    }
+
+    private fun updateEditState(transform: (FileEditState) -> FileEditState) {
+        _editState.update { current ->
+            transform(current).also(::persistEditState)
+        }
     }
 
     fun refresh() {
@@ -60,6 +107,49 @@ class FilesViewModel constructor(
         loadFiles(previousPath)
     }
 
+    fun setSearchActive(active: Boolean) {
+        savedStateHandle[KEY_SEARCH_ACTIVE] = active
+        _uiState.update { it.copy(isSearchActive = active) }
+    }
+
+    fun updateSearchQuery(query: String) {
+        savedStateHandle[KEY_SEARCH_QUERY] = query
+        _uiState.update { it.copy(searchQuery = query) }
+    }
+
+    fun setSymbolMode(active: Boolean) {
+        savedStateHandle[KEY_SYMBOL_MODE] = active
+        _uiState.update { it.copy(isSymbolMode = active) }
+    }
+
+    fun updateSymbolQuery(query: String) {
+        savedStateHandle[KEY_SYMBOL_QUERY] = query
+        _uiState.update { it.copy(symbolQuery = query) }
+        searchSymbols(query)
+    }
+
+    fun clearFilters() {
+        savedStateHandle[KEY_SEARCH_ACTIVE] = false
+        savedStateHandle[KEY_SYMBOL_MODE] = false
+        savedStateHandle[KEY_SEARCH_QUERY] = ""
+        savedStateHandle[KEY_SYMBOL_QUERY] = ""
+        _symbolResults.value = emptyList()
+        _uiState.update {
+            it.copy(
+                isSearchActive = false,
+                isSymbolMode = false,
+                searchQuery = "",
+                symbolQuery = "",
+                symbolError = null,
+            )
+        }
+    }
+
+    private fun persistPathState(path: String) {
+        savedStateHandle[KEY_CURRENT_PATH] = path
+        savedStateHandle[KEY_PATH_STACK] = ArrayList(pathStack)
+    }
+
     private fun loadFiles(path: String) {
         loadFilesJob?.cancel()
         loadFilesJob = viewModelScope.launch {
@@ -67,19 +157,31 @@ class FilesViewModel constructor(
 
             when (val result = fileRepository.listFiles(path)) {
                 is FileOperationResult.Ok -> {
+                    val restoreError = pendingPathRestoreError
+                    pendingPathRestoreError = null
+                    restoringInitialPath = false
                     _uiState.update {
                         it.copy(
                             isLoading = false,
                             files = result.data.files,
                             currentPath = result.data.path,
+                            pathRestoreError = restoreError,
                         )
                     }
+                    persistPathState(result.data.path)
                 }
                 is FileOperationResult.Conflict -> {
                     _uiState.update { it.copy(isLoading = false, error = result.message) }
                 }
                 is FileOperationResult.Failed -> {
-                    _uiState.update { it.copy(isLoading = false, error = result.message) }
+                    if (path != ROOT_PATH && restoringInitialPath) {
+                        pendingPathRestoreError = result.message
+                        pathStack.clear()
+                        loadFiles(ROOT_PATH)
+                    } else {
+                        restoringInitialPath = false
+                        _uiState.update { it.copy(isLoading = false, error = result.message) }
+                    }
                 }
             }
         }
@@ -120,15 +222,19 @@ class FilesViewModel constructor(
                     // Reset edit baseline whenever we (re)load. The viewer screen owns
                     // the decision of whether to enter edit mode; the baseline is only
                     // consumed when it does.
-                    _editState.update {
-                        FileEditState(
-                            path = path,
-                            originalContent = result.data.content,
-                            currentContent = result.data.content,
-                            isDirty = false,
-                            contentGeneration = it.contentGeneration + 1,
-                            baselineHash = result.data.hash,
-                        )
+                    updateEditState { current ->
+                        if (current.path == path && current.isDirty) {
+                            current
+                        } else {
+                            FileEditState(
+                                path = path,
+                                originalContent = result.data.content,
+                                currentContent = result.data.content,
+                                isDirty = false,
+                                contentGeneration = current.contentGeneration + 1,
+                                baselineHash = result.data.hash,
+                            )
+                        }
                     }
                 }
                 is FileOperationResult.Conflict -> {
@@ -143,8 +249,8 @@ class FilesViewModel constructor(
 
     /** Push the latest text snapshot from the editor into edit state. */
     fun onEditorTextChange(newText: String) {
-        _editState.update { current ->
-            if (current.path == null) return@update current
+        updateEditState { current ->
+            if (current.path == null) return@updateEditState current
             current.copy(
                 currentContent = newText,
                 isDirty = newText != current.originalContent,
@@ -156,10 +262,10 @@ class FilesViewModel constructor(
         val state = _editState.value
         if (state.path == null) return
         if (!state.isDirty) {
-            _editState.update { it.copy(saveError = null, pendingSavePreview = null) }
+            updateEditState { it.copy(saveError = null, pendingSavePreview = null) }
             return
         }
-        _editState.update {
+        updateEditState {
             it.copy(
                 pendingSavePreview = SavePreview(
                     path = state.path,
@@ -172,7 +278,7 @@ class FilesViewModel constructor(
     }
 
     fun dismissSavePreview() {
-        _editState.update { it.copy(pendingSavePreview = null) }
+        updateEditState { it.copy(pendingSavePreview = null) }
     }
 
     fun confirmSave() {
@@ -181,13 +287,13 @@ class FilesViewModel constructor(
 
     fun reloadFromServer() {
         val path = _editState.value.path ?: return
-        _editState.update { it.copy(conflict = null) }
+        updateEditState { it.copy(conflict = null) }
         loadFileContent(path)
     }
 
     /** Re-issues the write with no baseline hash, suppressing stale-write detection. */
     fun overwriteAnyway() {
-        _editState.update { it.copy(conflict = null) }
+        updateEditState { it.copy(conflict = null) }
         performSave(useBaselineHash = false)
     }
 
@@ -197,12 +303,12 @@ class FilesViewModel constructor(
         if (state.isSaving) return
         saveJob?.cancel()
         saveJob = viewModelScope.launch {
-            _editState.update { it.copy(isSaving = true, saveError = null) }
+            updateEditState { it.copy(isSaving = true, saveError = null) }
             val expected = if (useBaselineHash) state.baselineHash else null
             val request = FileWriteRequest(path = path, content = state.currentContent, expectedHash = expected)
             when (val result = fileRepository.writeFile(request)) {
                 is FileOperationResult.Ok -> {
-                    _editState.update {
+                    updateEditState {
                         it.copy(
                             originalContent = state.currentContent,
                             isDirty = false,
@@ -223,7 +329,7 @@ class FilesViewModel constructor(
                     _uiState.update { it.copy(fileContent = state.currentContent) }
                 }
                 is FileOperationResult.Conflict -> {
-                    _editState.update {
+                    updateEditState {
                         it.copy(
                             isSaving = false,
                             pendingSavePreview = null,
@@ -232,7 +338,7 @@ class FilesViewModel constructor(
                     }
                 }
                 is FileOperationResult.Failed -> {
-                    _editState.update {
+                    updateEditState {
                         it.copy(
                             isSaving = false,
                             pendingSavePreview = null,
@@ -245,11 +351,11 @@ class FilesViewModel constructor(
     }
 
     fun dismissConflict() {
-        _editState.update { it.copy(conflict = null) }
+        updateEditState { it.copy(conflict = null) }
     }
 
     fun discardEdits() {
-        _editState.update { state ->
+        updateEditState { state ->
             state.copy(
                 currentContent = state.originalContent,
                 isDirty = false,
@@ -261,7 +367,7 @@ class FilesViewModel constructor(
     }
 
     fun clearSaveError() {
-        _editState.update { it.copy(saveError = null) }
+        updateEditState { it.copy(saveError = null) }
     }
 
     fun uploadFromSources(source: UploadSource, sourceIds: List<String>) {
@@ -358,6 +464,16 @@ class FilesViewModel constructor(
 
     private companion object {
         const val ROOT_PATH = ""
+        const val KEY_CURRENT_PATH = "files_current_path"
+        const val KEY_PATH_STACK = "files_path_stack"
+        const val KEY_SEARCH_QUERY = "files_search_query"
+        const val KEY_SEARCH_ACTIVE = "files_search_active"
+        const val KEY_SYMBOL_QUERY = "files_symbol_query"
+        const val KEY_SYMBOL_MODE = "files_symbol_mode"
+        const val KEY_EDIT_PATH = "files_edit_path"
+        const val KEY_EDIT_ORIGINAL_CONTENT = "files_edit_original_content"
+        const val KEY_EDIT_CURRENT_CONTENT = "files_edit_current_content"
+        const val KEY_EDIT_BASELINE_HASH = "files_edit_baseline_hash"
 
         fun childPath(parent: String, child: String): String = listOf(parent.trim('/'), child.trim('/'))
             .filter { it.isNotBlank() }
@@ -373,7 +489,12 @@ data class FilesUiState(
     val currentPath: String = "",
     val fileContent: String? = null,
     val error: String? = null,
+    val pathRestoreError: String? = null,
     val symbolError: String? = null,
+    val searchQuery: String = "",
+    val isSearchActive: Boolean = false,
+    val isSymbolMode: Boolean = false,
+    val symbolQuery: String = "",
     val capabilities: FileCapabilities = FileCapabilities(),
     val isMutating: Boolean = false,
     val mutationMessage: String? = null,

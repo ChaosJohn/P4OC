@@ -28,7 +28,7 @@ import dev.blazelight.p4oc.ui.components.code.SyntaxHighlightedCode
 import dev.blazelight.p4oc.ui.diff.UnifiedDiffBuilder
 import dev.blazelight.p4oc.ui.screens.files.editor.SoraCodeEditorView
 import dev.blazelight.p4oc.ui.screens.files.editor.SoraLanguageRegistry
-import dev.blazelight.p4oc.ui.screens.files.editor.displayLabelForScope
+import dev.blazelight.p4oc.ui.screens.files.editor.displayLabelResForScope
 import dev.blazelight.p4oc.ui.theme.LocalOpenCodeTheme
 import dev.blazelight.p4oc.ui.theme.Sizing
 import dev.blazelight.p4oc.ui.theme.Spacing
@@ -57,9 +57,10 @@ fun FileViewerScreen(
     }
 
     val filename = path.substringAfterLast("/")
-    val languageLabel = remember(filename) {
-        displayLabelForScope(SoraLanguageRegistry.scopeFor(filename))
+    val languageLabelRes = remember(filename) {
+        displayLabelResForScope(SoraLanguageRegistry.scopeFor(filename))
     }
+    val languageLabel = stringResource(languageLabelRes)
     val theme = LocalOpenCodeTheme.current
 
     val isDirty = editState.isDirty && editMode

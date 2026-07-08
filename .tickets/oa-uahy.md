@@ -1,6 +1,6 @@
 ---
 id: oa-uahy
-status: open
+status: closed
 deps: []
 links: []
 created: 2026-07-06T19:23:41Z
@@ -31,3 +31,9 @@ Acceptance Criteria:
 Verification:
 On debug build, connect screen: fail one connection, select discovered server, then manually replace URL; confirm the field contains exactly one normalized URL and Connect uses that URL.
 
+
+## Notes
+
+**2026-07-07T20:06:10Z**
+
+Implemented Server URL replacement hardening. The Server URL OutlinedTextField now stores TextFieldValue locally and synchronizes external URL changes through serverUrlTextFieldValue(url), which sets the replacement text exactly and collapses selection at the end. The LaunchedEffect(url) guard only resets selection when the ViewModel-provided URL differs from the current field text, so normal typing is not disrupted while discovered/recent server selection cleanly replaces stale text. Existing connect path already validates ServerUrl.normalizeConnectUrl before network attempts. Added ServerUrlTextFieldValueTest for cursor-at-end replacement behavior. Verification: ./gradlew :app:testDebugUnitTest --tests dev.blazelight.p4oc.ui.screens.server.ServerUrlTextFieldValueTest; ./gradlew :app:compileDebugKotlin.

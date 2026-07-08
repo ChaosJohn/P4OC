@@ -39,6 +39,7 @@ import dev.blazelight.p4oc.ui.components.chat.FilePickerDialog
 import dev.blazelight.p4oc.ui.components.chat.JumpToBottomButton
 import dev.blazelight.p4oc.ui.components.chat.ModelAgentSelectorBar
 import dev.blazelight.p4oc.ui.components.command.CommandPalette
+import dev.blazelight.p4oc.ui.components.command.rememberResolvedCommandMetadata
 import dev.blazelight.p4oc.ui.components.question.InlineQuestionCard
 import dev.blazelight.p4oc.ui.components.status.SessionStatusDot
 import dev.blazelight.p4oc.ui.components.todo.TodoTrackerSheet
@@ -484,8 +485,9 @@ fun ChatScreen(
     }
 
     if (showCommandPalette) {
+        val resolvedCommands = rememberResolvedCommandMetadata(uiState.commands)
         CommandPalette(
-            commands = uiState.commands,
+            commands = resolvedCommands,
             isLoading = uiState.isLoadingCommands,
             error = uiState.commandLoadError,
             onRetry = { viewModel.refreshCommandsIfNeeded(force = true) },

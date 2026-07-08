@@ -1,6 +1,6 @@
 ---
 id: oa-9ev3
-status: open
+status: closed
 deps: []
 links: [oa-4olr, oa-x9pe, oa-12ui]
 created: 2026-07-05T18:06:47Z
@@ -66,3 +66,7 @@ Required policy with oa-e6g3 WorkspaceKey model:
 
 Acceptance addendum:
 Tests should cover both MainTabScreen PTY construction paths or their extracted request builder: top-level Global does not send '.', and Directory contextual creation sends the directory cwd explicitly.
+
+**2026-07-07T19:57:28Z**
+
+Completed PTY request policy. CreatePtyRequest DTO no longer supplies Android-guessed /bin/bash, '.', or Terminal defaults. MainTabScreen now routes both top-level and contextual terminal creation through createPtyRequestForWorkspace: WorkspaceKey.Global omits command/cwd/title for server-delegated defaults; WorkspaceKey.Directory sends cwd equal to the directory and a basename title; missing tab workspace identity is refused with a human-readable snackbar instead of guessed. Added MainTabScreenPtyRequestTest covering Global null command/cwd/title/empty args and Directory explicit cwd/title with cwd != '.'. Verification: ./gradlew :app:testDebugUnitTest --tests dev.blazelight.p4oc.ui.tabs.MainTabScreenPtyRequestTest; ./gradlew :app:compileDebugKotlin.

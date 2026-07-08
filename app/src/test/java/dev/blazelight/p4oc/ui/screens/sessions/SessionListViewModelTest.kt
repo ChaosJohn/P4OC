@@ -1,5 +1,6 @@
 package dev.blazelight.p4oc.ui.screens.sessions
 
+import androidx.lifecycle.SavedStateHandle
 import dev.blazelight.p4oc.data.remote.mapper.MessageMapper
 import dev.blazelight.p4oc.data.session.SessionRepositoryImpl
 import dev.blazelight.p4oc.fakes.FakeWorkspaceClient
@@ -154,6 +155,155 @@ class SessionListViewModelTest {
         repository.close()
     }
 
+    @Test
+    fun recreateWithSameSavedStateHandle_restoresGlobalSearchQueryAndExpandedSessions() = runTest(dispatcher) {
+        val client = FakeWorkspaceClient().apply {
+            sessionsByDirectoryAndSearch = mapOf(
+                Pair(null, "apple") to listOf(FakeWorkspaceClient.sessionDto("global", title = "apple global")),
+            )
+        }
+        val repository = repository(client)
+        val savedStateHandle = SavedStateHandle()
+        val original = SessionListViewModel(repository, savedStateHandle)
+        advanceUntilIdle()
+
+        original.updateSearchQuery("apple", directory = null)
+        original.toggleSessionExpanded("global")
+        advanceTimeBy(300)
+        advanceUntilIdle()
+
+        val recreated = SessionListViewModel(repository, savedStateHandle)
+        advanceUntilIdle()
+        recreated.updateSearchDirectory(null)
+        advanceUntilIdle()
+
+        assertEquals("apple", recreated.uiState.value.searchQuery)
+        assertNull(recreated.uiState.value.searchDirectory)
+        assertEquals(setOf("global"), recreated.uiState.value.expandedSessionIds)
+        assertEquals(listOf("global"), recreated.uiState.value.displayedSearchResults.map { it.session.id })
+        assertEquals(SessionSearchStatus.Current, recreated.uiState.value.searchStatus)
+        repository.close()
+    }
+
+    @Test
+    fun searchQueryAndExpandedSessions_areIsolatedByDirectoryContext() = runTest(dispatcher) {
+        val client = FakeWorkspaceClient().apply {
+            sessionsByDirectoryAndSearch = mapOf(
+                Pair("/project-a", "apple") to listOf(
+                    FakeWorkspaceClient.sessionDto("a", title = "apple work", directory = "/project-a"),
+                ),
+                Pair("/project-b", "banana") to listOf(
+                    FakeWorkspaceClient.sessionDto("b", title = "banana work", directory = "/project-b"),
+                ),
+            )
+        }
+        val repository = repository(client)
+        val viewModel = SessionListViewModel(repository, SavedStateHandle())
+        advanceUntilIdle()
+
+        viewModel.updateSearchQuery("apple", directory = "/project-a")
+        viewModel.toggleSessionExpanded("a")
+        advanceTimeBy(300)
+        advanceUntilIdle()
+        assertEquals(listOf("a"), viewModel.uiState.value.displayedSearchResults.map { it.session.id })
+
+        viewModel.updateSearchDirectory("/project-b")
+        advanceUntilIdle()
+        assertEquals("", viewModel.uiState.value.searchQuery)
+        assertEquals("/project-b", viewModel.uiState.value.searchDirectory)
+        assertTrue(viewModel.uiState.value.expandedSessionIds.isEmpty())
+        assertFalse(viewModel.uiState.value.isSearchActive)
+
+        viewModel.updateSearchQuery("banana", directory = "/project-b")
+        viewModel.toggleSessionExpanded("b")
+        advanceTimeBy(300)
+        advanceUntilIdle()
+        assertEquals(listOf("b"), viewModel.uiState.value.displayedSearchResults.map { it.session.id })
+
+        viewModel.updateSearchDirectory("/project-a")
+        advanceUntilIdle()
+
+        assertEquals("apple", viewModel.uiState.value.searchQuery)
+        assertEquals("/project-a", viewModel.uiState.value.searchDirectory)
+        assertEquals(setOf("a"), viewModel.uiState.value.expandedSessionIds)
+        assertEquals(listOf("a"), viewModel.uiState.value.displayedSearchResults.map { it.session.id })
+        assertEquals(SessionSearchStatus.Current, viewModel.uiState.value.searchStatus)
+        repository.close()
+    }
+
+    @Test
+    fun updateSearchQuery_blankClearsSearchOnlyForThatDirectoryContext() = runTest(dispatcher) {
+        val client = FakeWorkspaceClient().apply {
+            sessionsByDirectoryAndSearch = mapOf(
+                Pair("/project-a", "apple") to listOf(
+                    FakeWorkspaceClient.sessionDto("a", title = "apple work", directory = "/project-a"),
+                ),
+                Pair("/project-b", "banana") to listOf(
+                    FakeWorkspaceClient.sessionDto("b", title = "banana work", directory = "/project-b"),
+                ),
+            )
+        }
+        val repository = repository(client)
+        val viewModel = SessionListViewModel(repository, SavedStateHandle())
+        advanceUntilIdle()
+
+        viewModel.updateSearchQuery("apple", directory = "/project-a")
+        advanceTimeBy(300)
+        advanceUntilIdle()
+        viewModel.updateSearchQuery("banana", directory = "/project-b")
+        advanceTimeBy(300)
+        advanceUntilIdle()
+
+        viewModel.updateSearchQuery("", directory = "/project-b")
+        advanceUntilIdle()
+
+        assertEquals("", viewModel.uiState.value.searchQuery)
+        assertEquals("/project-b", viewModel.uiState.value.searchDirectory)
+        assertFalse(viewModel.uiState.value.isSearchActive)
+        assertTrue(viewModel.uiState.value.searchResults.isEmpty())
+        assertNull(viewModel.uiState.value.searchStatus)
+
+        viewModel.updateSearchDirectory("/project-a")
+        advanceUntilIdle()
+
+        assertEquals("apple", viewModel.uiState.value.searchQuery)
+        assertEquals(listOf("a"), viewModel.uiState.value.displayedSearchResults.map { it.session.id })
+        assertEquals(SessionSearchStatus.Current, viewModel.uiState.value.searchStatus)
+        repository.close()
+    }
+
+    @Test
+    fun restoredSearchWithNoMatches_keepsQueryAndCurrentNoResultsState() = runTest(dispatcher) {
+        val client = FakeWorkspaceClient().apply {
+            sessionsByDirectoryAndSearch = mapOf(
+                Pair("/project", "missing") to emptyList(),
+            )
+        }
+        val repository = repository(client)
+        val savedStateHandle = SavedStateHandle()
+        val original = SessionListViewModel(repository, savedStateHandle)
+        advanceUntilIdle()
+
+        original.updateSearchQuery("missing", directory = "/project")
+        advanceTimeBy(300)
+        advanceUntilIdle()
+        assertEquals(SessionSearchStatus.Current, original.uiState.value.searchStatus)
+        assertTrue(original.uiState.value.displayedSearchResults.isEmpty())
+
+        val recreated = SessionListViewModel(repository, savedStateHandle)
+        advanceUntilIdle()
+        recreated.updateSearchDirectory("/project")
+        advanceUntilIdle()
+
+        assertEquals("missing", recreated.uiState.value.searchQuery)
+        assertEquals("/project", recreated.uiState.value.searchDirectory)
+        assertTrue(recreated.uiState.value.isSearchActive)
+        assertTrue(recreated.uiState.value.searchResults.isEmpty())
+        assertTrue(recreated.uiState.value.displayedSearchResults.isEmpty())
+        assertEquals("missing", recreated.uiState.value.serverSearchQuery)
+        assertEquals(SessionSearchStatus.Current, recreated.uiState.value.searchStatus)
+        repository.close()
+    }
     private fun repository(client: FakeWorkspaceClient): SessionRepositoryImpl = SessionRepositoryImpl(
         client = client,
         messageMapper = MessageMapper(Json { ignoreUnknownKeys = true }),

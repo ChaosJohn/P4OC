@@ -138,46 +138,46 @@ class SessionRepositoryImpl(
         _state.value = RepoState.Live(snapshot)
     }
 
-    suspend fun searchSessions(query: String, directory: String? = null): List<WorkspaceSession> {
+    suspend fun searchSessionsInWorkspace(query: String, directory: String): List<WorkspaceSession> {
         val trimmed = query.trim()
         if (trimmed.isEmpty()) return emptyList()
+        return searchSessionsInDirectories(trimmed, listOf(directory))
+    }
 
-        val projects = if (directory == null) {
-            runCatching { client.listProjects() }.getOrElse { emptyList() }
-        } else {
-            emptyList()
-        }
-        val directories = if (directory != null) {
-            listOf(directory)
-        } else {
-            listOf<String?>(null) + projects.map { it.worktree }
-        }
+    suspend fun searchSessionsGlobally(query: String): List<WorkspaceSession> {
+        val trimmed = query.trim()
+        if (trimmed.isEmpty()) return emptyList()
+        val projects = runCatching { client.listProjects() }.getOrElse { emptyList() }
+        return searchSessionsInDirectories(trimmed, listOf<String?>(null) + projects.map { it.worktree })
+    }
 
-        return coroutineScope {
-            val results = directories.map { searchDirectory ->
-                async {
-                    runCatching {
-                        client.listSessions(
-                            directory = searchDirectory,
-                            scope = null,
-                            roots = true,
-                            search = trimmed,
-                            limit = SEARCH_LIMIT,
-                        ).filterNot { dto -> OfishSessionNames.isOfishTitle(dto.title) }
-                            .map { dto -> workspaceSession(SessionMapper.mapToDomain(dto)) }
-                    }.onFailure { error ->
-                        AppLog.e(TAG, "Failed to search sessions for ${searchDirectory ?: "global"}: ${error.message}")
-                    }
+    private suspend fun searchSessionsInDirectories(
+        query: String,
+        directories: List<String?>,
+    ): List<WorkspaceSession> = coroutineScope {
+        val results = directories.map { searchDirectory ->
+            async {
+                runCatching {
+                    client.listSessions(
+                        directory = searchDirectory,
+                        scope = null,
+                        roots = true,
+                        search = query,
+                        limit = SEARCH_LIMIT,
+                    ).filterNot { dto -> OfishSessionNames.isOfishTitle(dto.title) }
+                        .map { dto -> workspaceSession(SessionMapper.mapToDomain(dto)) }
+                }.onFailure { error ->
+                    AppLog.e(TAG, "Failed to search sessions for ${searchDirectory ?: "global"}: ${error.message}")
                 }
-            }.awaitAll()
-            if (results.all { it.isFailure }) {
-                throw results.firstNotNullOf { it.exceptionOrNull() }
             }
-            results.map { it.getOrElse { emptyList() } }
-                .flatten()
-                .distinctBy { it.id.value }
-                .sortedByDescending { it.session.updatedAt }
+        }.awaitAll()
+        if (results.all { it.isFailure }) {
+            throw results.firstNotNullOf { it.exceptionOrNull() }
         }
+        results.map { it.getOrElse { emptyList() } }
+            .flatten()
+            .distinctBy { it.id.value }
+            .sortedByDescending { it.session.updatedAt }
     }
 
     override suspend fun getSession(id: SessionId): WorkspaceSession? {

@@ -1,6 +1,6 @@
 ---
 id: oa-4olr
-status: open
+status: closed
 deps: []
 links: [oa-9ev3, oa-n1fs, oa-x9pe]
 created: 2026-05-10T09:56:06Z
@@ -31,3 +31,9 @@ Acceptance Criteria:
 Verification:
 Run ./gradlew :app:compileDebugKotlin and manually test terminal input on software and hardware keyboard scenarios.
 
+
+## Notes
+
+**2026-07-07T21:21:20Z**
+
+Evaluation result: do not remove the custom TerminalInputView/KeyInterceptingContainer wrapper in this change. Verified through the current implementation and termux-view public API (javap on terminal-view 0.118.0) that TerminalView does expose native onCreateInputConnection/onKeyDown/onKeyUp and text-selection support, but the app wrapper is currently carrying Compose interop behavior that is not trivially redundant: it owns a hidden focusable text-editor view to reliably summon the IME from AndroidView taps, translates common hardware/navigation keys into terminal escape sequences, preserves the existing ctrl/alt extra-key path through TerminalScreen.wrappedKeyInput, and delegates long-press selection to TerminalView by returning false from TerminalViewClient.onLongPress. Removing it would require a device/IME matrix across Gboard, Samsung Keyboard, SwiftKey, hardware keyboards, deletion/composition/arrows/control keys, paste, focus after tab switch, and rotation. Given oa-x9pe paste and oa-n1fs lifecycle changes now depend on the existing focus/session path, the safer decision is to keep the wrapper and document that native TerminalView input may be revisited only with a full manual matrix. Verification for the keep decision: ./gradlew :app:compileDebugKotlin and ./gradlew :app:detekt passed after terminal changes.

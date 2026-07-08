@@ -1,6 +1,6 @@
 ---
 id: oa-ivwp
-status: open
+status: closed
 deps: []
 links: [oa-wmvc, oa-erzs, oa-12ui]
 created: 2026-07-05T18:06:47Z
@@ -33,3 +33,9 @@ Acceptance Criteria:
 Verification:
 Run targeted notification formatter/observer tests and compile with JAVA_HOME=/usr/lib/jvm/java-17-openjdk ./gradlew :app:compileDebugKotlin.
 
+
+## Notes
+
+**2026-07-07T20:12:41Z**
+
+Moved notification channel names/descriptions and event notification titles/fallback bodies to Android string resources. NotificationHelper now uses context.getString for user-input and completion channel metadata, question title, question fallback body, completion title, and completion fallback body. NotificationEventObserver no longer owns the hardcoded 'AI has a question' fallback; it passes nullable question text to the notification boundary. Permission notification title remains aligned with PermissionDisplayFormatter and R.string.notification_permission_required. Verification: grep found no remaining hardcoded notification user-facing strings in core/notification; ./gradlew :app:compileDebugKotlin passed. Unit tests were not added because this project has no Robolectric/resource-backed JVM test setup, so resource correctness is compile-verified.

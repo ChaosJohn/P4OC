@@ -1,6 +1,6 @@
 ---
 id: oa-dygk
-status: open
+status: closed
 deps: []
 links: [oa-0mel, oa-casy, oa-3yk2, oa-wmvc, oa-qy0f, oa-wxf2]
 created: 2026-05-09T15:47:12Z
@@ -22,3 +22,7 @@ Standardization note: deliver complete slash popup UX, not phased partial polish
 **2026-05-10T15:51:10Z**
 
 Design constraint: slash autocomplete rows should be extremely compact and one-line. Prefer showing /name plus a short source badge, with description/agent/model omitted or heavily truncated when space is tight. The popup should prioritize keeping the typed command visible and preserving transcript space over showing full metadata.
+
+**2026-07-07T20:46:47Z**
+
+Verified and completed slash command popup placement and metadata behavior. Popup is anchored above the chat input via AboveAnchorPopupPositionProvider, keeps active item visible, shows explicit loading/error/empty states with resource-backed copy, displays compact source badges for built-in/skill/MCP/custom/subtask commands, and now consumes resolved descriptions from oa-0mel for search/display. Exposed pure helpers for filtering/source labels and added SlashCommandsPopupTest coverage for empty/name/description filtering, all source labels, and above-anchor/clamped popup geometry. Verification: ./gradlew :app:testDebugUnitTest --tests dev.blazelight.p4oc.ui.components.chat.SlashCommandsPopupTest; ./gradlew :app:compileDebugKotlin; ./gradlew :app:detekt (fails only on pre-existing SessionListViewModel LongMethod, ConnectionManager ReturnCount, and SessionRepositoryImplTest line-length findings; no SlashCommandsPopup findings remain).

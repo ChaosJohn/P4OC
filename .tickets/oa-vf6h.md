@@ -1,6 +1,6 @@
 ---
 id: oa-vf6h
-status: open
+status: closed
 deps: []
 links: [oa-wmvc, oa-12ui]
 created: 2026-07-05T18:06:47Z
@@ -33,3 +33,9 @@ Acceptance Criteria:
 Verification:
 Run targeted todo tracker/UI formatter tests and compile after implementation.
 
+
+## Notes
+
+**2026-07-07T20:42:34Z**
+
+Implemented resource-backed todo tracker status/progress labels. TodoTracker now uses existing progress_count and percent_complete resources, central todo status constants plus todoStatusLabelRes for status labels, new todo_status_* resources, and semantic ImageVector status indicators with content descriptions on todo rows. Section icons are decorative beside visible status labels to avoid duplicate accessibility announcements; priority remains raw technical metadata. Added TodoTrackerMetadataTest for known status resource mappings and unknown fallback. Verification: ./gradlew :app:testDebugUnitTest --tests dev.blazelight.p4oc.ui.components.todo.TodoTrackerMetadataTest; ./gradlew :app:compileDebugKotlin; ./gradlew :app:detekt (fails only on pre-existing SessionListViewModel LongMethod, ConnectionManager ReturnCount, and SessionRepositoryImplTest line-length findings; no TodoTracker findings remain).

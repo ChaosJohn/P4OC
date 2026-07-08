@@ -21,11 +21,7 @@ class NotificationHelper constructor(
 ) {
     companion object {
         const val CHANNEL_ID = "user_input_required"
-        const val CHANNEL_NAME = "User Input Required"
-        const val CHANNEL_DESCRIPTION = "Notifications when AI needs your input"
         const val COMPLETION_CHANNEL_ID = "assistant_completed"
-        const val COMPLETION_CHANNEL_NAME = "Assistant completed"
-        const val COMPLETION_CHANNEL_DESCRIPTION = "Notifications when the assistant finishes a response"
 
         private const val PERMISSION_ID_MASK = 0x40000000
         private const val QUESTION_ID_MASK = 0x20000000
@@ -49,18 +45,18 @@ class NotificationHelper constructor(
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
             val inputChannel = NotificationChannel(
                 CHANNEL_ID,
-                CHANNEL_NAME,
+                context.getString(R.string.notification_channel_user_input_name),
                 NotificationManager.IMPORTANCE_HIGH
             ).apply {
-                description = CHANNEL_DESCRIPTION
+                description = context.getString(R.string.notification_channel_user_input_desc)
                 enableVibration(true)
             }
             val completionChannel = NotificationChannel(
                 COMPLETION_CHANNEL_ID,
-                COMPLETION_CHANNEL_NAME,
+                context.getString(R.string.notification_channel_completion_name),
                 NotificationManager.IMPORTANCE_DEFAULT
             ).apply {
-                description = COMPLETION_CHANNEL_DESCRIPTION
+                description = context.getString(R.string.notification_channel_completion_desc)
                 enableVibration(false)
                 setSound(null, null)
             }
@@ -103,7 +99,7 @@ class NotificationHelper constructor(
         }
     }
 
-    fun showQuestionNotification(sessionId: String, question: String) {
+    fun showQuestionNotification(sessionId: String, question: String?) {
         val notificationId = questionNotificationId(sessionId)
         val intent = Intent(context, MainActivity::class.java).apply {
             flags = Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_CLEAR_TOP
@@ -118,11 +114,13 @@ class NotificationHelper constructor(
             PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE
         )
 
+        val questionText = question ?: context.getString(R.string.notification_question_fallback)
+
         val notification = NotificationCompat.Builder(context, CHANNEL_ID)
             .setSmallIcon(R.drawable.ic_launcher_foreground)
-            .setContentTitle("Question from AI")
-            .setContentText(question)
-            .setStyle(NotificationCompat.BigTextStyle().bigText(question))
+            .setContentTitle(context.getString(R.string.notification_question_title))
+            .setContentText(questionText)
+            .setStyle(NotificationCompat.BigTextStyle().bigText(questionText))
             .setPriority(NotificationCompat.PRIORITY_HIGH)
             .setAutoCancel(true)
             .setContentIntent(pendingIntent)
@@ -152,8 +150,8 @@ class NotificationHelper constructor(
 
         val notification = NotificationCompat.Builder(context, COMPLETION_CHANNEL_ID)
             .setSmallIcon(R.drawable.ic_launcher_foreground)
-            .setContentTitle("Assistant finished")
-            .setContentText(sessionTitle ?: "Response complete")
+            .setContentTitle(context.getString(R.string.notification_completion_title))
+            .setContentText(sessionTitle ?: context.getString(R.string.notification_completion_fallback))
             .setPriority(NotificationCompat.PRIORITY_DEFAULT)
             .setAutoCancel(true)
             .setOnlyAlertOnce(true)

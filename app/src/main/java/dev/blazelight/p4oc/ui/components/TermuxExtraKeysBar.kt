@@ -44,7 +44,8 @@ fun TermuxExtraKeysBar(
     onCtrlToggle: () -> Unit,
     onAltToggle: () -> Unit,
     modifier: Modifier = Modifier,
-    enabled: Boolean = true
+    enabled: Boolean = true,
+    onPaste: (() -> Unit)? = null,
 ) {
     Column(
         modifier = modifier
@@ -64,6 +65,7 @@ fun TermuxExtraKeysBar(
             RepeatableExtraKey("↑", "\u001B[A", enabled, onKeyPress, Modifier.weight(1f))
             ExtraKey("END", "\u001B[F", enabled, onKeyPress, Modifier.weight(1f))
             ExtraKey("PGUP", "\u001B[5~", enabled, onKeyPress, Modifier.weight(1f))
+            ActionExtraKey("PST", enabled && onPaste != null, onPaste ?: {}, Modifier.weight(1f))
         }
 
         // Row 2: TAB  CTRL  ALT  ←  ↓  →  PGDN
@@ -129,6 +131,48 @@ private fun ExtraKey(
             fontSize = TuiCodeFontSize.md,
             fontFamily = FontFamily.Monospace,
             textAlign = TextAlign.Center
+        )
+    }
+}
+
+@Composable
+private fun ActionExtraKey(
+    label: String,
+    enabled: Boolean,
+    onClick: () -> Unit,
+    modifier: Modifier = Modifier,
+) {
+    var isPressed by remember { mutableStateOf(false) }
+
+    Box(
+        modifier = modifier
+            .background(
+                color = if (isPressed) SemanticColors.TerminalKeys.keyPressed else Color.Transparent,
+                shape = RectangleShape
+            )
+            .pointerInput(enabled) {
+                if (!enabled) return@pointerInput
+                detectTapGestures(
+                    onPress = {
+                        isPressed = true
+                        tryAwaitRelease()
+                        isPressed = false
+                    },
+                    onTap = { onClick() },
+                )
+            },
+        contentAlignment = Alignment.Center,
+    ) {
+        Text(
+            text = label,
+            color = if (enabled) {
+                SemanticColors.TerminalKeys.keyText
+            } else {
+                SemanticColors.TerminalKeys.keyText.copy(alpha = 0.5f)
+            },
+            fontSize = TuiCodeFontSize.md,
+            fontFamily = FontFamily.Monospace,
+            textAlign = TextAlign.Center,
         )
     }
 }

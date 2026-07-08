@@ -123,7 +123,7 @@ class ConnectionManager constructor(
         _connectionState.value = ConnectionState.Connecting
 
         val configsToTry = connectionCandidates(config)
-        var lastError: Throwable? = null
+        var primaryError: Throwable? = null
         configsToTry.forEachIndexed { index, candidate ->
             if (index > 0) {
                 AppLog.d(TAG, "Retrying connection with fallback URL ${candidate.url}")
@@ -131,10 +131,10 @@ class ConnectionManager constructor(
 
             val result = connectSingle(candidate, password)
             if (result.isSuccess) return result
-            lastError = result.exceptionOrNull()
+            if (primaryError == null) primaryError = result.exceptionOrNull()
         }
 
-        return Result.failure(lastError ?: Exception("Connection failed"))
+        return Result.failure(primaryError ?: Exception("Connection failed"))
     }
 
     private suspend fun connectSingle(config: ServerConfig, password: String? = null): Result<List<ProjectDto>> {
@@ -201,20 +201,41 @@ class ConnectionManager constructor(
         }
     }
 
-    private fun connectionCandidates(config: ServerConfig): List<ServerConfig> {
-        val parsed = config.url.toHttpUrlOrNull() ?: return listOf(config)
-        if (parsed.port != ServerUrl.DEFAULT_PORT) return listOf(config)
+    internal fun connectionCandidates(config: ServerConfig): List<ServerConfig> {
+        val primaryUrl = ServerUrl.normalizeConnectUrl(config.url) ?: config.url
+        val primaryConfig = if (primaryUrl.trimEnd('/') == config.url.trimEnd('/')) {
+            config
+        } else {
+            config.copy(url = primaryUrl)
+        }
+        val parsed = primaryConfig.url.toHttpUrlOrNull() ?: return listOf(primaryConfig)
+        if (hasExplicitPort(config.url) || parsed.port != ServerUrl.DEFAULT_PORT) return listOf(primaryConfig)
 
         val fallbackPort = when (parsed.scheme) {
             "http" -> 80
             "https" -> 443
-            else -> return listOf(config)
+            else -> return listOf(primaryConfig)
         }
 
         val fallbackUrl = parsed.newBuilder().port(fallbackPort).build().toString().trimEnd('/')
-        if (fallbackUrl == config.url.trimEnd('/')) return listOf(config)
+        if (fallbackUrl == primaryConfig.url.trimEnd('/')) return listOf(primaryConfig)
 
-        return listOf(config, config.copy(url = fallbackUrl))
+        return listOf(primaryConfig, primaryConfig.copy(url = fallbackUrl))
+    }
+
+    internal fun hasExplicitPort(url: String): Boolean {
+        val authority = url
+            .substringAfter("://", missingDelimiterValue = url)
+            .substringBefore('/')
+            .substringBefore('?')
+            .substringBefore('#')
+            .substringAfterLast('@')
+
+        if (authority.startsWith("[")) {
+            return authority.substringAfter("]", missingDelimiterValue = "").startsWith(":")
+        }
+
+        return authority.contains(':')
     }
 
     /**

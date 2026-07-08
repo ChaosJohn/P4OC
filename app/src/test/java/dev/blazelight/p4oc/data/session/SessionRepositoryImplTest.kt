@@ -204,6 +204,74 @@ class SessionRepositoryImplTest {
     }
 
     @Test
+    fun `searchSessionsInWorkspace searches only requested directory`() = runTest {
+        val client = FakeWorkspaceClient().apply {
+            projects = listOf(
+                FakeWorkspaceClient.projectDto("a", "/repo/a"),
+                FakeWorkspaceClient.projectDto("b", "/repo/b"),
+            )
+            sessionsByDirectoryAndSearch = mapOf(
+                Pair("/repo/a", "match") to listOf(
+                    FakeWorkspaceClient.sessionDto(id = "in-a", title = "match in a", directory = "/repo/a")
+                ),
+                Pair("/repo/b", "match") to listOf(
+                    FakeWorkspaceClient.sessionDto(id = "in-b", title = "match in b", directory = "/repo/b")
+                ),
+            )
+        }
+        val repository =
+            SessionRepositoryImpl(
+                client,
+                nowMs = { testScheduler.currentTime },
+                dispatcher = StandardTestDispatcher(testScheduler)
+            )
+
+        val results = repository.searchSessionsInWorkspace("match", "/repo/a")
+
+        assertEquals(listOf("/repo/a"), client.listSessionsDirectories)
+        assertEquals(listOf("match"), client.listSessionsCallsLog.map { it.search })
+        assertEquals(listOf("in-a"), results.map { it.id.value })
+        assertEquals(listOf("/repo/a"), results.map { it.session.directory })
+    }
+
+    @Test
+    fun `searchSessionsGlobally searches global and project worktrees and dedupes results`() = runTest {
+        val client = FakeWorkspaceClient().apply {
+            projects = listOf(
+                FakeWorkspaceClient.projectDto("a", "/repo/a"),
+                FakeWorkspaceClient.projectDto("b", "/repo/b"),
+            )
+            sessionsByDirectoryAndSearch = mapOf(
+                Pair(null, "match") to listOf(
+                    FakeWorkspaceClient.sessionDto(id = "global", title = "global match", directory = "/global", updatedAt = 3L),
+                    FakeWorkspaceClient.sessionDto(id = "shared", title = "older match", directory = "/global", updatedAt = 1L),
+                ),
+                Pair("/repo/a", "match") to listOf(
+                    FakeWorkspaceClient.sessionDto(id = "repo-a", title = "repo a match", directory = "/repo/a", updatedAt = 5L),
+                    FakeWorkspaceClient.sessionDto(id = "shared", title = "newer match", directory = "/repo/a", updatedAt = 5L)
+                ),
+                Pair("/repo/b", "match") to listOf(
+                    FakeWorkspaceClient.sessionDto(id = "repo-b", title = "repo b match", directory = "/repo/b", updatedAt = 4L)
+                ),
+            )
+        }
+        val repository =
+            SessionRepositoryImpl(
+                client,
+                nowMs = { testScheduler.currentTime },
+                dispatcher = StandardTestDispatcher(testScheduler)
+            )
+
+        val results = repository.searchSessionsGlobally("match")
+
+        assertEquals(1, client.listProjectsCalls)
+        assertEquals(listOf(null, "/repo/a", "/repo/b"), client.listSessionsDirectories)
+        assertEquals(listOf("match", "match", "match"), client.listSessionsCallsLog.map { it.search })
+        assertEquals(listOf("repo-a", "repo-b", "global", "shared"), results.map { it.id.value })
+        assertEquals(listOf("/repo/a", "/repo/b", "/global", "/global"), results.map { it.session.directory })
+    }
+
+    @Test
     fun `hydrate filters OFISH sessions from visible state`() = runTest {
         val client = FakeWorkspaceClient().apply {
             projects = emptyList()

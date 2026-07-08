@@ -1,6 +1,6 @@
 ---
 id: oa-prjv
-status: open
+status: closed
 deps: []
 links: [oa-wmvc, oa-12ui]
 created: 2026-07-05T18:06:47Z
@@ -33,3 +33,9 @@ Acceptance Criteria:
 Verification:
 Run targeted Skills/MCP formatter or screen tests and compile after implementation.
 
+
+## Notes
+
+**2026-07-07T20:35:30Z**
+
+Implemented resource-backed MCP/skills display metadata. SkillsViewModel now exposes structured SkillInfo.status/errorDetail and SkillsErrorKind instead of English display strings. UI resolves known MCP status codes with mcpStatusDescriptionRes and R.string.skills_status_* resources, preserves server-provided errorDetail as upstream technical detail, uses resource/plural-backed tools/resources counts, and keeps raw source/tool/resource identifiers as technical metadata. Added SkillsMetadataTest coverage for known status resource mappings, unknown fallback, connected-only isEnabled behavior, and expected error kinds. Verification: ./gradlew :app:testDebugUnitTest --tests dev.blazelight.p4oc.ui.screens.settings.SkillsMetadataTest; ./gradlew :app:compileDebugKotlin; ./gradlew :app:detekt (fails only on pre-existing SessionListViewModel LongMethod, ConnectionManager ReturnCount, and SessionRepositoryImplTest line-length findings; no oa-prjv/SkillsScreen findings remain).

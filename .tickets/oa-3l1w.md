@@ -1,6 +1,6 @@
 ---
 id: oa-3l1w
-status: open
+status: closed
 deps: []
 links: [oa-wmvc, oa-12ui]
 created: 2026-07-05T18:06:47Z
@@ -32,3 +32,9 @@ Acceptance Criteria:
 Verification:
 Run targeted file/language registry tests and compile after implementation.
 
+
+## Notes
+
+**2026-07-07T20:16:05Z**
+
+Implemented resource-backed file language display labels. SoraLanguageRegistry remains pure and returns technical TextMate scopes only; displayLabelResForScope maps known scopes and null/unknown fallback to R.string.file_language_* IDs. FileViewerScreen resolves the resource ID with stringResource at the UI boundary. Added string resources for known labels and plain text fallback. Added SoraLanguageRegistryTest coverage for known Kotlin/Markdown resource mappings and null/unknown plain-text fallback. Verification: ./gradlew :app:testDebugUnitTest --tests dev.blazelight.p4oc.ui.screens.files.editor.SoraLanguageRegistryTest; ./gradlew :app:compileDebugKotlin.

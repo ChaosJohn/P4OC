@@ -1,6 +1,6 @@
 ---
 id: oa-0mel
-status: open
+status: closed
 deps: []
 links: [oa-dygk, oa-wmvc, oa-3yk2, oa-12ui]
 created: 2026-07-05T18:06:47Z
@@ -50,3 +50,7 @@ Expected label model after oa-e6g3:
 
 Dependency note:
 The tab title source should switch cleanly after oa-e6g3's TabState.workspaceKey change. Until then, avoid further entrenching workspaceDirectory:String? in new title-formatting APIs.
+
+**2026-07-07T20:26:14Z**
+
+Implemented resource-backed tab and slash-command display metadata. Tab title formatting now takes TabTitleLabels populated with stringResource at the MainTabScreen/TabBar UI boundary, with compact tab workspace labels including dedicated tab_workspace_global. Built-in slash commands now carry no ViewModel hardcoded descriptions; builtInCommandDescriptionRes maps local built-ins to R.string.slash_command_* resources, and Compose boundaries resolve those descriptions for ChatInputBar slash filtering/suggestions and CommandPalette while preserving custom/MCP/skill/upstream descriptions. Slash suggestions now display the resolved description line consistently with the palette. Added CommandMetadataTest for built-in resource mapping, unknown fallback, and preservation of custom/MCP/skill/unknown-built-in descriptions; added TabBarTitleTest for route/workspace title cases. Verification: ./gradlew :app:testDebugUnitTest --tests dev.blazelight.p4oc.ui.components.command.CommandMetadataTest --tests dev.blazelight.p4oc.ui.tabs.TabBarTitleTest; ./gradlew :app:compileDebugKotlin.

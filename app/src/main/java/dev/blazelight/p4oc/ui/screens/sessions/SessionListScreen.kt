@@ -234,8 +234,6 @@ fun SessionListScreen(
                     }
                 }
             } else {
-                val expandedSessions = remember { mutableStateMapOf<String, Boolean>() }
-
                 // During search, flatten to matching sessions (tree roots only would
                 // hide matching child sessions whose parent is filtered out).
                 val sessionTree = remember(displayedSessions, uiState.searchQuery) {
@@ -358,7 +356,7 @@ fun SessionListScreen(
                             SessionTreeNode(
                                 node = node,
                                 depth = 0,
-                                expandedSessions = expandedSessions,
+                                expandedSessionIds = uiState.expandedSessionIds,
                                 sessionStatuses = uiState.sessionStatuses,
                                 sessionPresences = uiState.sessionPresences,
                                 showProjectChip = filterProjectId == null,
@@ -380,7 +378,7 @@ fun SessionListScreen(
                                 },
                                 onProjectClick = onProjectClick,
                                 onToggleExpand = { id ->
-                                    expandedSessions[id] = !(expandedSessions[id] ?: false)
+                                    viewModel.toggleSessionExpanded(id)
                                 }
                             )
                         }
@@ -568,7 +566,7 @@ private fun buildSessionTree(sessions: List<SessionWithProject>): List<SessionNo
 private fun SessionTreeNode(
     node: SessionNode,
     depth: Int,
-    expandedSessions: MutableMap<String, Boolean>,
+    expandedSessionIds: Set<String>,
     sessionStatuses: Map<String, SessionStatus>,
     sessionPresences: Map<String, SessionPresence>,
     showProjectChip: Boolean,
@@ -583,7 +581,7 @@ private fun SessionTreeNode(
 ) {
     val swp = node.sessionWithProject
     val session = swp.session
-    val isExpanded = expandedSessions[session.id] ?: false
+    val isExpanded = session.id in expandedSessionIds
     val hasChildren = node.children.isNotEmpty()
     val indentPadding: Dp = Sizing.treeIndent * depth
 
@@ -622,7 +620,7 @@ private fun SessionTreeNode(
                     SessionTreeNode(
                         node = child,
                         depth = depth + 1,
-                        expandedSessions = expandedSessions,
+                        expandedSessionIds = expandedSessionIds,
                         sessionStatuses = sessionStatuses,
                         sessionPresences = sessionPresences,
                         showProjectChip = showProjectChip,

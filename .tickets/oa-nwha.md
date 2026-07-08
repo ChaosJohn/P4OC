@@ -1,6 +1,6 @@
 ---
 id: oa-nwha
-status: open
+status: closed
 deps: []
 links: [oa-qy0f, oa-wmvc, oa-wxf2, oa-casy, oa-3yk2]
 created: 2026-07-05T18:03:15Z
@@ -31,3 +31,9 @@ Acceptance Criteria:
 Verification:
 Use targeted unit/androidTest/Compose tests per child ticket. Run compile/detekt only after implementation work, not as part of ticket creation.
 
+
+## Notes
+
+**2026-07-07T21:22:45Z**
+
+Epic completion summary: all ready child/follow-up tickets for the audited source-of-truth, resource-boundary, workspace identity, lifecycle restoration, terminal, slash-command, and stale-test contract families are now closed. Work completed includes resource-backed display metadata boundaries; explicit WorkspaceKey tab semantics with ambiguous legacy restore dropping; explicit terminal PTY request defaults; workspace-scoped session search APIs; busy chat follow-up upstream semantics; chat draft/attachment persistence and unavailable attachment recovery; session list search/expansion restoration; file explorer path/search/symbol restoration; file editor draft restoration; terminal clipboard affordance; terminal identity/capped transcript restoration; and the InputConnection keep/remove evaluation. Verification notes are recorded on child tickets; latest project-level verification during this closure: ./gradlew :app:compileDebugKotlin and ./gradlew :app:detekt both passed. tk ready had only oa-12ui and this epic before closing oa-12ui; no specific ready child remains for this epic.

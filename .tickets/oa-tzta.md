@@ -1,6 +1,6 @@
 ---
 id: oa-tzta
-status: open
+status: closed
 deps: []
 links: [oa-e6g3, oa-ua2q, oa-12ui]
 created: 2026-07-05T18:06:47Z
@@ -33,3 +33,9 @@ Acceptance Criteria:
 Verification:
 Run targeted FilesViewModel/FileExplorer tests and smoke test two workspaces/tabs with different explorer paths.
 
+
+## Notes
+
+**2026-07-07T21:05:42Z**
+
+Implemented file explorer lifecycle restoration with per-tab SavedStateHandle state. FilesViewModel now accepts SavedStateHandle, restores/persists currentPath, pathStack, local filename search query/active state, symbol mode, and symbol query; FileExplorerScreen now reads these from FilesUiState instead of local remember state. Restored non-blank symbol queries re-run search rather than persisting derived symbol results. Restored missing paths now fall back to the workspace root, clear the path stack, and surface a visible root-path restore warning via resource-backed UI text. Koin now registers both SessionListViewModel and FilesViewModel with SavedStateHandle. Added FilesViewModelEditTest coverage for same-tab SavedStateHandle recreation restoring path stack and filters, symbol query re-fetch, and missing restored path root fallback with user-visible restore error. Verification: ./gradlew :app:testDebugUnitTest --tests dev.blazelight.p4oc.ui.screens.files.FilesViewModelEditTest; ./gradlew :app:compileDebugKotlin; ./gradlew :app:detekt (fails only on the same 7 pre-existing findings: SessionListViewModel searchSessions LongMethod, ConnectionManager connectionCandidates ReturnCount, and SessionRepositoryImplTest line-length findings).

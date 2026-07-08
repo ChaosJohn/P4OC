@@ -32,7 +32,7 @@ import kotlinx.coroutines.launch
  * Each terminal tab gets its own instance with its own ptyId and websocket connection.
  */
 class TerminalViewModel constructor(
-    savedStateHandle: SavedStateHandle,
+    private val savedStateHandle: SavedStateHandle,
     private val context: Context,
     private val connectionManager: ConnectionManager,
     private val ptyWebSocket: PtyWebSocketClient
@@ -44,12 +44,22 @@ class TerminalViewModel constructor(
         private const val DEFAULT_COLS = 80
         private const val TRANSCRIPT_ROWS = 2000
         private const val RESIZE_DEBOUNCE_MS = 150L
+        private const val MAX_SAVED_TRANSCRIPT_CHARS = 64 * 1024
+        private const val KEY_TRANSCRIPT = "terminal_transcript"
+        private const val KEY_TITLE = "terminal_title"
+        private const val KEY_EXITED = "terminal_exited"
+        private const val KEY_RESTORED_MISSING = "terminal_restored_missing"
     }
 
     val ptyId: String = savedStateHandle.get<String>(Screen.Terminal.ARG_PTY_ID)
         ?: throw IllegalArgumentException("ptyId is required for TerminalViewModel")
 
-    private val _uiState = MutableStateFlow(TerminalUiState())
+    private val _uiState = MutableStateFlow(
+        TerminalUiState(
+            title = savedStateHandle[KEY_TITLE],
+            isExited = savedStateHandle[KEY_EXITED] ?: false,
+        )
+    )
     val uiState: StateFlow<TerminalUiState> = _uiState.asStateFlow()
 
     private val _terminalInvalidations = MutableSharedFlow<Unit>(extraBufferCapacity = 64)
@@ -78,6 +88,7 @@ class TerminalViewModel constructor(
 
     init {
         initEmulator()
+        replayRestoredTranscript()
         fetchPtyDetails()
         connectToSession()
         observeEvents()
@@ -107,6 +118,21 @@ class TerminalViewModel constructor(
                 }
         }
     }
+    private fun replayRestoredTranscript() {
+        val transcript = savedStateHandle.get<String>(KEY_TRANSCRIPT).orEmpty()
+        if (transcript.isEmpty()) return
+        val bytes = transcript.toByteArray()
+        emulator?.append(bytes, bytes.size)
+        requestTerminalInvalidation()
+    }
+
+    private fun appendAndPersist(chunk: String) {
+        val bytes = chunk.toByteArray()
+        emulator?.append(bytes, bytes.size)
+        val current = savedStateHandle.get<String>(KEY_TRANSCRIPT).orEmpty()
+        savedStateHandle[KEY_TRANSCRIPT] = (current + chunk).takeLast(MAX_SAVED_TRANSCRIPT_CHARS)
+        requestTerminalInvalidation()
+    }
 
     private fun fetchPtyDetails() {
         viewModelScope.launch {
@@ -115,8 +141,18 @@ class TerminalViewModel constructor(
             when (result) {
                 is ApiResult.Success -> {
                     val pty = result.data.find { it.id == ptyId }
-                    pty?.let {
-                        _uiState.update { state -> state.copy(title = it.title) }
+                    if (pty == null) {
+                        savedStateHandle[KEY_RESTORED_MISSING] = true
+                        _uiState.update {
+                            it.copy(
+                                error = "Terminal session is no longer available",
+                                isConnected = false,
+                                isConnecting = false,
+                            )
+                        }
+                    } else {
+                        savedStateHandle[KEY_TITLE] = pty.title
+                        _uiState.update { state -> state.copy(title = pty.title) }
                     }
                 }
                 is ApiResult.Error -> {
@@ -173,10 +209,7 @@ class TerminalViewModel constructor(
     private fun observeWebSocketOutput() {
         viewModelScope.launch {
             ptyWebSocket.output.collect { data ->
-                val em = emulator ?: return@collect
-                val bytes = data.toByteArray()
-                em.append(bytes, bytes.size)
-                requestTerminalInvalidation()
+                appendAndPersist(data)
             }
         }
     }
@@ -218,15 +251,15 @@ class TerminalViewModel constructor(
                 when (val event = scopedEvent.event) {
                     is OpenCodeEvent.PtyUpdated -> {
                         if (event.pty.id == ptyId) {
+                            savedStateHandle[KEY_TITLE] = event.pty.title
                             _uiState.update { it.copy(title = event.pty.title) }
                         }
                     }
                     is OpenCodeEvent.PtyExited -> {
                         if (event.id == ptyId) {
                             val exitMessage = "\r\n[Process exited with code ${event.exitCode}]\r\n"
-                            val bytes = exitMessage.toByteArray()
-                            emulator?.append(bytes, bytes.size)
-                            requestTerminalInvalidation()
+                            appendAndPersist(exitMessage)
+                            savedStateHandle[KEY_EXITED] = true
                             _uiState.update { it.copy(isExited = true) }
                         }
                     }

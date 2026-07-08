@@ -1,5 +1,6 @@
 package dev.blazelight.p4oc.ui.screens.files
 
+import androidx.lifecycle.SavedStateHandle
 import dev.blazelight.p4oc.data.files.FileCapabilities
 import dev.blazelight.p4oc.data.files.FileList
 import dev.blazelight.p4oc.data.files.FileOperationResult
@@ -134,22 +135,107 @@ class FilesViewModelEditTest {
         assertNull(vm.editState.value.pendingSavePreview)
     }
 
+    @Test
+    fun recreateWithSameSavedStateHandle_restoresDirtyEditBuffer() = runTest {
+        val savedStateHandle = SavedStateHandle()
+        val repo = FakeRepo(content = "original", hash = "hash-1")
+        val first = FilesViewModel(repo, testUploadCoordinator(repo), savedStateHandle)
+        first.loadFileContent("src/App.kt")
+
+        first.onEditorTextChange("changed")
+
+        val recreated = FilesViewModel(repo, testUploadCoordinator(repo), savedStateHandle)
+        val edit = recreated.editState.value
+
+        assertEquals("src/App.kt", edit.path)
+        assertEquals("original", edit.originalContent)
+        assertEquals("changed", edit.currentContent)
+        assertEquals("hash-1", edit.baselineHash)
+        assertTrue(edit.isDirty)
+    }
+
+    @Test
+    fun loadFileContent_preservesRestoredDirtyBufferForSamePath() = runTest {
+        val savedStateHandle = SavedStateHandle()
+        val repo = FakeRepo(content = "original", hash = "hash-1")
+        val first = FilesViewModel(repo, testUploadCoordinator(repo), savedStateHandle)
+        first.loadFileContent("src/App.kt")
+        first.onEditorTextChange("changed")
+
+        val recreated = FilesViewModel(repo, testUploadCoordinator(repo), savedStateHandle)
+        recreated.loadFileContent("src/App.kt")
+
+        assertEquals("changed", recreated.editState.value.currentContent)
+        assertTrue(recreated.editState.value.isDirty)
+    }
+
+    @Test
+    fun recreateWithSameSavedStateHandle_restoresPathStackAndFilters() = runTest {
+        val savedStateHandle = SavedStateHandle()
+        val repo = FakeRepo(content = "")
+        val first = FilesViewModel(repo, testUploadCoordinator(repo), savedStateHandle)
+
+        first.navigateTo("src")
+        first.navigateTo("src/main")
+        first.setSearchActive(true)
+        first.updateSearchQuery("view")
+        first.setSymbolMode(true)
+        first.updateSymbolQuery("Main")
+
+        val recreated = FilesViewModel(repo, testUploadCoordinator(repo), savedStateHandle)
+
+        assertEquals("src/main", recreated.uiState.value.currentPath)
+        assertTrue(recreated.uiState.value.isSearchActive)
+        assertEquals("view", recreated.uiState.value.searchQuery)
+        assertTrue(recreated.uiState.value.isSymbolMode)
+        assertEquals("Main", recreated.uiState.value.symbolQuery)
+        assertEquals(listOf("Main", "Main"), repo.symbolQueries)
+
+        recreated.navigateUp()
+
+        assertEquals("src", recreated.uiState.value.currentPath)
+    }
+
+    @Test
+    fun missingRestoredPathFallsBackToRootWithRestoreError() = runTest {
+        val savedStateHandle = SavedStateHandle(
+            mapOf(
+                "files_current_path" to "missing",
+                "files_path_stack" to arrayListOf(""),
+            )
+        )
+        val repo = FakeRepo(content = "", failedPaths = setOf("missing"))
+
+        val vm = FilesViewModel(repo, testUploadCoordinator(repo), savedStateHandle)
+
+        assertEquals("", vm.uiState.value.currentPath)
+        assertEquals("missing path", vm.uiState.value.pathRestoreError)
+    }
+
     private class FakeRepo(
         val content: String,
         val hash: String? = null,
+        val failedPaths: Set<String> = emptySet(),
         val writeResult: FileOperationResult<FileWriteResult> =
             FileOperationResult.Ok(FileWriteResult("p", hash = null)),
     ) : FileRepository {
         val writes = mutableListOf<FileWriteRequest>()
+        val symbolQueries = mutableListOf<String>()
 
         override suspend fun listFiles(path: String): FileOperationResult<FileList> =
-            FileOperationResult.Ok(FileList(path, emptyList()))
+            if (path in failedPaths) {
+                FileOperationResult.Failed("missing path")
+            } else {
+                FileOperationResult.Ok(FileList(path, emptyList()))
+            }
 
         override suspend fun readFile(path: String): FileOperationResult<FileContent> =
             FileOperationResult.Ok(FileContent(content = content, hash = hash))
 
-        override suspend fun searchSymbols(query: String): FileOperationResult<List<Symbol>> =
-            FileOperationResult.Ok(emptyList())
+        override suspend fun searchSymbols(query: String): FileOperationResult<List<Symbol>> {
+            symbolQueries += query
+            return FileOperationResult.Ok(emptyList())
+        }
 
         override suspend fun writeFile(request: FileWriteRequest): FileOperationResult<FileWriteResult> {
             writes += request

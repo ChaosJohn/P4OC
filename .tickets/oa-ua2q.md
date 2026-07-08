@@ -1,6 +1,6 @@
 ---
 id: oa-ua2q
-status: open
+status: closed
 deps: []
 links: [oa-tzta, oa-e6g3, oa-plno, oa-casy, oa-12ui]
 created: 2026-07-05T18:06:47Z
@@ -50,3 +50,7 @@ Implementation intent:
 - Missing legacy workspaceKey = null is not Global; it should recover/ask rather than silently fan out.
 
 Do not implement this by making every Sessions tab directory-scoped. The bug is global fan-out by omission/ambiguous null, not explicit top-level Global behavior.
+
+**2026-07-07T20:01:47Z**
+
+Implemented explicit session search split. Removed the public nullable-default searchSessions(query, directory = null) contract and replaced it with searchSessionsInWorkspace(query, directory) for scoped Directory search and searchSessionsGlobally(query) for explicit Global/all-project search. SessionListViewModel now chooses the explicit API based on the current search scope instead of relying on omitted/null broadening. Added SessionRepositoryImpl tests proving scoped search only queries the requested directory with two matching workspaces present, and explicit global search queries null plus known project worktrees and dedupes duplicate ids. Verification: ./gradlew :app:testDebugUnitTest --tests dev.blazelight.p4oc.data.session.SessionRepositoryImplTest.searchSessions*; ./gradlew :app:compileDebugKotlin.

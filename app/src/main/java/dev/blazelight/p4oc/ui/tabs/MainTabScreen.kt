@@ -128,6 +128,7 @@ fun MainTabScreen(
         settingsDataStore.setPersistedTabState(state)
     }
 
+    val tabTitleLabels = rememberTabTitleLabels()
     // Build tab titles and icons from current routes (updated inside pager pages).
     // Seed from startRoute so titles are correct even when pages are off-screen.
     val tabTitles = remember { mutableStateMapOf<String, String>() }
@@ -136,6 +137,7 @@ fun MainTabScreen(
         if (tab.id !in tabTitles) {
             tabTitles[tab.id] = getTitleForRoute(
                 route = tab.startRoute,
+                labels = tabTitleLabels,
                 sessionTitle = tab.sessionTitle,
                 workspaceKey = tab.workspaceKey,
             )
@@ -388,7 +390,9 @@ fun MainTabScreen(
                                         snackbarHostState.showSnackbar("Not connected to server")
                                         return@launch
                                     }
-                                    val result = safeApiCall { api.createPtySession(CreatePtyRequest()) }
+                                    val result = safeApiCall {
+                                        api.createPtySession(createPtyRequestForWorkspace(globalWorkspaceKey))
+                                    }
                                     when (result) {
                                         is ApiResult.Success -> {
                                             val ptyId = result.data.id
@@ -458,6 +462,7 @@ fun MainTabScreen(
                             if (route != null) {
                                 tabTitles[tab.id] = getTitleForRoute(
                                     route = route,
+                                    labels = tabTitleLabels,
                                     sessionTitle = tab.sessionTitle,
                                     workspaceKey = tab.workspaceKey,
                                 )
@@ -500,12 +505,7 @@ fun MainTabScreen(
                                             return@launch
                                         }
                                         val result = safeApiCall {
-                                            api.createPtySession(
-                                                CreatePtyRequest(
-                                                    cwd = (workspaceKey as? WorkspaceKey.Directory)?.value,
-                                                    title = terminalTitle(workspaceKey),
-                                                )
-                                            )
+                                            api.createPtySession(createPtyRequestForWorkspace(workspaceKey))
                                         }
                                         when (result) {
                                             is ApiResult.Success -> {
@@ -579,7 +579,7 @@ fun MainTabScreen(
             )
             openWorkspaceKeys.forEach { workspaceKey ->
                 FilesWorkspaceOption(
-                    title = workspaceLabel(workspaceKey) ?: "Missing workspace",
+                    title = workspaceLabel(workspaceKey, tabTitleLabels) ?: "Missing workspace",
                     subtitle = workspaceSubtitle(workspaceKey),
                     marker = "◇",
                     onClick = { openFilesTab(workspaceKey) },
@@ -588,6 +588,11 @@ fun MainTabScreen(
         }
     }
 }
+internal fun createPtyRequestForWorkspace(workspaceKey: WorkspaceKey): CreatePtyRequest = CreatePtyRequest(
+    cwd = (workspaceKey as? WorkspaceKey.Directory)?.value,
+    title = terminalTitle(workspaceKey),
+)
+
 private fun terminalTitle(workspaceKey: WorkspaceKey): String? = when (workspaceKey) {
     is WorkspaceKey.Directory -> workspaceKey.value.trimEnd('/').substringAfterLast('/').ifBlank { "Terminal" }
     WorkspaceKey.Global -> null

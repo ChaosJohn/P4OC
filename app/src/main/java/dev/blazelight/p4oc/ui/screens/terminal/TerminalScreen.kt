@@ -117,6 +117,7 @@ fun TerminalScreen(
                 onCtrlToggle = { ctrlActive = !ctrlActive },
                 onAltToggle = { altActive = !altActive },
                 enabled = uiState.isConnected,
+                onPaste = { currentTerminalView?.mTermSession?.onPasteTextFromClipboard() },
                 modifier = Modifier.fillMaxWidth()
             )
         }

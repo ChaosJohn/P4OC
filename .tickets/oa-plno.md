@@ -1,6 +1,6 @@
 ---
 id: oa-plno
-status: open
+status: closed
 deps: []
 links: [oa-ua2q, oa-12ui]
 created: 2026-07-05T18:06:47Z
@@ -33,3 +33,9 @@ Acceptance Criteria:
 Verification:
 Run targeted SessionListViewModel/Screen tests and smoke test switching between two workspace session lists.
 
+
+## Notes
+
+**2026-07-07T20:55:16Z**
+
+Implemented workspace/directory-scoped session list search and tree expansion restoration. SessionListViewModel now receives SavedStateHandle through Koin, persists search queries and expanded session ids by context (global vs directory), restores state on context changes/recreation, and exposes expandedSessionIds/toggleSessionExpanded so SessionListScreen no longer owns lifecycle-blind expansion state. Search clearing resets only the active context; switching contexts prevents query/expanded-session leakage and switching back restores the saved state. Added SessionListViewModelTest coverage for shared-SavedStateHandle recreation, different-directory isolation, blank-query clearing, and restored no-match search semantics. Verification: ./gradlew :app:testDebugUnitTest --tests dev.blazelight.p4oc.ui.screens.sessions.SessionListViewModelTest; ./gradlew :app:compileDebugKotlin; ./gradlew :app:detekt (fails only on pre-existing SessionListViewModel searchSessions LongMethod, ConnectionManager ReturnCount, and SessionRepositoryImplTest line-length findings; no oa-plno-specific findings remain).

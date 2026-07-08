@@ -150,27 +150,19 @@ class ChatViewModel constructor(
 
         /**
          * Built-in OpenCode commands that aren't returned by the /command API endpoint.
-         * These are hardcoded based on OpenCode documentation.
+         * Localized descriptions are resolved at Compose display boundaries.
          */
         private val BUILTIN_COMMANDS = listOf(
-            Command(
-                name = "compact",
-                description = "Compact the conversation to reduce context size",
-                source = CommandSource.BuiltIn
-            ),
-            Command(name = "clear", description = "Clear the conversation history", source = CommandSource.BuiltIn),
-            Command(name = "new", description = "Start a new conversation", source = CommandSource.BuiltIn),
-            Command(name = "undo", description = "Undo the last change", source = CommandSource.BuiltIn),
-            Command(name = "redo", description = "Redo the last undone change", source = CommandSource.BuiltIn),
-            Command(name = "share", description = "Share the current conversation", source = CommandSource.BuiltIn),
-            Command(
-                name = "init",
-                description = "Initialize OpenCode for this project",
-                source = CommandSource.BuiltIn
-            ),
-            Command(name = "help", description = "Show help information", source = CommandSource.BuiltIn),
-            Command(name = "connect", description = "Connect to a provider", source = CommandSource.BuiltIn),
-            Command(name = "bug", description = "Report a bug", source = CommandSource.BuiltIn),
+            Command(name = "compact", source = CommandSource.BuiltIn),
+            Command(name = "clear", source = CommandSource.BuiltIn),
+            Command(name = "new", source = CommandSource.BuiltIn),
+            Command(name = "undo", source = CommandSource.BuiltIn),
+            Command(name = "redo", source = CommandSource.BuiltIn),
+            Command(name = "share", source = CommandSource.BuiltIn),
+            Command(name = "init", source = CommandSource.BuiltIn),
+            Command(name = "help", source = CommandSource.BuiltIn),
+            Command(name = "connect", source = CommandSource.BuiltIn),
+            Command(name = "bug", source = CommandSource.BuiltIn),
         )
     }
 

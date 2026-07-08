@@ -1,6 +1,6 @@
 ---
 id: oa-n1fs
-status: open
+status: closed
 deps: []
 links: [oa-4olr, oa-x9pe, oa-12ui]
 created: 2026-07-05T18:06:47Z
@@ -33,3 +33,9 @@ Acceptance Criteria:
 Verification:
 Run targeted terminal ViewModel/UI tests and smoke test tab switch/recreate with an active terminal.
 
+
+## Notes
+
+**2026-07-07T21:20:41Z**
+
+Implemented terminal tab lifecycle identity/scrollback preservation around the existing explicit ptyId route argument. TerminalViewModel now keeps ptyId as the stable terminal identity, restores/persists title and exited state via SavedStateHandle, and replays a capped 64KiB transcript tail into a fresh TerminalEmulator on VM recreation to preserve visible context without risking SavedStateHandle/Bundle overflow. Incoming websocket output and local process-exit messages append to the emulator and the capped transcript snapshot. PTY update/exited events are scoped to this ptyId. Restoring a tab whose ptyId is not returned by listPtySessions now marks it unavailable with a human-readable error instead of silently creating or substituting a new PTY. Verification: ./gradlew :app:compileDebugKotlin; ./gradlew :app:detekt. Manual smoke should still verify visual scroll position/selection details on device, but identity, capped transcript replay, and no-silent-new-PTY behavior are implemented in the VM.

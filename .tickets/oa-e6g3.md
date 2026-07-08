@@ -1,6 +1,6 @@
 ---
 id: oa-e6g3
-status: open
+status: closed
 deps: [oa-qv8d]
 links: [oa-tzta, oa-ua2q, oa-casy, oa-12ui]
 created: 2026-07-05T18:06:47Z
@@ -90,3 +90,11 @@ Blocked on oa-qv8d. Do not resume implementation until plus-button workspace sem
 **2026-07-06T12:54:34Z**
 
 Follow-up cleanup: removed the compile-red speculative WorkspaceKey contract tests from TabManagerPersistenceTest while oa-e6g3 is blocked on oa-qv8d. Left existing persistence tests compiling against current production API. Verified with ./gradlew :app:testDebugUnitTest --tests dev.blazelight.p4oc.ui.tabs.TabManagerPersistenceTest.
+
+**2026-07-07T19:53:56Z**
+
+Implemented by WorkspaceKey cutover and follow-up restore hardening. TabManager.createTab now requires a non-null WorkspaceKey with no nullable workspaceDirectory default; TabState stores WorkspaceKey?; persistence writes PersistedWorkspaceKey so explicit Global is distinct from missing/null; restoreState drops current-version tabs with missing workspaceKey and returns Empty if none survive; legacy migration drops unresolved tabs and retains activeTabId only when the active tab survived. Current MainTabScreen uses explicit WorkspaceKey.Global for top-level Sessions and Terminal, Files chooser offers Global and open Directory workspaces, and contextual terminal/sub-session opens preserve the source WorkspaceKey. Verification: ./gradlew :app:testDebugUnitTest --tests dev.blazelight.p4oc.ui.tabs.TabManagerPersistenceTest, ./gradlew :app:compileDebugKotlin, ./gradlew :app:detekt.
+
+**2026-07-07T19:54:12Z**
+
+Acceptance deviation documented after closure: the original notes proposed an in-app recovery state for workspace-critical legacy tabs with missing workspace identity. The implemented and user-approved policy is intentionally simpler: ambiguous restored tabs are dropped during migration/restore; if no tabs survive, the app falls back to the normal fresh explicit Global tab path. This still satisfies the invariant that missing workspace identity is never silently converted to Global, but recovery is reset/drop rather than an in-app chooser UI.

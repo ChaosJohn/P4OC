@@ -196,6 +196,28 @@
     <string name="chat_disabled_empty">Message is empty</string>
     <string name="chat_queued_prefix">queued</string>
     <string name="vcs_branch_prefix">◈</string>
+    <string name="slash_command_compact_desc">Compact the conversation to reduce context size</string>
+    <string name="slash_command_clear_desc">Clear the conversation history</string>
+    <string name="slash_command_new_desc">Start a new conversation</string>
+    <string name="slash_command_undo_desc">Undo the last change</string>
+    <string name="slash_command_redo_desc">Redo the last undone change</string>
+    <string name="slash_command_share_desc">Share the current conversation</string>
+    <string name="slash_command_init_desc">Initialize OpenCode for this project</string>
+    <string name="slash_command_help_desc">Show help information</string>
+    <string name="slash_command_connect_desc">Connect to a provider</string>
+    <string name="slash_command_bug_desc">Report a bug</string>
+    <string name="slash_commands_loading">Loading workspace commands...</string>
+    <string name="slash_commands_no_match">No commands match %1$s</string>
+    <string name="slash_commands_retry_loading">Retry loading commands</string>
+
+    <!-- Tabs -->
+    <string name="tab_title_fallback">Tab</string>
+    <string name="tab_title_chat">Chat</string>
+    <string name="tab_title_files">Files</string>
+    <string name="tab_title_file">File</string>
+    <string name="tab_title_projects">Projects</string>
+    <string name="tab_workspace_global">Global</string>
+    <string name="tab_workspace_session">Session</string>
     
     <!-- Common -->
     <string name="back">Back</string>
@@ -229,6 +251,7 @@
     <string name="files_no_matching_files">-- no matching files --</string>
     <string name="files_empty_folder">-- empty folder --</string>
     <string name="files_symbol_search_failed">Symbol search failed: %1$s</string>
+    <string name="files_restored_path_unavailable">Restored path is unavailable; showing workspace root. %1$s</string>
     <string name="files_create">Create</string>
     <string name="files_new_file">New file</string>
     <string name="files_new_folder">New folder</string>
@@ -355,6 +378,22 @@
     <string name="skills_resources">Resources</string>
     <string name="skills_no_skills">No skills configured</string>
     <string name="skills_appear_here">MCP servers will appear here once configured</string>
+    <string name="skills_status_connected">Connected</string>
+    <string name="skills_status_disabled">Disabled</string>
+    <string name="skills_status_failed">Connection failed</string>
+    <string name="skills_status_needs_auth">Authentication required</string>
+    <string name="skills_status_needs_client_registration">Client registration required</string>
+    <string name="skills_status_unknown">Unknown status</string>
+    <string name="skills_error_not_connected">Not connected</string>
+    <string name="skills_error_generic">Unable to load skills</string>
+    <plurals name="skills_tools_count">
+        <item quantity="one">%d tool</item>
+        <item quantity="other">%d tools</item>
+    </plurals>
+    <plurals name="skills_resources_count">
+        <item quantity="one">%d resource</item>
+        <item quantity="other">%d resources</item>
+    </plurals>
     
     <!-- Provider Config Screen -->
     <string name="provider_config_title">Provider Configuration</string>
@@ -573,6 +612,11 @@
     <string name="progress">Progress</string>
     <string name="progress_count">%1$d / %2$d</string>
     <string name="percent_complete">%d%% complete</string>
+    <string name="todo_status_pending">pending</string>
+    <string name="todo_status_in_progress">in progress</string>
+    <string name="todo_status_completed">completed</string>
+    <string name="todo_status_cancelled">cancelled</string>
+    <string name="todo_status_unknown">unknown</string>
     <string name="no_active_todos">No active todos</string>
     <string name="agent_no_tasks">The agent hasn\'t created any tasks yet</string>
     
@@ -696,6 +740,14 @@
 
     <!-- Notification permissions -->
     <string name="notification_permission_required">Permission Required</string>
+    <string name="notification_channel_user_input_name">User Input Required</string>
+    <string name="notification_channel_user_input_desc">Notifications when AI needs your input</string>
+    <string name="notification_channel_completion_name">Assistant completed</string>
+    <string name="notification_channel_completion_desc">Notifications when the assistant finishes a response</string>
+    <string name="notification_question_title">Question from AI</string>
+    <string name="notification_question_fallback">AI has a question</string>
+    <string name="notification_completion_title">Assistant finished</string>
+    <string name="notification_completion_fallback">Response complete</string>
     <string name="notification_permission_denied_message">Notification permission was denied. To receive notifications when the AI needs your input, enable notifications in your device settings.</string>
     <string name="notification_open_settings">Open Settings</string>
     <string name="notification_permission_not_granted">Notification permission not granted</string>
@@ -734,6 +786,19 @@
     <string name="upload_sheet_done_title">[ Upload complete ]</string>
     <string name="upload_sheet_progress">Uploading %1$d of %2$d: %3$s — %4$s / %5$s</string>
     <string name="upload_sheet_summary">%1$d uploaded · %2$d failed</string>
+    <!-- File language labels -->
+    <string name="file_language_kotlin">kotlin</string>
+    <string name="file_language_json">json</string>
+    <string name="file_language_python">python</string>
+    <string name="file_language_typescript">typescript</string>
+    <string name="file_language_yaml">yaml</string>
+    <string name="file_language_toml">toml</string>
+    <string name="file_language_shell">shell</string>
+    <string name="file_language_env">env</string>
+    <string name="file_language_xml">xml</string>
+    <string name="file_language_markdown">markdown</string>
+    <string name="file_language_plain_text">plain text</string>
+
     <string name="upload_sheet_cancel">Cancel</string>
     <string name="upload_sheet_dismiss">Dismiss</string>
     <string name="upload_sheet_retry_failed">Retry failed</string>

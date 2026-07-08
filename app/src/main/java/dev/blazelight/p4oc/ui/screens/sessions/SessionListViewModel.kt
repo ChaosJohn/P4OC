@@ -1,5 +1,6 @@
 package dev.blazelight.p4oc.ui.screens.sessions
 
+import androidx.lifecycle.SavedStateHandle
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
 import dev.blazelight.p4oc.data.remote.dto.ProjectDto
@@ -22,6 +23,7 @@ import kotlinx.coroutines.withTimeoutOrNull
 
 class SessionListViewModel constructor(
     private val sessionRepository: SessionRepositoryImpl,
+    private val savedStateHandle: SavedStateHandle = SavedStateHandle(),
 ) : ViewModel() {
 
     private val _uiState = MutableStateFlow(SessionListUiState())
@@ -30,9 +32,35 @@ class SessionListViewModel constructor(
     private companion object {
         const val LOAD_TIMEOUT_MS = 30_000L
         const val SEARCH_DEBOUNCE_MS = 300L
+        const val KEY_SEARCH_QUERIES = "session_list_search_queries"
+        const val KEY_EXPANDED_SESSIONS = "session_list_expanded_sessions"
+        const val GLOBAL_CONTEXT_KEY = "__global__"
     }
 
     private var searchJob: Job? = null
+    private val searchQueriesByContext = restoredStringMap(KEY_SEARCH_QUERIES)
+    private val expandedSessionIdsByContext = restoredStringSetMap(KEY_EXPANDED_SESSIONS)
+
+    private fun restoredStringMap(key: String): MutableMap<String, String> =
+        savedStateHandle.get<HashMap<String, String>>(key)?.toMutableMap() ?: mutableMapOf()
+
+    private fun restoredStringSetMap(key: String): MutableMap<String, Set<String>> =
+        savedStateHandle.get<HashMap<String, ArrayList<String>>>(key)
+            ?.mapValues { (_, value) -> value.toSet() }
+            ?.toMutableMap()
+            ?: mutableMapOf()
+
+    private fun persistSearchQueries() {
+        savedStateHandle[KEY_SEARCH_QUERIES] = HashMap(searchQueriesByContext)
+    }
+
+    private fun persistExpandedSessions() {
+        savedStateHandle[KEY_EXPANDED_SESSIONS] = HashMap(
+            expandedSessionIdsByContext.mapValues { (_, value) -> ArrayList(value) },
+        )
+    }
+
+    private fun contextKey(directory: String?): String = directory ?: GLOBAL_CONTEXT_KEY
 
     init {
         viewModelScope.launch {
@@ -127,6 +155,9 @@ class SessionListViewModel constructor(
     }
 
     fun updateSearchQuery(query: String, directory: String?) {
+        val key = contextKey(directory)
+        searchQueriesByContext[key] = query
+        persistSearchQueries()
         _uiState.update { state ->
             state.copy(
                 searchQuery = query,
@@ -139,11 +170,31 @@ class SessionListViewModel constructor(
     }
 
     fun updateSearchDirectory(directory: String?) {
-        val query = _uiState.value.searchQuery
-        _uiState.update { it.copy(searchDirectory = directory) }
-        if (query.isNotBlank()) {
-            searchSessions(query, directory, debounce = false)
+        val key = contextKey(directory)
+        val restoredQuery = searchQueriesByContext[key].orEmpty()
+        val restoredExpanded = expandedSessionIdsByContext[key].orEmpty()
+        _uiState.update {
+            it.copy(
+                searchDirectory = directory,
+                searchQuery = restoredQuery,
+                searchResults = emptyList(),
+                serverSearchQuery = null,
+                searchError = null,
+                expandedSessionIds = restoredExpanded,
+            )
         }
+        if (restoredQuery.isNotBlank()) {
+            searchSessions(restoredQuery, directory, debounce = false)
+        }
+    }
+
+    fun toggleSessionExpanded(sessionId: String) {
+        val key = contextKey(_uiState.value.searchDirectory)
+        val current = _uiState.value.expandedSessionIds
+        val next = if (sessionId in current) current - sessionId else current + sessionId
+        expandedSessionIdsByContext[key] = next
+        persistExpandedSessions()
+        _uiState.update { it.copy(expandedSessionIds = next) }
     }
 
     private fun searchSessions(query: String, directory: String?, debounce: Boolean) {
@@ -164,7 +215,13 @@ class SessionListViewModel constructor(
         searchJob = viewModelScope.launch {
             if (debounce) delay(SEARCH_DEBOUNCE_MS)
             _uiState.update { it.copy(isSearching = true, searchError = null) }
-            val result = runCatching { sessionRepository.searchSessions(trimmed, directory) }
+            val result = runCatching {
+                if (directory == null) {
+                    sessionRepository.searchSessionsGlobally(trimmed)
+                } else {
+                    sessionRepository.searchSessionsInWorkspace(trimmed, directory)
+                }
+            }
             result.fold(
                 onSuccess = { sessions ->
                     _uiState.update { state ->
@@ -354,6 +411,7 @@ data class SessionListUiState(
     val newSessionId: String? = null,
     val newSessionDirectory: String? = null,
     val shareUrl: String? = null,
+    val expandedSessionIds: Set<String> = emptySet(),
     val error: String? = null
 ) {
     val isSearchActive: Boolean

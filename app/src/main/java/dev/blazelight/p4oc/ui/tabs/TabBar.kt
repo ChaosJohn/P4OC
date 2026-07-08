@@ -16,8 +16,10 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.RectangleShape
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.platform.testTag
+import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.semantics.Role
 import androidx.compose.ui.text.style.TextOverflow
+import dev.blazelight.p4oc.R
 import dev.blazelight.p4oc.domain.model.SessionConnectionState
 import dev.blazelight.p4oc.domain.model.SessionPresence
 import dev.blazelight.p4oc.domain.server.WorkspaceKey
@@ -204,34 +206,62 @@ fun getIconForRoute(route: String?): ImageVector {
 /**
  * Helper to get appropriate title for a screen route.
  */
+data class TabTitleLabels(
+    val fallbackTab: String,
+    val sessions: String,
+    val chat: String,
+    val files: String,
+    val file: String,
+    val terminal: String,
+    val settings: String,
+    val projects: String,
+    val globalWorkspace: String,
+    val sessionWorkspace: String,
+)
+
+@Composable
+fun rememberTabTitleLabels(): TabTitleLabels = TabTitleLabels(
+    fallbackTab = stringResource(R.string.tab_title_fallback),
+    sessions = stringResource(R.string.sessions_title),
+    chat = stringResource(R.string.tab_title_chat),
+    files = stringResource(R.string.tab_title_files),
+    file = stringResource(R.string.tab_title_file),
+    terminal = stringResource(R.string.terminal_title),
+    settings = stringResource(R.string.settings_title),
+    projects = stringResource(R.string.tab_title_projects),
+    globalWorkspace = stringResource(R.string.tab_workspace_global),
+    sessionWorkspace = stringResource(R.string.tab_workspace_session),
+)
+
 fun getTitleForRoute(
     route: String?,
+    labels: TabTitleLabels,
     sessionTitle: String? = null,
     workspaceKey: WorkspaceKey? = null,
 ): String {
     return when {
-        route == null -> "Tab"
-        route == "sessions" -> withWorkspaceSuffix("Sessions", workspaceKey)
-        route.startsWith("sessions?") -> withWorkspaceSuffix("Sessions", workspaceKey)
-        route.startsWith("chat/") -> withWorkspaceSuffix(sessionTitle ?: "Chat", workspaceKey)
-        route == "files" -> workspaceLabel(workspaceKey) ?: "Files"
-        route.startsWith("files/") -> workspaceLabel(workspaceKey) ?: "File"
-        route.startsWith("terminal/") -> withWorkspaceSuffix(sessionTitle ?: "Terminal", workspaceKey)
-        route == "settings" -> "Settings"
-        route.startsWith("settings/") -> "Settings"
-        route == "projects" -> "Projects"
-        else -> "Tab"
+        route == null -> labels.fallbackTab
+        route == "sessions" -> withWorkspaceSuffix(labels.sessions, workspaceKey, labels)
+        route.startsWith("sessions?") -> withWorkspaceSuffix(labels.sessions, workspaceKey, labels)
+        route.startsWith("chat/") -> withWorkspaceSuffix(sessionTitle ?: labels.chat, workspaceKey, labels)
+        route == "files" -> workspaceLabel(workspaceKey, labels) ?: labels.files
+        route.startsWith("files/") -> workspaceLabel(workspaceKey, labels) ?: labels.file
+        route.startsWith("terminal/") -> withWorkspaceSuffix(sessionTitle ?: labels.terminal, workspaceKey, labels)
+        route == "settings" -> labels.settings
+        route.startsWith("settings/") -> labels.settings
+        route == "projects" -> labels.projects
+        else -> labels.fallbackTab
     }
 }
 
-private fun withWorkspaceSuffix(title: String, workspaceKey: WorkspaceKey?): String {
-    val workspace = workspaceLabel(workspaceKey) ?: return title
+private fun withWorkspaceSuffix(title: String, workspaceKey: WorkspaceKey?, labels: TabTitleLabels): String {
+    val workspace = workspaceLabel(workspaceKey, labels) ?: return title
     return "$title · $workspace"
 }
 
-fun workspaceLabel(workspaceKey: WorkspaceKey?): String? = when (workspaceKey) {
+fun workspaceLabel(workspaceKey: WorkspaceKey?, labels: TabTitleLabels): String? = when (workspaceKey) {
     is WorkspaceKey.Directory -> workspaceKey.value.trimEnd('/').substringAfterLast('/').ifBlank { workspaceKey.value }
-    WorkspaceKey.Global -> "Global"
-    is WorkspaceKey.SessionScoped -> "Session"
+    WorkspaceKey.Global -> labels.globalWorkspace
+    is WorkspaceKey.SessionScoped -> labels.sessionWorkspace
     null -> null
 }

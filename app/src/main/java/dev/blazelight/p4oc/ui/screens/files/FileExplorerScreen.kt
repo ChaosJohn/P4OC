@@ -67,10 +67,10 @@ fun FileExplorerScreen(
     val uiState by viewModel.uiState.collectAsStateWithLifecycle()
     val symbolResults by viewModel.symbolResults.collectAsStateWithLifecycle()
     val uploadState by viewModel.uploadState.collectAsStateWithLifecycle()
-    var searchQuery by remember { mutableStateOf("") }
-    var isSearchActive by remember { mutableStateOf(false) }
-    var isSymbolMode by remember { mutableStateOf(false) }
-    var symbolQuery by remember { mutableStateOf("") }
+    val searchQuery = uiState.searchQuery
+    val isSearchActive = uiState.isSearchActive
+    val isSymbolMode = uiState.isSymbolMode
+    val symbolQuery = uiState.symbolQuery
     var createDialog by remember { mutableStateOf<FileCreateKind?>(null) }
     var renameTarget by remember { mutableStateOf<FileNode?>(null) }
     var deleteTarget by remember { mutableStateOf<FileNode?>(null) }
@@ -105,10 +105,7 @@ fun FileExplorerScreen(
                     title = "",
                     onNavigateBack = {
                         if (isSearchActive || isSymbolMode) {
-                            isSearchActive = false
-                            isSymbolMode = false
-                            searchQuery = ""
-                            symbolQuery = ""
+                            viewModel.clearFilters()
                         } else if (uiState.currentPath.isNotBlank()) {
                             viewModel.navigateUp()
                         } else {
@@ -119,10 +116,7 @@ fun FileExplorerScreen(
                         if (isSymbolMode) {
                             OutlinedTextField(
                                 value = symbolQuery,
-                                onValueChange = {
-                                    symbolQuery = it
-                                    viewModel.searchSymbols(it)
-                                },
+                                onValueChange = viewModel::updateSymbolQuery,
                                 placeholder = {
                                     Text(
                                         stringResource(R.string.symbol_search_hint),
@@ -142,7 +136,7 @@ fun FileExplorerScreen(
                         } else if (isSearchActive) {
                             OutlinedTextField(
                                 value = searchQuery,
-                                onValueChange = { searchQuery = it },
+                                onValueChange = viewModel::updateSearchQuery,
                                 placeholder = {
                                     Text(
                                         stringResource(R.string.files_search_placeholder),
@@ -195,7 +189,7 @@ fun FileExplorerScreen(
                                 onCreateFolder = { createDialog = FileCreateKind.Folder },
                             )
                             IconButton(
-                                onClick = { isSearchActive = true },
+                                onClick = { viewModel.setSearchActive(true) },
                                 modifier = Modifier.size(Sizing.iconButtonMd)
                             ) {
                                 Icon(
@@ -206,7 +200,7 @@ fun FileExplorerScreen(
                                 )
                             }
                             IconButton(
-                                onClick = { isSymbolMode = true },
+                                onClick = { viewModel.setSymbolMode(true) },
                                 modifier = Modifier.size(Sizing.iconButtonMd)
                             ) {
                                 Icon(
@@ -261,6 +255,25 @@ fun FileExplorerScreen(
                 .fillMaxSize()
                 .padding(padding)
         ) {
+            if (uiState.pathRestoreError != null) {
+                Surface(
+                    modifier = Modifier
+                        .align(Alignment.TopCenter)
+                        .padding(Spacing.md),
+                    color = theme.error.copy(alpha = 0.12f),
+                    shape = RectangleShape,
+                ) {
+                    Text(
+                        text = stringResource(
+                            R.string.files_restored_path_unavailable,
+                            uiState.pathRestoreError.orEmpty(),
+                        ),
+                        color = theme.error,
+                        modifier = Modifier.padding(Spacing.sm),
+                    )
+                }
+            }
+
             if (isSymbolMode) {
                 // Symbol search results
                 if (symbolQuery.isBlank()) {

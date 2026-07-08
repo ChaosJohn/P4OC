@@ -21,9 +21,11 @@ import androidx.compose.ui.graphics.RectangleShape
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.semantics.Role
+import androidx.compose.ui.text.TextRange
 import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.text.input.PasswordVisualTransformation
+import androidx.compose.ui.text.input.TextFieldValue
 import androidx.compose.ui.text.input.VisualTransformation
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
@@ -170,6 +172,11 @@ fun ServerScreen(
     }
 }
 
+internal fun serverUrlTextFieldValue(url: String): TextFieldValue = TextFieldValue(
+    text = url,
+    selection = TextRange(url.length),
+)
+
 @Composable
 private fun RemoteServerSection(
     url: String,
@@ -185,6 +192,13 @@ private fun RemoteServerSection(
 ) {
     val theme = LocalOpenCodeTheme.current
     var passwordVisible by remember { mutableStateOf(false) }
+    var urlFieldValue by remember { mutableStateOf(serverUrlTextFieldValue(url)) }
+
+    LaunchedEffect(url) {
+        if (url != urlFieldValue.text) {
+            urlFieldValue = serverUrlTextFieldValue(url)
+        }
+    }
 
     Surface(
         color = theme.backgroundElement,
@@ -209,8 +223,11 @@ private fun RemoteServerSection(
             )
 
             OutlinedTextField(
-                value = url,
-                onValueChange = onUrlChange,
+                value = urlFieldValue,
+                onValueChange = { value ->
+                    urlFieldValue = value
+                    onUrlChange(value.text)
+                },
                 label = { Text(stringResource(R.string.field_server_url), fontFamily = FontFamily.Monospace) },
                 placeholder = { Text(
                     stringResource(R.string.field_server_url_placeholder),

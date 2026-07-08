@@ -1,5 +1,6 @@
 package dev.blazelight.p4oc.di
 
+import androidx.lifecycle.SavedStateHandle
 import dev.blazelight.p4oc.core.datastore.SettingsDataStore
 import dev.blazelight.p4oc.core.haptic.HapticFeedback
 import dev.blazelight.p4oc.core.network.ConnectionManager
@@ -126,8 +127,10 @@ val viewModelModule = module {
             get<ModelSelectionCoordinator>()
         )
     }
-    viewModel { params -> SessionListViewModel(params.get<SessionRepositoryImpl>()) }
-    viewModel { params -> FilesViewModel(params.get<FileRepository>(), params.get()) }
+    viewModel { params ->
+        SessionListViewModel(params.get<SessionRepositoryImpl>(), get<SavedStateHandle>())
+    }
+    viewModel { params -> FilesViewModel(params.get<FileRepository>(), params.get(), get<SavedStateHandle>()) }
     viewModel { params -> TerminalViewModel(params.get(), androidContext(), get(), get()) }
 }
 

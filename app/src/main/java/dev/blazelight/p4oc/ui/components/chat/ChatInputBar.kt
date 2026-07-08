@@ -38,6 +38,7 @@ import androidx.compose.ui.text.style.TextOverflow
 import dev.blazelight.p4oc.R
 import dev.blazelight.p4oc.domain.model.Command
 import dev.blazelight.p4oc.ui.components.TuiLoadingIndicator
+import dev.blazelight.p4oc.ui.components.command.rememberResolvedCommandMetadata
 import dev.blazelight.p4oc.ui.theme.LocalOpenCodeTheme
 import dev.blazelight.p4oc.ui.theme.Sizing
 import dev.blazelight.p4oc.ui.theme.Spacing
@@ -119,15 +120,16 @@ fun ChatInputBar(
         !enabled -> disconnectedDescription
         else -> emptyDescription
     }
+    val resolvedCommands = rememberResolvedCommandMetadata(commands)
 
     // Show slash commands popup when input starts with "/"
     val showSlashCommands = currentText.startsWith("/") && !currentText.contains(" ")
-    val filteredCommands = remember(commands, currentText) {
+    val filteredCommands = remember(resolvedCommands, currentText) {
         val searchTerm = currentText.removePrefix("/").lowercase()
         val matches = if (searchTerm.isEmpty()) {
-            commands
+            resolvedCommands
         } else {
-            commands.filter { cmd ->
+            resolvedCommands.filter { cmd ->
                 cmd.name.lowercase().contains(searchTerm) ||
                     cmd.description?.lowercase()?.contains(searchTerm) == true
             }
@@ -382,7 +384,7 @@ fun ChatInputBar(
         if (showSlashCommands) {
             SlashCommandsPopup(
                 state = SlashCommandsPopupState(
-                    commands = commands,
+                    commands = resolvedCommands,
                     filter = currentText,
                     isLoading = isLoadingCommands,
                     error = commandLoadError,

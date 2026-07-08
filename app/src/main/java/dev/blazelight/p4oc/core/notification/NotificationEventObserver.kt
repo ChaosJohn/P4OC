@@ -102,8 +102,8 @@ class NotificationEventObserver constructor(
             }
             is OpenCodeEvent.QuestionAsked -> {
                 if (!cachedSettings.questions) return
-                val firstQuestion = event.request.questions.firstOrNull()?.question ?: "AI has a question"
-                AppLog.d(TAG, "Question asked in background: $firstQuestion")
+                val firstQuestion = event.request.questions.firstOrNull()?.question
+                AppLog.d(TAG, "Question asked in background")
                 notificationHelper.showQuestionNotification(
                     sessionId = event.request.sessionID,
                     question = firstQuestion
