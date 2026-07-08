@@ -11,7 +11,7 @@ object ServerUrl {
         return buildUrl(
             scheme = components.scheme,
             host = components.formattedHost,
-            port = components.port,
+            port = components.explicitPort,
             path = components.path,
         )
     }
@@ -21,7 +21,7 @@ object ServerUrl {
         return buildUrl(
             scheme = components.scheme,
             host = components.formattedHost,
-            port = components.port,
+            port = components.canonicalPort,
             path = components.path,
         )
     }
@@ -29,7 +29,8 @@ object ServerUrl {
     private data class ParsedServerUrl(
         val scheme: String,
         val formattedHost: String,
-        val port: Int,
+        val explicitPort: Int?,
+        val canonicalPort: Int,
         val path: String,
     )
 
@@ -45,10 +46,8 @@ object ServerUrl {
 
         val host = parsed.host.substringBefore('%').lowercase()
         val formattedHost = if (':' in host) "[$host]" else host
-        val port = when {
-            hasExplicitPort(sanitizedCandidate) -> parsed.port
-            else -> DEFAULT_PORT
-        }
+        val explicitPort = parsed.port.takeIf { hasExplicitPort(sanitizedCandidate) }
+        val canonicalPort = explicitPort ?: DEFAULT_PORT
         val path = parsed.encodedPath
             .takeUnless { it == "/" }
             ?.trimEnd('/')
@@ -57,7 +56,8 @@ object ServerUrl {
         return ParsedServerUrl(
             scheme = scheme,
             formattedHost = formattedHost,
-            port = port,
+            explicitPort = explicitPort,
+            canonicalPort = canonicalPort,
             path = path,
         )
     }
@@ -65,10 +65,10 @@ object ServerUrl {
     private fun buildUrl(
         scheme: String,
         host: String,
-        port: Int,
+        port: Int?,
         path: String,
     ): String {
-        val base = "$scheme://$host:$port"
+        val base = if (port == null) "$scheme://$host" else "$scheme://$host:$port"
         return if (path.isEmpty()) base else "$base$path"
     }
 

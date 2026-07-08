@@ -8,8 +8,8 @@ import org.junit.Test
 class ServerUrlTest {
 
     @Test
-    fun `bare host defaults to http and 4096`() {
-        assertEquals("http://example.com:4096", ServerUrl.normalizeConnectUrl("example.com"))
+    fun `bare host defaults to http without persisted port`() {
+        assertEquals("http://example.com", ServerUrl.normalizeConnectUrl("example.com"))
     }
 
     @Test
@@ -18,19 +18,19 @@ class ServerUrlTest {
     }
 
     @Test
-    fun `explicit http without port uses opencode default port`() {
-        assertEquals("http://example.com:4096", ServerUrl.normalizeConnectUrl("http://example.com"))
+    fun `explicit http without port preserves absent port`() {
+        assertEquals("http://example.com", ServerUrl.normalizeConnectUrl("http://example.com"))
     }
 
     @Test
-    fun `explicit https without port uses opencode default port`() {
-        assertEquals("https://example.com:4096", ServerUrl.normalizeConnectUrl("https://example.com"))
+    fun `explicit https without port preserves absent port`() {
+        assertEquals("https://example.com", ServerUrl.normalizeConnectUrl("https://example.com"))
     }
 
     @Test
     fun `path is preserved for connect url`() {
         assertEquals(
-            "http://example.com:4096/foo/bar",
+            "http://example.com/foo/bar",
             ServerUrl.normalizeConnectUrl("example.com/foo/bar"),
         )
     }
@@ -38,14 +38,14 @@ class ServerUrlTest {
     @Test
     fun `query and fragment are stripped but path is preserved`() {
         assertEquals(
-            "http://example.com:4096/foo/bar",
+            "http://example.com/foo/bar",
             ServerUrl.normalizeConnectUrl("example.com/foo/bar?x=1#frag"),
         )
     }
 
     @Test
     fun `host is lowercased`() {
-        assertEquals("https://example.com:4096", ServerUrl.normalizeConnectUrl("https://EXAMPLE.COM"))
+        assertEquals("https://example.com", ServerUrl.normalizeConnectUrl("https://EXAMPLE.COM"))
     }
 
     @Test
@@ -61,7 +61,7 @@ class ServerUrlTest {
     @Test
     fun `ipv6 is bracketed and zone id is stripped with path preserved`() {
         assertEquals(
-            "http://[2001:db8::1]:4096/foo",
+            "http://[2001:db8::1]/foo",
             ServerUrl.normalizeConnectUrl("http://[2001:db8::1%wlan0]/foo"),
         )
     }

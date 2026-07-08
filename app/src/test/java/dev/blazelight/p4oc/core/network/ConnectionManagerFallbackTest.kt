@@ -50,7 +50,7 @@ class ConnectionManagerFallbackTest {
     }
 
     @Test
-    fun `implicit http opencode port can fall back to port 80`() {
+    fun `implicit http url probes opencode port before preserved no-port url`() {
         val primary = ServerConfig(url = "http://192.168.24.25")
 
         val candidates = manager.connectionCandidates(primary)

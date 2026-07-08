@@ -209,18 +209,13 @@ class ConnectionManager constructor(
             config.copy(url = primaryUrl)
         }
         val parsed = primaryConfig.url.toHttpUrlOrNull() ?: return listOf(primaryConfig)
-        if (hasExplicitPort(config.url) || parsed.port != ServerUrl.DEFAULT_PORT) return listOf(primaryConfig)
+        if (hasExplicitPort(config.url)) return listOf(primaryConfig)
 
-        val fallbackPort = when (parsed.scheme) {
-            "http" -> 80
-            "https" -> 443
-            else -> return listOf(primaryConfig)
-        }
+        val opencodeUrl = parsed.newBuilder().port(ServerUrl.DEFAULT_PORT).build().toString().trimEnd('/')
+        val opencodeConfig = primaryConfig.copy(url = opencodeUrl)
+        if (opencodeUrl == primaryConfig.url.trimEnd('/')) return listOf(primaryConfig)
 
-        val fallbackUrl = parsed.newBuilder().port(fallbackPort).build().toString().trimEnd('/')
-        if (fallbackUrl == primaryConfig.url.trimEnd('/')) return listOf(primaryConfig)
-
-        return listOf(primaryConfig, primaryConfig.copy(url = fallbackUrl))
+        return listOf(opencodeConfig, primaryConfig)
     }
 
     internal fun hasExplicitPort(url: String): Boolean {
