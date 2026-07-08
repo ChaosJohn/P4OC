@@ -230,8 +230,8 @@ class TabManagerPersistenceTest {
         assertEquals(1, result.restoredCount)
         assertEquals(listOf(TabInstance.HOME_TAB_ID, "alpha-chat"), manager.tabs.value.map { it.id })
         assertEquals("alpha-chat", manager.activeTabId.value)
-
     }
+
     @Test
     fun `pinned Home is leftmost non-closeable and not duplicated`() {
         val manager = TabManager()
@@ -298,13 +298,20 @@ class TabManagerPersistenceTest {
         val afterRestart = TabManager()
         val result = afterRestart.restoreState(
             persisted,
-            mapOf(alpha.endpointKey to alpha, beta.endpointKey to beta, local.endpointKey to local),
+            mapOf(
+                alpha.endpointKey to alpha,
+                beta.endpointKey to beta,
+                local.endpointKey to local,
+            ),
         )
 
         assertTrue(result is RestoreResult.Restored)
         assertEquals(TabInstance.HOME_TAB_ID, afterRestart.tabs.value.first().id)
         val restoredWorkTabs = afterRestart.tabs.value.filterNot { it.isPinnedHome }
-        assertEquals(listOf(alpha.endpointKey, beta.endpointKey, local.endpointKey), restoredWorkTabs.map { it.serverEndpointKey })
+        assertEquals(
+            listOf(alpha.endpointKey, beta.endpointKey, local.endpointKey),
+            restoredWorkTabs.map { it.serverEndpointKey },
+        )
         assertEquals(listOf("/alpha", "/beta", "/local"), restoredWorkTabs.map { it.workspaceDirectory })
         assertEquals("chat/alpha-session", restoredWorkTabs[0].startRoute)
         assertEquals(Screen.Files.route, restoredWorkTabs[1].startRoute)
@@ -332,7 +339,10 @@ class TabManagerPersistenceTest {
         val second = manager.focusOrCreateFilesTab(otherServer, workspace)
 
         assertEquals(2, manager.tabs.value.count { it.startRoute == Screen.Files.route && !it.isPinnedHome })
-        assertEquals(listOf(server.endpointKey, otherServer.endpointKey), listOf(first.serverEndpointKey, second.serverEndpointKey))
+        assertEquals(
+            listOf(server.endpointKey, otherServer.endpointKey),
+            listOf(first.serverEndpointKey, second.serverEndpointKey),
+        )
     }
 
     @Test

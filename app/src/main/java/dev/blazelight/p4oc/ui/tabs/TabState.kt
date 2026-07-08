@@ -2,8 +2,8 @@ package dev.blazelight.p4oc.ui.tabs
 
 import dev.blazelight.p4oc.domain.model.SessionConnectionState
 import dev.blazelight.p4oc.domain.server.ServerRef
-import dev.blazelight.p4oc.ui.navigation.Screen
 import dev.blazelight.p4oc.domain.server.WorkspaceKey
+import dev.blazelight.p4oc.ui.navigation.Screen
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
@@ -38,7 +38,6 @@ data class TabState(
 
     /** Server endpoint owned by this tab. Null is allowed only for explicitly global surfaces. */
     val serverRef: ServerRef? = null,
-
 
     /** Pinned Home is global, leftmost, non-closeable, and not a work tab. */
     val pinnedHome: Boolean = false,

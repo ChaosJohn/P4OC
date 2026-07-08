@@ -10,12 +10,9 @@ import io.mockk.mockk
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.ExperimentalCoroutinesApi
 import kotlinx.coroutines.flow.MutableStateFlow
-import kotlinx.coroutines.test.StandardTestDispatcher
-import kotlinx.coroutines.test.TestScope
 import kotlinx.coroutines.test.advanceUntilIdle
 import kotlinx.coroutines.test.runTest
 import org.junit.Assert.assertEquals
-import org.junit.Assert.assertNull
 import org.junit.Test
 
 @OptIn(ExperimentalCoroutinesApi::class)
@@ -140,7 +137,9 @@ class ServerConnectionRegistryTest {
         val manager = mockk<ConnectionManager>(relaxed = true)
         every { manager.connection } returns MutableStateFlow(null)
         every { manager.connectionState } returns MutableStateFlow(ConnectionState.Error(message))
-        coEvery { manager.connect(server.toServerConfig(), any()) } returns Result.failure(IllegalStateException(message))
+        coEvery { manager.connect(server.toServerConfig(), any()) } returns Result.failure(
+            IllegalStateException(message),
+        )
         return manager
     }
 }

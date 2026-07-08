@@ -13,8 +13,20 @@ class AttentionBadgeRegistryTest {
         val workspace = WorkspaceKey.Directory("/repo")
         val registry = AttentionBadgeRegistry()
 
-        registry.set(AttentionSignal(AttentionKey(alpha, workspace, "tab-a"), AttentionSeverity.Warning, "awaiting input"))
-        registry.set(AttentionSignal(AttentionKey(beta, workspace, "tab-b"), AttentionSeverity.Error, "auth"))
+        registry.set(
+            AttentionSignal(
+                AttentionKey(alpha, workspace, "tab-a"),
+                AttentionSeverity.Warning,
+                "awaiting input",
+            ),
+        )
+        registry.set(
+            AttentionSignal(
+                AttentionKey(beta, workspace, "tab-b"),
+                AttentionSeverity.Error,
+                "auth",
+            ),
+        )
 
         val state = registry.state.value
         assertEquals(2, state.homeCount)
@@ -29,8 +41,20 @@ class AttentionBadgeRegistryTest {
         val alpha = ServerRef.fromEndpointKey("http://alpha.example:4096")
         val beta = ServerRef.fromEndpointKey("http://beta.example:4096")
         val registry = AttentionBadgeRegistry()
-        registry.set(AttentionSignal(AttentionKey(alpha, tabId = "tab-a"), AttentionSeverity.Info, "done"))
-        registry.set(AttentionSignal(AttentionKey(beta, tabId = "tab-b"), AttentionSeverity.Error, "auth"))
+        registry.set(
+            AttentionSignal(
+                AttentionKey(alpha, tabId = "tab-a"),
+                AttentionSeverity.Info,
+                "done",
+            ),
+        )
+        registry.set(
+            AttentionSignal(
+                AttentionKey(beta, tabId = "tab-b"),
+                AttentionSeverity.Error,
+                "auth",
+            ),
+        )
 
         registry.clearTab("tab-a")
 
