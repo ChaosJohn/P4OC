@@ -3,6 +3,7 @@ package dev.blazelight.p4oc.ui.screens.server
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
 import dev.blazelight.p4oc.core.datastore.RecentServer
+import dev.blazelight.p4oc.core.datastore.SavedServer
 import dev.blazelight.p4oc.core.datastore.SettingsDataStore
 import dev.blazelight.p4oc.core.log.AppLog
 import dev.blazelight.p4oc.core.network.ConnectionManager
@@ -33,6 +34,7 @@ class ServerViewModel constructor(
 
     init {
         loadRecentServers()
+        loadSavedServers()
         collectDiscoveryFlows()
         tryAutoReconnect()
     }
@@ -41,6 +43,14 @@ class ServerViewModel constructor(
         viewModelScope.launch {
             settingsDataStore.recentServers.collect { servers ->
                 _uiState.update { it.copy(recentServers = servers) }
+            }
+        }
+    }
+
+    private fun loadSavedServers() {
+        viewModelScope.launch {
+            settingsDataStore.savedServers.collect { servers ->
+                _uiState.update { it.copy(savedServers = servers) }
             }
         }
     }
@@ -142,6 +152,14 @@ class ServerViewModel constructor(
                         password = password,
                         allowInsecure = state.allowInsecure
                     )
+                    settingsDataStore.addSavedServer(
+                        url = url,
+                        name = "Remote Server",
+                        username = state.username.takeIf { it.isNotBlank() },
+                        password = password,
+                        allowInsecure = state.allowInsecure,
+                        lastConnectedAt = System.currentTimeMillis(),
+                    )
                     initializeProjectContext()
                     _uiState.update { it.copy(isConnecting = false, isConnected = true) }
                 },
@@ -178,6 +196,12 @@ class ServerViewModel constructor(
     fun removeRecentServer(server: RecentServer) {
         viewModelScope.launch {
             settingsDataStore.removeRecentServer(server.url)
+        }
+    }
+
+    fun removeSavedServer(server: SavedServer) {
+        viewModelScope.launch {
+            settingsDataStore.removeSavedServer(server.id)
         }
     }
 
@@ -246,6 +270,7 @@ data class ServerUiState(
     val isConnected: Boolean = false,
     val error: String? = null,
     val recentServers: List<RecentServer> = emptyList(),
+    val savedServers: List<SavedServer> = emptyList(),
     val discoveredServers: List<DiscoveredServer> = emptyList(),
     val discoveryState: DiscoveryState = DiscoveryState.IDLE,
     // Navigation destination after connection

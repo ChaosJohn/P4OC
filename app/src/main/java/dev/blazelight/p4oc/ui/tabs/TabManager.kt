@@ -53,21 +53,28 @@ class TabManager {
     fun createTab(
         startRoute: String = "sessions",
         workspaceKey: WorkspaceKey,
+        serverRef: ServerRef,
         focus: Boolean = true
     ): TabInstance = addTab(
         tab = TabInstance(
-            TabState(workspaceKey = workspaceKey),
+            TabState(workspaceKey = workspaceKey, serverRef = serverRef),
             startRoute = startRoute,
         ),
         focus = focus,
     )
 
     private fun addTab(tab: TabInstance, focus: Boolean): TabInstance {
+        val tabToAdd = if (tab.isPinnedHome) TabInstance.home() else tab
         _tabs.update { currentTabs ->
-            val newTabs = currentTabs + tab
+            val withoutDuplicateHome = if (tabToAdd.isPinnedHome) {
+                currentTabs.filterNot { it.isPinnedHome }
+            } else {
+                currentTabs
+            }
+            val newTabs = ensureHomeFirst(withoutDuplicateHome + tabToAdd)
 
-            // Show warning at 5+ tabs (once per session)
-            if (newTabs.size >= 5 && !tabWarningShown) {
+            // Show warning at 5+ closeable work tabs (once per session)
+            if (newTabs.count { !it.isPinnedHome } >= 5 && !tabWarningShown) {
                 _showTabWarning.value = true
                 tabWarningShown = true
             }
@@ -76,10 +83,12 @@ class TabManager {
         }
 
         if (focus) {
-            _activeTabId.value = tab.id
+            _activeTabId.value = tabToAdd.id
+        } else if (_activeTabId.value == null) {
+            _activeTabId.value = TabInstance.HOME_TAB_ID
         }
 
-        return tab
+        return tabToAdd
     }
 
     /**
@@ -92,25 +101,18 @@ class TabManager {
         val tabIndex = currentTabs.indexOfFirst { it.id == tabId }
 
         if (tabIndex == -1) return
+        if (currentTabs[tabIndex].isPinnedHome) return
 
         val isActive = _activeTabId.value == tabId
 
-        if (currentTabs.size == 1) {
-            // Last tab - create a fresh replacement
-            val newTab = TabInstance(TabState(workspaceKey = WorkspaceKey.Global))
-            _tabs.value = listOf(newTab)
-            _activeTabId.value = newTab.id
-            return
-        }
-
         // Remove the tab
-        _tabs.update { tabs -> tabs.filter { it.id != tabId } }
+        _tabs.update { tabs -> ensureHomeFirst(tabs.filter { it.id != tabId }) }
 
-        // If was active, focus adjacent
+        // If was active, focus adjacent closeable tab or pinned Home.
         if (isActive) {
             val newTabs = _tabs.value
             val newActiveIndex = minOf(tabIndex, newTabs.size - 1)
-            _activeTabId.value = newTabs.getOrNull(newActiveIndex)?.id
+            _activeTabId.value = newTabs.getOrNull(newActiveIndex)?.id ?: TabInstance.HOME_TAB_ID
         }
     }
 
@@ -126,6 +128,36 @@ class TabManager {
     /**
      * Find a tab that's showing the given session.
      */
+
+    fun findFilesTab(serverRef: ServerRef, workspaceKey: WorkspaceKey): TabInstance? =
+        _tabs.value.firstOrNull {
+            !it.isPinnedHome &&
+                it.serverRef == serverRef &&
+                it.workspaceKey == workspaceKey &&
+                it.startRoute == Screen.Files.route
+        }
+
+    fun focusOrCreateFilesTab(serverRef: ServerRef, workspaceKey: WorkspaceKey): TabInstance {
+        val existing = findFilesTab(serverRef, workspaceKey)
+        if (existing != null) {
+            focusTab(existing.id)
+            return existing
+        }
+        return createTab(
+            startRoute = Screen.Files.route,
+            workspaceKey = workspaceKey,
+            serverRef = serverRef,
+            focus = true,
+        )
+    }
+
+    fun findTerminalTabs(serverRef: ServerRef, workspaceKey: WorkspaceKey): List<TabInstance> =
+        _tabs.value.filter {
+            !it.isPinnedHome &&
+                it.serverRef == serverRef &&
+                it.workspaceKey == workspaceKey &&
+                it.startRoute.startsWith("terminal/")
+        }
     fun findTabBySessionId(sessionId: String): TabInstance? {
         return _tabs.value.find { it.sessionId == sessionId }
     }
@@ -167,35 +199,47 @@ class TabManager {
 
     fun saveState(serverRef: ServerRef): PersistedTabState? {
         val currentTabs = _tabs.value
-        if (currentTabs.isEmpty()) return null
         return PersistedTabState(
             serverEndpointKey = serverRef.endpointKey,
             activeTabId = _activeTabId.value,
-            tabs = currentTabs.map { tab ->
+            tabs = currentTabs.filterNot { it.isPinnedHome }.map { tab ->
                 PersistedTab(
                     id = tab.id,
                     startRoute = persistableStartRoute(tab),
                     sessionId = tab.sessionId,
                     sessionTitle = tab.sessionTitle,
                     workspaceKey = tab.workspaceKey?.let(PersistedWorkspaceKey::fromWorkspaceKey),
+                    serverEndpointKey = tab.serverEndpointKey ?: serverRef.endpointKey,
                 )
             },
         )
     }
 
     fun restoreState(state: PersistedTabState, activeServer: ServerRef): RestoreResult {
+        return restoreState(state, mapOf(activeServer.endpointKey to activeServer), fallbackServer = activeServer)
+    }
+
+    fun restoreState(
+        state: PersistedTabState,
+        availableServers: Map<String, ServerRef>,
+        fallbackServer: ServerRef? = null,
+    ): RestoreResult {
         if (state.version != PersistedTabState.CURRENT_VERSION) {
             restored = true
             return RestoreResult.VersionMismatch(state.version)
         }
-        if (state.serverEndpointKey != activeServer.endpointKey) {
-            restored = true
-            return RestoreResult.ServerMismatch(state.serverEndpointKey, activeServer.endpointKey)
-        }
 
+        val missingServerEndpointKeys = linkedSetOf<String>()
         val restoredTabs = state.tabs.mapNotNull { persisted ->
             if (persisted.id.isBlank()) return@mapNotNull null
             val workspaceKey = persisted.resolvedWorkspaceKey() ?: return@mapNotNull null
+            val serverEndpointKey = persisted.resolvedServerEndpointKey(state.serverEndpointKey) ?: return@mapNotNull null
+            val serverRef = availableServers[serverEndpointKey] ?: fallbackServer?.takeIf {
+                it.endpointKey == serverEndpointKey
+            } ?: run {
+                missingServerEndpointKeys += serverEndpointKey
+                return@mapNotNull null
+            }
             val route = persisted.sessionId?.let { TabChatRouteCodec.chatRoute(it) }
                 ?: persisted.startRoute.takeIf { it.isNotBlank() }
                 ?: Screen.Sessions.route
@@ -205,21 +249,26 @@ class TabManager {
                     sessionId = persisted.sessionId,
                     sessionTitle = persisted.sessionTitle,
                     workspaceKey = workspaceKey,
+                    serverRef = serverRef,
                 ),
                 startRoute = route,
             )
         }
 
+        val withHome = ensureHomeFirst(restoredTabs)
         if (restoredTabs.isEmpty()) {
+            _tabs.value = withHome
+            _activeTabId.value = TabInstance.HOME_TAB_ID
             restored = true
-            return RestoreResult.Empty
+            return missingServerEndpointKeys.firstOrNull()?.let { RestoreResult.MissingServer(it) } ?: RestoreResult.Empty
         }
 
-        _tabs.value = restoredTabs
-        _activeTabId.value = state.activeTabId?.takeIf { activeId -> restoredTabs.any { it.id == activeId } }
+        _tabs.value = withHome
+        _activeTabId.value = state.activeTabId?.takeIf { activeId -> withHome.any { it.id == activeId } }
             ?: restoredTabs.first().id
         restored = true
-        return RestoreResult.Restored(restoredTabs.size)
+        return missingServerEndpointKeys.firstOrNull()?.let { RestoreResult.MissingServer(it, restoredTabs.size) }
+            ?: RestoreResult.Restored(restoredTabs.size)
     }
 
     fun shouldAttemptRestore(): Boolean = !restored && _tabs.value.isEmpty()
@@ -236,13 +285,14 @@ class TabManager {
      */
     fun registerTab(tab: TabInstance, focus: Boolean = true) {
         _tabs.update { currentTabs ->
-            if (currentTabs.any { it.id == tab.id }) {
-                currentTabs // Already registered
+            val registered = if (tab.isPinnedHome) TabInstance.home() else tab
+            if (currentTabs.any { it.id == registered.id }) {
+                ensureHomeFirst(currentTabs)
             } else {
-                val newTabs = currentTabs + tab
+                val newTabs = ensureHomeFirst(currentTabs + registered)
 
-                // Show warning at 5+ tabs (once per session)
-                if (newTabs.size >= 5 && !tabWarningShown) {
+                // Show warning at 5+ closeable work tabs (once per session)
+                if (newTabs.count { !it.isPinnedHome } >= 5 && !tabWarningShown) {
                     _showTabWarning.value = true
                     tabWarningShown = true
                 }
@@ -252,7 +302,9 @@ class TabManager {
         }
 
         if (focus) {
-            _activeTabId.value = tab.id
+            _activeTabId.value = if (tab.isPinnedHome) TabInstance.HOME_TAB_ID else tab.id
+        } else if (_activeTabId.value == null) {
+            _activeTabId.value = TabInstance.HOME_TAB_ID
         }
     }
 
@@ -266,6 +318,21 @@ class TabManager {
      */
     fun tabCount(): Int = _tabs.value.size
 
+    fun ensureHomeTab(focus: Boolean = false): TabInstance {
+        val existing = _tabs.value.firstOrNull { it.isPinnedHome }
+        if (existing != null) {
+            _tabs.update(::ensureHomeFirst)
+            if (focus) _activeTabId.value = existing.id
+            return existing
+        }
+        return addTab(TabInstance.home(), focus = focus)
+    }
+
+    private fun ensureHomeFirst(tabs: List<TabInstance>): List<TabInstance> {
+        val home = tabs.firstOrNull { it.isPinnedHome } ?: TabInstance.home()
+        return listOf(home) + tabs.filterNot { it.isPinnedHome }
+    }
+
     private fun persistableStartRoute(tab: TabInstance): String = when (val sessionId = tab.sessionId) {
         null -> if (tab.startRoute.startsWith("terminal/")) Screen.Sessions.route else tab.startRoute
         else -> TabChatRouteCodec.chatRoute(sessionId)
@@ -277,4 +344,5 @@ sealed interface RestoreResult {
     data object Empty : RestoreResult
     data class VersionMismatch(val version: Int) : RestoreResult
     data class ServerMismatch(val persistedEndpointKey: String, val activeEndpointKey: String) : RestoreResult
+    data class MissingServer(val endpointKey: String, val restoredCount: Int = 0) : RestoreResult
 }

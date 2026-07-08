@@ -25,6 +25,7 @@ import dev.blazelight.p4oc.core.datastore.SettingsDataStore
 import dev.blazelight.p4oc.core.datastore.VisualSettings
 import dev.blazelight.p4oc.domain.model.SessionConnectionState
 import dev.blazelight.p4oc.domain.server.WorkspaceKey
+import dev.blazelight.p4oc.domain.server.ServerRef
 import dev.blazelight.p4oc.ui.navigation.Screen
 import dev.blazelight.p4oc.ui.screens.chat.ChatScreen
 import dev.blazelight.p4oc.ui.screens.diff.DiffViewerScreen
@@ -32,6 +33,8 @@ import dev.blazelight.p4oc.ui.screens.diff.SessionDiffScreen
 import dev.blazelight.p4oc.ui.screens.files.FileExplorerScreen
 import dev.blazelight.p4oc.ui.screens.files.FileViewerScreen
 import dev.blazelight.p4oc.ui.screens.files.FilesViewModel
+import dev.blazelight.p4oc.ui.screens.home.HomeScreen
+import dev.blazelight.p4oc.ui.screens.home.HomeSummaryBuilder
 import dev.blazelight.p4oc.ui.screens.projects.ProjectsScreen
 import dev.blazelight.p4oc.ui.screens.sessions.SessionListScreen
 import dev.blazelight.p4oc.ui.screens.sessions.SessionListViewModel
@@ -73,6 +76,7 @@ fun TabNavHost(
     isActiveTab: Boolean = true,
     startRoute: String = Screen.Sessions.route,
     workspaceOwner: WorkspaceRepositoryOwner,
+    serverRef: ServerRef,
     onConnectionStateChanged: ((SessionConnectionState?) -> Unit)? = null,
     modifier: androidx.compose.ui.Modifier = androidx.compose.ui.Modifier
 ) {
@@ -154,6 +158,19 @@ fun TabNavHost(
                 navArgument(WORKSPACE_ROUTE_ARG_REVISION) { type = NavType.IntType },
             )
         ) {
+            composable(Screen.Home.route) {
+                HomeScreen(
+                    summary = HomeSummaryBuilder.build(
+                        savedServers = emptyList(),
+                        connectionStates = emptyMap(),
+                        tabs = tabs,
+                    ),
+                    onBrowseSessions = { navController.navigate(Screen.Sessions.route) },
+                    onOpenFiles = onNewFilesTab,
+                    onOpenTerminal = onNewTerminalTab,
+                )
+            }
+
             // Sessions list (start destination for new tabs)
             composable(Screen.Sessions.route) { backStackEntry ->
                 val workspaceViewModel = TouchWorkspaceViewModel(
@@ -344,6 +361,7 @@ fun TabNavHost(
                             tabManager.createTab(
                                 startRoute = Screen.Chat.createRoute(subSessionId),
                                 workspaceKey = workspaceOwner.workspace.key,
+                                serverRef = serverRef,
                                 focus = true,
                             )
                         } else {

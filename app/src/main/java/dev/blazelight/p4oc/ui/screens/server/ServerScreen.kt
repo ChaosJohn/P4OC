@@ -31,6 +31,7 @@ import androidx.compose.ui.text.style.TextOverflow
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import dev.blazelight.p4oc.R
 import dev.blazelight.p4oc.core.datastore.RecentServer
+import dev.blazelight.p4oc.core.datastore.SavedServer
 import dev.blazelight.p4oc.core.network.DiscoveredServer
 import dev.blazelight.p4oc.core.network.DiscoveryState
 import dev.blazelight.p4oc.ui.components.TuiLoadingIndicator
@@ -117,6 +118,20 @@ fun ServerScreen(
                     discoveryState = uiState.discoveryState,
                     isConnecting = uiState.isConnecting,
                     onServerClick = viewModel::connectToDiscoveredServer
+                )
+            }
+
+            if (uiState.savedServers.isNotEmpty()) {
+                SavedServersSection(
+                    servers = uiState.savedServers,
+                    isConnecting = uiState.isConnecting,
+                    hasOpenTabs = false,
+                    onServerClick = { saved ->
+                        viewModel.setRemoteUrl(saved.endpoint)
+                        viewModel.setUsername(saved.username ?: "opencode")
+                        viewModel.setAllowInsecure(saved.allowInsecure)
+                    },
+                    onRemoveServer = viewModel::removeSavedServer,
                 )
             }
 
@@ -473,6 +488,76 @@ private fun SetupCodeBlock(command: String) {
             color = theme.accent,
             style = MaterialTheme.typography.bodySmall
         )
+    }
+}
+
+@Composable
+private fun SavedServersSection(
+    servers: List<SavedServer>,
+    isConnecting: Boolean,
+    hasOpenTabs: Boolean,
+    onServerClick: (SavedServer) -> Unit,
+    onRemoveServer: (SavedServer) -> Unit,
+) {
+    val theme = LocalOpenCodeTheme.current
+
+    Surface(
+        color = theme.backgroundElement,
+        shape = RectangleShape,
+    ) {
+        Column(
+            modifier = Modifier.padding(Spacing.md),
+            verticalArrangement = Arrangement.spacedBy(Spacing.xs),
+        ) {
+            Text(
+                text = "[ Saved servers ]",
+                style = MaterialTheme.typography.titleMedium,
+                fontFamily = FontFamily.Monospace,
+                color = theme.text,
+            )
+            Text(
+                text = "Manage saved connection targets. Remove warns when open tabs reference this server.",
+                style = MaterialTheme.typography.bodySmall,
+                fontFamily = FontFamily.Monospace,
+                color = theme.textMuted,
+            )
+            servers.forEach { server ->
+                Row(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .clickable(enabled = !isConnecting, role = Role.Button) { onServerClick(server) }
+                        .padding(vertical = Spacing.md),
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.spacedBy(Spacing.lg),
+                ) {
+                    Text("●", color = theme.success, fontFamily = FontFamily.Monospace)
+                    Column(modifier = Modifier.weight(1f)) {
+                        Text(
+                            text = server.displayName,
+                            style = MaterialTheme.typography.bodyMedium,
+                            fontFamily = FontFamily.Monospace,
+                            color = theme.text,
+                            maxLines = 1,
+                            overflow = TextOverflow.Ellipsis,
+                        )
+                        Text(
+                            text = "${server.endpoint} · ${if (server.allowInsecure) "TLS checks off" else "TLS checks on"}",
+                            style = MaterialTheme.typography.bodySmall,
+                            fontFamily = FontFamily.Monospace,
+                            color = theme.textMuted,
+                            maxLines = 1,
+                            overflow = TextOverflow.Ellipsis,
+                        )
+                    }
+                    Text(
+                        text = if (hasOpenTabs) "warn remove" else "remove",
+                        color = theme.warning,
+                        fontFamily = FontFamily.Monospace,
+                        modifier = Modifier.clickable(role = Role.Button) { onRemoveServer(server) },
+                    )
+                }
+            }
+        }
     }
 }
 

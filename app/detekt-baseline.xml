@@ -2,7 +2,16 @@
 <SmellBaseline>
   <ManuallySuppressedIssues/>
   <CurrentIssues>
+    <ID>ArgumentListWrapping:AttentionBadgeRegistryTest.kt$AttentionBadgeRegistryTest$(AttentionKey(alpha, workspace, "tab-a"), AttentionSeverity.Warning, "awaiting input")</ID>
+    <ID>ArgumentListWrapping:AttentionBadgeRegistryTest.kt$AttentionBadgeRegistryTest$(AttentionSignal(AttentionKey(alpha, workspace, "tab-a"), AttentionSeverity.Warning, "awaiting input"))</ID>
+    <ID>ArgumentListWrapping:AttentionBadgeRegistryTest.kt$AttentionBadgeRegistryTest$(alpha, workspace, "tab-a")</ID>
     <ID>ArgumentListWrapping:FileExplorerScreen.kt$(Icons.AutoMirrored.Filled.NoteAdd, contentDescription = null, tint = theme.textMuted)</ID>
+    <ID>ArgumentListWrapping:ServerConnectionRegistry.kt$ServerConnectionRegistry$(serverRef.endpointKey)</ID>
+    <ID>ArgumentListWrapping:TabManagerPersistenceTest.kt$TabManagerPersistenceTest$(alpha.endpointKey, beta.endpointKey, local.endpointKey)</ID>
+    <ID>ArgumentListWrapping:TabManagerPersistenceTest.kt$TabManagerPersistenceTest$(first.serverEndpointKey, second.serverEndpointKey)</ID>
+    <ID>ArgumentListWrapping:TabManagerPersistenceTest.kt$TabManagerPersistenceTest$(listOf(alpha.endpointKey, beta.endpointKey, local.endpointKey), restoredWorkTabs.map { it.serverEndpointKey })</ID>
+    <ID>ArgumentListWrapping:TabManagerPersistenceTest.kt$TabManagerPersistenceTest$(listOf(server.endpointKey, otherServer.endpointKey), listOf(first.serverEndpointKey, second.serverEndpointKey))</ID>
+    <ID>ArgumentListWrapping:TabManagerPersistenceTest.kt$TabManagerPersistenceTest$(server.endpointKey, otherServer.endpointKey)</ID>
     <ID>ArgumentListWrapping:TabNavHost.kt$(backStackEntry, navController, workspaceRoute, workspaceOwner, backStackEntry.destination.route)</ID>
     <ID>ArgumentListWrapping:ToolGroupWidget.kt$(pendingPermissionIdsByCallId[tool.callID] ?: tool.callID)</ID>
     <ID>CommentWrapping:SoraCodeEditorView.kt$/* autoComplete = */</ID>
@@ -32,7 +41,8 @@
     <ID>CyclomaticComplexMethod:StreamingMarkdown.kt$internal fun parseMarkdownBlocks(text: String): List&lt;MarkdownBlock&gt;</ID>
     <ID>CyclomaticComplexMethod:StreamingMarkdown.kt$private fun inlineMarkdown(text: String, colors: MarkdownRenderColors): AnnotatedString</ID>
     <ID>CyclomaticComplexMethod:TabBar.kt$fun getTitleForRoute( route: String?, labels: TabTitleLabels, sessionTitle: String? = null, workspaceKey: WorkspaceKey? = null, ): String</ID>
-    <ID>CyclomaticComplexMethod:TabNavHost.kt$@Composable fun TabNavHost( navController: NavHostController, tabManager: TabManager, tabId: String, onDisconnect: () -&gt; Unit, onNewFilesTab: () -&gt; Unit = {}, onNewTerminalTab: () -&gt; Unit = {}, onCloseTab: () -&gt; Unit = {}, isActiveTab: Boolean = true, startRoute: String = Screen.Sessions.route, workspaceOwner: WorkspaceRepositoryOwner, onConnectionStateChanged: ((SessionConnectionState?) -&gt; Unit)? = null, modifier: androidx.compose.ui.Modifier = androidx.compose.ui.Modifier )</ID>
+    <ID>CyclomaticComplexMethod:TabManager.kt$TabManager$fun restoreState( state: PersistedTabState, availableServers: Map&lt;String, ServerRef&gt;, fallbackServer: ServerRef? = null, ): RestoreResult</ID>
+    <ID>CyclomaticComplexMethod:TabNavHost.kt$@Composable fun TabNavHost( navController: NavHostController, tabManager: TabManager, tabId: String, onDisconnect: () -&gt; Unit, onNewFilesTab: () -&gt; Unit = {}, onNewTerminalTab: () -&gt; Unit = {}, onCloseTab: () -&gt; Unit = {}, isActiveTab: Boolean = true, startRoute: String = Screen.Sessions.route, workspaceOwner: WorkspaceRepositoryOwner, serverRef: ServerRef, onConnectionStateChanged: ((SessionConnectionState?) -&gt; Unit)? = null, modifier: androidx.compose.ui.Modifier = androidx.compose.ui.Modifier )</ID>
     <ID>CyclomaticComplexMethod:TermuxTerminalView.kt$KeyInterceptingContainer$private fun handleKeyDown(event: KeyEvent): Boolean</ID>
     <ID>CyclomaticComplexMethod:ToolCallWidget.kt$private fun getToolCompactDescription(tool: Part.Tool): String</ID>
     <ID>CyclomaticComplexMethod:ToolComponents.kt$@Composable fun DiffPreview( diffContent: String, modifier: Modifier = Modifier )</ID>
@@ -41,6 +51,7 @@
     <ID>CyclomaticComplexMethod:ToolComponents.kt$fun getToolDescription(toolName: String, input: JsonObject): String</ID>
     <ID>CyclomaticComplexMethod:ToolGroupWidget.kt$@Composable fun ToolGroupWidget( tools: List&lt;Part.Tool&gt;, defaultState: ToolWidgetState, pendingPermissionIdsByCallId: Map&lt;String, String&gt; = emptyMap(), onToolApprove: (String) -&gt; Unit, onToolDeny: (String) -&gt; Unit, onOpenSubSession: ((String) -&gt; Unit)? = null, modifier: Modifier = Modifier )</ID>
     <ID>EmptyFunctionBlock:InsecureTls.kt$&lt;no name provided&gt;${}</ID>
+    <ID>EmptyFunctionBlock:TabManagerPersistenceTest.kt${}</ID>
     <ID>Filename:ComponentPreviews.kt$dev.blazelight.p4oc.ui.preview.ComponentPreviews.kt</ID>
     <ID>Filename:TodoDtos.kt$dev.blazelight.p4oc.data.remote.dto.TodoDtos.kt</ID>
     <ID>FunctionNaming:AgentsConfigScreen.kt$@Composable private fun AgentDetailDialog( agent: AgentInfo, onDismiss: () -&gt; Unit )</ID>
@@ -105,6 +116,10 @@
     <ID>FunctionNaming:FileViewerScreen.kt$@Composable private fun DiscardChangesDialog( onConfirm: () -&gt; Unit, onDismiss: () -&gt; Unit, )</ID>
     <ID>FunctionNaming:FileViewerScreen.kt$@Composable private fun SaveDiffDialog( preview: SavePreview, isSaving: Boolean, onConfirm: () -&gt; Unit, onDismiss: () -&gt; Unit, )</ID>
     <ID>FunctionNaming:FileViewerScreen.kt$@OptIn(ExperimentalMaterial3Api::class) @Composable fun FileViewerScreen( path: String, viewModel: FilesViewModel, onNavigateBack: () -&gt; Unit )</ID>
+    <ID>FunctionNaming:HomeScreen.kt$@Composable fun HomeScreen( summary: HomeSummaryState, onBrowseSessions: () -&gt; Unit, onOpenFiles: () -&gt; Unit, onOpenTerminal: () -&gt; Unit, modifier: Modifier = Modifier, onWorkspaceSelected: (WorkspaceSummary) -&gt; Unit = {}, )</ID>
+    <ID>FunctionNaming:HomeScreen.kt$@Composable private fun HomeActionRow( label: String, description: String, icon: @Composable () -&gt; Unit, onClick: () -&gt; Unit, testTag: String, modifier: Modifier = Modifier, )</ID>
+    <ID>FunctionNaming:HomeScreen.kt$@Composable private fun HomeSection(title: String, body: String)</ID>
+    <ID>FunctionNaming:HomeScreen.kt$@Composable private fun WorkspaceDetail( workspace: WorkspaceSummary, openWork: List&lt;OpenWorkSummary&gt;, onBack: () -&gt; Unit, onOpenFiles: () -&gt; Unit, onOpenTerminal: () -&gt; Unit, modifier: Modifier = Modifier, )</ID>
     <ID>FunctionNaming:InlineDiffViewer.kt$@Composable fun InlineDiffViewer( fileName: String, diffContent: String, additions: Int = 0, deletions: Int = 0, modifier: Modifier = Modifier )</ID>
     <ID>FunctionNaming:InlineDiffViewer.kt$@Composable fun PatchDiffViewer( files: List&lt;String&gt;, getDiffContent: suspend (String) -&gt; String?, modifier: Modifier = Modifier )</ID>
     <ID>FunctionNaming:InlineDiffViewer.kt$@Composable private fun InlineDiffLineRow(line: ParsedDiffLine)</ID>
@@ -120,6 +135,7 @@
     <ID>FunctionNaming:LicensesScreen.kt$@OptIn(ExperimentalMaterial3Api::class) @Composable fun LicensesScreen( onNavigateBack: () -&gt; Unit, viewModel: LicensesViewModel = koinViewModel(), )</ID>
     <ID>FunctionNaming:MainTabScreen.kt$@Composable fun MainTabScreen( onDisconnect: () -&gt; Unit, modifier: Modifier = Modifier )</ID>
     <ID>FunctionNaming:MainTabScreen.kt$@Composable private fun FilesWorkspaceOption( title: String, subtitle: String, marker: String, onClick: () -&gt; Unit, modifier: Modifier = Modifier, )</ID>
+    <ID>FunctionNaming:MainTabScreen.kt$@Composable private fun StartWorkActionRow( label: String, description: String, marker: String, onClick: () -&gt; Unit, )</ID>
     <ID>FunctionNaming:MessageBlockUtils.kt$@Composable internal fun MessageBlockView( block: MessageBlock, onToolApprove: (String) -&gt; Unit, onToolDeny: (String) -&gt; Unit, onToolAlways: (String) -&gt; Unit, onOpenSubSession: ((String) -&gt; Unit)? = null, defaultToolWidgetState: ToolWidgetState = ToolWidgetState.COMPACT, pendingPermissionsByCallId: Map&lt;String, Permission&gt; = emptyMap(), onRevert: ((String) -&gt; Unit)? = null )</ID>
     <ID>FunctionNaming:ModelAgentSelector.kt$@Composable private fun ReasoningEffortSelect( efforts: List&lt;String&gt;, selectedEffort: String?, onEffortSelected: (String?) -&gt; Unit, )</ID>
     <ID>FunctionNaming:ModelAgentSelector.kt$@Composable private fun TuiFilterTab( text: String, selected: Boolean, onClick: () -&gt; Unit )</ID>
@@ -151,6 +167,7 @@
     <ID>FunctionNaming:ServerScreen.kt$@Composable private fun DiscoveredServersSection( servers: List&lt;DiscoveredServer&gt;, discoveryState: DiscoveryState, isConnecting: Boolean, onServerClick: (DiscoveredServer) -&gt; Unit )</ID>
     <ID>FunctionNaming:ServerScreen.kt$@Composable private fun RecentServersSection( servers: List&lt;RecentServer&gt;, isConnecting: Boolean, onServerClick: (RecentServer) -&gt; Unit, onRemoveServer: (RecentServer) -&gt; Unit )</ID>
     <ID>FunctionNaming:ServerScreen.kt$@Composable private fun RemoteServerSection( url: String, username: String, password: String, allowInsecure: Boolean, isConnecting: Boolean, onUrlChange: (String) -&gt; Unit, onUsernameChange: (String) -&gt; Unit, onPasswordChange: (String) -&gt; Unit, onAllowInsecureChange: (Boolean) -&gt; Unit, onConnect: () -&gt; Unit )</ID>
+    <ID>FunctionNaming:ServerScreen.kt$@Composable private fun SavedServersSection( servers: List&lt;SavedServer&gt;, isConnecting: Boolean, hasOpenTabs: Boolean, onServerClick: (SavedServer) -&gt; Unit, onRemoveServer: (SavedServer) -&gt; Unit, )</ID>
     <ID>FunctionNaming:ServerScreen.kt$@Composable private fun ScanningIndicator()</ID>
     <ID>FunctionNaming:ServerScreen.kt$@Composable private fun ServerSetupHelpSection()</ID>
     <ID>FunctionNaming:ServerScreen.kt$@Composable private fun SetupCodeBlock(command: String)</ID>
@@ -196,8 +213,8 @@
     <ID>FunctionNaming:StreamingMarkdown.kt$@Composable private fun MarkdownText( text: AnnotatedString, style: TextStyle, colors: MarkdownRenderColors, modifier: Modifier = Modifier, )</ID>
     <ID>FunctionNaming:SyntaxHighlightedCode.kt$@Composable fun SyntaxHighlightedCode( code: String, filename: String, modifier: Modifier = Modifier, showLineNumbers: Boolean = true, fontSize: Int = 12, selectable: Boolean = false, )</ID>
     <ID>FunctionNaming:TabBar.kt$@Composable fun TabBar( tabs: List&lt;TabInstance&gt;, activeTabId: String?, tabTitles: Map&lt;String, String&gt;, tabIcons: Map&lt;String, ImageVector&gt;, tabConnectionStates: Map&lt;String, SessionConnectionState&gt;, onTabClick: (String) -&gt; Unit, onTabClose: (String) -&gt; Unit, onAddClick: () -&gt; Unit, modifier: Modifier = Modifier )</ID>
-    <ID>FunctionNaming:TabBar.kt$@Composable private fun TabIndicator( title: String, icon: ImageVector, connectionState: SessionConnectionState?, isActive: Boolean, onClick: () -&gt; Unit, onClose: () -&gt; Unit, modifier: Modifier = Modifier )</ID>
-    <ID>FunctionNaming:TabNavHost.kt$@Composable fun TabNavHost( navController: NavHostController, tabManager: TabManager, tabId: String, onDisconnect: () -&gt; Unit, onNewFilesTab: () -&gt; Unit = {}, onNewTerminalTab: () -&gt; Unit = {}, onCloseTab: () -&gt; Unit = {}, isActiveTab: Boolean = true, startRoute: String = Screen.Sessions.route, workspaceOwner: WorkspaceRepositoryOwner, onConnectionStateChanged: ((SessionConnectionState?) -&gt; Unit)? = null, modifier: androidx.compose.ui.Modifier = androidx.compose.ui.Modifier )</ID>
+    <ID>FunctionNaming:TabBar.kt$@Composable private fun TabIndicator( title: String, icon: ImageVector, connectionState: SessionConnectionState?, isActive: Boolean, closeable: Boolean = true, onClick: () -&gt; Unit, onClose: () -&gt; Unit, modifier: Modifier = Modifier )</ID>
+    <ID>FunctionNaming:TabNavHost.kt$@Composable fun TabNavHost( navController: NavHostController, tabManager: TabManager, tabId: String, onDisconnect: () -&gt; Unit, onNewFilesTab: () -&gt; Unit = {}, onNewTerminalTab: () -&gt; Unit = {}, onCloseTab: () -&gt; Unit = {}, isActiveTab: Boolean = true, startRoute: String = Screen.Sessions.route, workspaceOwner: WorkspaceRepositoryOwner, serverRef: ServerRef, onConnectionStateChanged: ((SessionConnectionState?) -&gt; Unit)? = null, modifier: androidx.compose.ui.Modifier = androidx.compose.ui.Modifier )</ID>
     <ID>FunctionNaming:TabNavHost.kt$@Composable private fun TouchWorkspaceViewModel( owner: NavBackStackEntry, navController: NavHostController, workspaceRoute: String, workspaceOwner: WorkspaceRepositoryOwner, destinationRoute: String?, ): WorkspaceViewModel</ID>
     <ID>FunctionNaming:TerminalScreen.kt$@Composable fun TerminalScreen( viewModel: TerminalViewModel = koinViewModel(), onPtyLoaded: ((ptyId: String, ptyTitle: String) -&gt; Unit)? = null, )</ID>
     <ID>FunctionNaming:TermuxExtraKeysBar.kt$@Composable fun TermuxExtraKeysBar( onKeyPress: (String) -&gt; Unit, ctrlActive: Boolean, altActive: Boolean, onCtrlToggle: () -&gt; Unit, onAltToggle: () -&gt; Unit, modifier: Modifier = Modifier, enabled: Boolean = true, onPaste: (() -&gt; Unit)? = null, )</ID>
@@ -263,6 +280,10 @@
     <ID>FunctionNaming:VisualSettingsScreen.kt$@OptIn(ExperimentalMaterial3Api::class) @Composable private fun ThemeSelector( selected: String, options: List&lt;Pair&lt;String, String&gt;&gt;, onSelect: (String) -&gt; Unit )</ID>
     <ID>FunctionNaming:VisualSettingsScreen.kt$@OptIn(ExperimentalMaterial3Api::class) @Composable private fun ToolWidgetStateSelector( selected: String, onSelect: (String) -&gt; Unit )</ID>
     <ID>ImportOrdering:ConnectionManager.kt$import dev.blazelight.p4oc.BuildConfig import dev.blazelight.p4oc.core.datastore.SettingsDataStore import dev.blazelight.p4oc.core.log.AppLog import dev.blazelight.p4oc.data.remote.dto.ProjectDto import dev.blazelight.p4oc.data.remote.mapper.EventMapper import dev.blazelight.p4oc.domain.server.ScopedEvent import dev.blazelight.p4oc.domain.server.ServerGeneration import dev.blazelight.p4oc.domain.server.ServerRef import dev.blazelight.p4oc.domain.server.WorkspaceKey import kotlinx.coroutines.CoroutineScope import kotlinx.coroutines.Dispatchers import kotlinx.coroutines.Job import kotlinx.coroutines.SupervisorJob import kotlinx.coroutines.delay import kotlinx.coroutines.flow.Flow import kotlinx.coroutines.flow.MutableStateFlow import kotlinx.coroutines.flow.StateFlow import kotlinx.coroutines.flow.asStateFlow import kotlinx.coroutines.flow.emptyFlow import kotlinx.coroutines.flow.first import kotlinx.coroutines.flow.flatMapLatest import kotlinx.coroutines.flow.map import kotlinx.coroutines.launch import kotlinx.coroutines.withTimeout import kotlinx.serialization.json.Json import okhttp3.ConnectionPool import okhttp3.Credentials import okhttp3.Dispatcher import okhttp3.Interceptor import okhttp3.MediaType.Companion.toMediaType import okhttp3.OkHttpClient import okhttp3.HttpUrl.Companion.toHttpUrlOrNull import okhttp3.logging.HttpLoggingInterceptor import retrofit2.Retrofit import retrofit2.converter.kotlinx.serialization.asConverterFactory import java.util.concurrent.TimeUnit</ID>
+    <ID>ImportOrdering:HomeScreen.kt$import androidx.compose.foundation.layout.Arrangement import androidx.compose.foundation.layout.Column import androidx.compose.foundation.layout.Row import androidx.compose.foundation.layout.fillMaxSize import androidx.compose.foundation.layout.fillMaxWidth import androidx.compose.foundation.layout.padding import androidx.compose.material.icons.Icons import androidx.compose.material.icons.filled.Folder import androidx.compose.material.icons.filled.Home import androidx.compose.material.icons.filled.Terminal import androidx.compose.material.icons.filled.ViewList import androidx.compose.material3.Icon import androidx.compose.material3.MaterialTheme import androidx.compose.material3.Surface import androidx.compose.material3.Text import androidx.compose.runtime.Composable import androidx.compose.runtime.getValue import androidx.compose.runtime.mutableStateOf import androidx.compose.runtime.remember import androidx.compose.runtime.setValue import androidx.compose.ui.Alignment import androidx.compose.ui.Modifier import androidx.compose.ui.graphics.RectangleShape import androidx.compose.ui.platform.testTag import dev.blazelight.p4oc.ui.theme.LocalOpenCodeTheme import dev.blazelight.p4oc.domain.server.WorkspaceKey import dev.blazelight.p4oc.ui.theme.Spacing import dev.blazelight.p4oc.ui.theme.TuiShapes</ID>
+    <ID>ImportOrdering:SettingsDataStore.kt$import android.content.Context import androidx.datastore.core.DataMigration import androidx.datastore.core.DataStore import androidx.datastore.preferences.core.* import androidx.datastore.preferences.preferencesDataStore import dev.blazelight.p4oc.core.log.AppLog import dev.blazelight.p4oc.core.security.CredentialStore import dev.blazelight.p4oc.core.network.ServerUrl import dev.blazelight.p4oc.data.remote.dto.ModelInput import dev.blazelight.p4oc.domain.server.WorkspaceKey import dev.blazelight.p4oc.domain.session.SessionId import kotlinx.coroutines.CoroutineScope import kotlinx.coroutines.Dispatchers import kotlinx.coroutines.SupervisorJob import kotlinx.coroutines.flow.Flow import kotlinx.coroutines.flow.first import kotlinx.coroutines.flow.map import kotlinx.coroutines.launch import kotlinx.serialization.Serializable import kotlinx.serialization.encodeToString import kotlinx.serialization.json.Json</ID>
+    <ID>ImportOrdering:TabNavHost.kt$import android.net.Uri import android.widget.Toast import androidx.activity.compose.BackHandler import androidx.compose.animation.* import androidx.compose.animation.core.tween import androidx.compose.runtime.Composable import androidx.compose.runtime.LaunchedEffect import androidx.compose.runtime.collectAsState import androidx.compose.runtime.getValue import androidx.compose.runtime.mutableLongStateOf import androidx.compose.runtime.mutableStateOf import androidx.compose.runtime.remember import androidx.compose.runtime.setValue import androidx.compose.ui.platform.LocalContext import androidx.navigation.NavBackStackEntry import androidx.navigation.NavHostController import androidx.navigation.NavType import androidx.navigation.compose.NavHost import androidx.navigation.compose.composable import androidx.navigation.compose.navigation import androidx.navigation.navArgument import dev.blazelight.p4oc.core.datastore.SettingsDataStore import dev.blazelight.p4oc.core.datastore.VisualSettings import dev.blazelight.p4oc.domain.model.SessionConnectionState import dev.blazelight.p4oc.domain.server.WorkspaceKey import dev.blazelight.p4oc.domain.server.ServerRef import dev.blazelight.p4oc.ui.navigation.Screen import dev.blazelight.p4oc.ui.screens.chat.ChatScreen import dev.blazelight.p4oc.ui.screens.diff.DiffViewerScreen import dev.blazelight.p4oc.ui.screens.diff.SessionDiffScreen import dev.blazelight.p4oc.ui.screens.files.FileExplorerScreen import dev.blazelight.p4oc.ui.screens.files.FileViewerScreen import dev.blazelight.p4oc.ui.screens.files.FilesViewModel import dev.blazelight.p4oc.ui.screens.home.HomeScreen import dev.blazelight.p4oc.ui.screens.home.HomeSummaryBuilder import dev.blazelight.p4oc.ui.screens.projects.ProjectsScreen import dev.blazelight.p4oc.ui.screens.sessions.SessionListScreen import dev.blazelight.p4oc.ui.screens.sessions.SessionListViewModel import dev.blazelight.p4oc.ui.screens.settings.* import dev.blazelight.p4oc.ui.screens.terminal.TerminalScreen import dev.blazelight.p4oc.ui.workspace.WorkspaceRepositoryOwner import dev.blazelight.p4oc.ui.workspace.WorkspaceViewModel import org.koin.androidx.compose.koinViewModel import org.koin.compose.koinInject import org.koin.core.parameter.parametersOf</ID>
+    <ID>ImportOrdering:TabState.kt$import dev.blazelight.p4oc.domain.model.SessionConnectionState import dev.blazelight.p4oc.domain.server.ServerRef import dev.blazelight.p4oc.ui.navigation.Screen import dev.blazelight.p4oc.domain.server.WorkspaceKey import kotlinx.coroutines.flow.MutableStateFlow import kotlinx.coroutines.flow.StateFlow import kotlinx.coroutines.flow.asStateFlow import java.util.UUID</ID>
     <ID>Indentation:ChatScreen.kt$ </ID>
     <ID>InstanceOfCheckForException:DialogQueueManager.kt$DialogQueueManager$e is CancellationException</ID>
     <ID>LargeClass:SessionRepositoryImpl.kt$SessionRepositoryImpl : SessionRepository</ID>
@@ -290,6 +311,7 @@
     <ID>LongMethod:FileExplorerScreen.kt$@OptIn(ExperimentalMaterial3Api::class) @Composable fun FileExplorerScreen( viewModel: FilesViewModel, workspaceKey: WorkspaceKey?, onFileClick: (String) -&gt; Unit, onNavigateBack: () -&gt; Unit, onSwitchWorkspace: () -&gt; Unit = {}, )</ID>
     <ID>LongMethod:FilePickerDialog.kt$@OptIn(ExperimentalMaterial3Api::class) @Composable fun FilePickerDialog( files: List&lt;FileNode&gt;, currentPath: String, isLoading: Boolean, error: String?, selectedFiles: List&lt;SelectedFile&gt;, onNavigateTo: (String) -&gt; Unit, onNavigateUp: () -&gt; Unit, onFileSelected: (FileNode) -&gt; Unit, onFileDeselected: (String) -&gt; Unit, onUploadClick: () -&gt; Unit, onConfirm: () -&gt; Unit, onDismiss: () -&gt; Unit )</ID>
     <ID>LongMethod:FileViewerScreen.kt$@OptIn(ExperimentalMaterial3Api::class) @Composable fun FileViewerScreen( path: String, viewModel: FilesViewModel, onNavigateBack: () -&gt; Unit )</ID>
+    <ID>LongMethod:HomeScreen.kt$@Composable fun HomeScreen( summary: HomeSummaryState, onBrowseSessions: () -&gt; Unit, onOpenFiles: () -&gt; Unit, onOpenTerminal: () -&gt; Unit, modifier: Modifier = Modifier, onWorkspaceSelected: (WorkspaceSummary) -&gt; Unit = {}, )</ID>
     <ID>LongMethod:InlineDiffViewer.kt$@Composable fun InlineDiffViewer( fileName: String, diffContent: String, additions: Int = 0, deletions: Int = 0, modifier: Modifier = Modifier )</ID>
     <ID>LongMethod:InlineDiffViewer.kt$@Composable fun PatchDiffViewer( files: List&lt;String&gt;, getDiffContent: suspend (String) -&gt; String?, modifier: Modifier = Modifier )</ID>
     <ID>LongMethod:InlinePermissionPrompt.kt$@Composable fun InlinePermissionPrompt( permission: Permission, onAllow: () -&gt; Unit, onAlways: () -&gt; Unit, onReject: () -&gt; Unit, modifier: Modifier = Modifier )</ID>
@@ -314,8 +336,11 @@
     <ID>LongMethod:ProviderConfigScreen.kt$@OptIn(ExperimentalMaterial3Api::class) @Composable fun ProviderConfigScreen( viewModel: ProviderConfigViewModel = koinViewModel(), onNavigateBack: () -&gt; Unit )</ID>
     <ID>LongMethod:ServerScreen.kt$@Composable private fun DiscoveredServersSection( servers: List&lt;DiscoveredServer&gt;, discoveryState: DiscoveryState, isConnecting: Boolean, onServerClick: (DiscoveredServer) -&gt; Unit )</ID>
     <ID>LongMethod:ServerScreen.kt$@Composable private fun RemoteServerSection( url: String, username: String, password: String, allowInsecure: Boolean, isConnecting: Boolean, onUrlChange: (String) -&gt; Unit, onUsernameChange: (String) -&gt; Unit, onPasswordChange: (String) -&gt; Unit, onAllowInsecureChange: (Boolean) -&gt; Unit, onConnect: () -&gt; Unit )</ID>
+    <ID>LongMethod:ServerScreen.kt$@Composable private fun SavedServersSection( servers: List&lt;SavedServer&gt;, isConnecting: Boolean, hasOpenTabs: Boolean, onServerClick: (SavedServer) -&gt; Unit, onRemoveServer: (SavedServer) -&gt; Unit, )</ID>
     <ID>LongMethod:ServerScreen.kt$@Composable private fun ServerSetupHelpSection()</ID>
     <ID>LongMethod:ServerScreen.kt$@OptIn(ExperimentalMaterial3Api::class) @Composable fun ServerScreen( viewModel: ServerViewModel = koinViewModel(), onNavigateToSessions: () -&gt; Unit, onNavigateToProjects: () -&gt; Unit, onSettings: () -&gt; Unit )</ID>
+    <ID>LongMethod:ServerViewModel.kt$ServerViewModel$fun connectToRemote()</ID>
+    <ID>LongMethod:ServerViewModelIssue31Test.kt$ServerViewModelIssue31Test$@Test fun `connectToRemote persists no-port https url without appending opencode port`()</ID>
     <ID>LongMethod:SessionDiffScreen.kt$@OptIn(ExperimentalMaterial3Api::class) @Composable fun SessionDiffScreen( sessionId: String, workspaceClient: WorkspaceClient, onNavigateBack: () -&gt; Unit, )</ID>
     <ID>LongMethod:SessionListScreen.kt$@OptIn(ExperimentalFoundationApi::class) @Composable private fun SessionCard( session: Session, projectId: String?, projectName: String?, showProjectChip: Boolean, status: SessionStatus?, presence: SessionPresence, isShared: Boolean, onClick: () -&gt; Unit, onDelete: () -&gt; Unit, onRename: () -&gt; Unit, onShare: () -&gt; Unit, onViewChanges: () -&gt; Unit, onSummarize: () -&gt; Unit, onProjectClick: (String) -&gt; Unit, childCount: Int = 0, isExpanded: Boolean = false, onExpandToggle: (() -&gt; Unit)? = null, isSubAgent: Boolean = false )</ID>
     <ID>LongMethod:SessionListScreen.kt$@OptIn(ExperimentalMaterial3Api::class) @Composable private fun NewSessionDialog( projects: List&lt;ProjectInfo&gt;, defaultProjectId: String? = null, initialUseCustomDirectory: Boolean = false, onDismiss: () -&gt; Unit, onCreate: (String?, String?) -&gt; Unit )</ID>
@@ -333,7 +358,8 @@
     <ID>LongMethod:StreamingMarkdown.kt$internal fun parseMarkdownBlocks(text: String): List&lt;MarkdownBlock&gt;</ID>
     <ID>LongMethod:StreamingMarkdown.kt$private fun inlineMarkdown(text: String, colors: MarkdownRenderColors): AnnotatedString</ID>
     <ID>LongMethod:SyntaxHighlightedCode.kt$@Composable fun SyntaxHighlightedCode( code: String, filename: String, modifier: Modifier = Modifier, showLineNumbers: Boolean = true, fontSize: Int = 12, selectable: Boolean = false, )</ID>
-    <ID>LongMethod:TabNavHost.kt$@Composable fun TabNavHost( navController: NavHostController, tabManager: TabManager, tabId: String, onDisconnect: () -&gt; Unit, onNewFilesTab: () -&gt; Unit = {}, onNewTerminalTab: () -&gt; Unit = {}, onCloseTab: () -&gt; Unit = {}, isActiveTab: Boolean = true, startRoute: String = Screen.Sessions.route, workspaceOwner: WorkspaceRepositoryOwner, onConnectionStateChanged: ((SessionConnectionState?) -&gt; Unit)? = null, modifier: androidx.compose.ui.Modifier = androidx.compose.ui.Modifier )</ID>
+    <ID>LongMethod:TabBar.kt$@Composable fun TabBar( tabs: List&lt;TabInstance&gt;, activeTabId: String?, tabTitles: Map&lt;String, String&gt;, tabIcons: Map&lt;String, ImageVector&gt;, tabConnectionStates: Map&lt;String, SessionConnectionState&gt;, onTabClick: (String) -&gt; Unit, onTabClose: (String) -&gt; Unit, onAddClick: () -&gt; Unit, modifier: Modifier = Modifier )</ID>
+    <ID>LongMethod:TabNavHost.kt$@Composable fun TabNavHost( navController: NavHostController, tabManager: TabManager, tabId: String, onDisconnect: () -&gt; Unit, onNewFilesTab: () -&gt; Unit = {}, onNewTerminalTab: () -&gt; Unit = {}, onCloseTab: () -&gt; Unit = {}, isActiveTab: Boolean = true, startRoute: String = Screen.Sessions.route, workspaceOwner: WorkspaceRepositoryOwner, serverRef: ServerRef, onConnectionStateChanged: ((SessionConnectionState?) -&gt; Unit)? = null, modifier: androidx.compose.ui.Modifier = androidx.compose.ui.Modifier )</ID>
     <ID>LongMethod:TerminalScreen.kt$@Composable fun TerminalScreen( viewModel: TerminalViewModel = koinViewModel(), onPtyLoaded: ((ptyId: String, ptyTitle: String) -&gt; Unit)? = null, )</ID>
     <ID>LongMethod:TodoTracker.kt$@Composable private fun TuiTodoItem(todo: Todo)</ID>
     <ID>LongMethod:TodoTracker.kt$@Composable private fun TuiTodoList(todos: List&lt;Todo&gt;)</ID>
@@ -361,6 +387,9 @@
     <ID>LongParameterList:ExpandedWidgets.kt$( tool: Part.Tool, onClick: (() -&gt; Unit)?, showApprovalActions: Boolean, approvalRequestId: String = tool.callID, onToolApprove: (String) -&gt; Unit, onToolDeny: (String) -&gt; Unit, modifier: Modifier = Modifier )</ID>
     <ID>LongParameterList:ExpandedWidgets.kt$( tool: Part.Tool, onClick: (() -&gt; Unit)?, showApprovalActions: Boolean, approvalRequestId: String = tool.callID, onToolApprove: (String) -&gt; Unit, onToolDeny: (String) -&gt; Unit, onOpenSubSession: ((String) -&gt; Unit)?, modifier: Modifier = Modifier )</ID>
     <ID>LongParameterList:FilePickerDialog.kt$( files: List&lt;FileNode&gt;, currentPath: String, isLoading: Boolean, error: String?, selectedFiles: List&lt;SelectedFile&gt;, onNavigateTo: (String) -&gt; Unit, onNavigateUp: () -&gt; Unit, onFileSelected: (FileNode) -&gt; Unit, onFileDeselected: (String) -&gt; Unit, onUploadClick: () -&gt; Unit, onConfirm: () -&gt; Unit, onDismiss: () -&gt; Unit )</ID>
+    <ID>LongParameterList:HomeScreen.kt$( label: String, description: String, icon: @Composable () -&gt; Unit, onClick: () -&gt; Unit, testTag: String, modifier: Modifier = Modifier, )</ID>
+    <ID>LongParameterList:HomeScreen.kt$( summary: HomeSummaryState, onBrowseSessions: () -&gt; Unit, onOpenFiles: () -&gt; Unit, onOpenTerminal: () -&gt; Unit, modifier: Modifier = Modifier, onWorkspaceSelected: (WorkspaceSummary) -&gt; Unit = {}, )</ID>
+    <ID>LongParameterList:HomeScreen.kt$( workspace: WorkspaceSummary, openWork: List&lt;OpenWorkSummary&gt;, onBack: () -&gt; Unit, onOpenFiles: () -&gt; Unit, onOpenTerminal: () -&gt; Unit, modifier: Modifier = Modifier, )</ID>
     <ID>LongParameterList:LicensesScreen.kt$( entry: LicenseEntry, expanded: Boolean, fullText: String?, isLoading: Boolean, onToggle: () -&gt; Unit, onOpenUpstream: () -&gt; Unit, )</ID>
     <ID>LongParameterList:MessageBlockUtils.kt$( block: MessageBlock, onToolApprove: (String) -&gt; Unit, onToolDeny: (String) -&gt; Unit, onToolAlways: (String) -&gt; Unit, onOpenSubSession: ((String) -&gt; Unit)? = null, defaultToolWidgetState: ToolWidgetState = ToolWidgetState.COMPACT, pendingPermissionsByCallId: Map&lt;String, Permission&gt; = emptyMap(), onRevert: ((String) -&gt; Unit)? = null )</ID>
     <ID>LongParameterList:ModelAgentSelector.kt$( availableModels: List&lt;Pair&lt;String, ModelDto&gt;&gt;, selectedModel: ModelInput?, favoriteModels: Set&lt;ModelInput&gt;, recentModels: List&lt;ModelInput&gt;, onModelSelected: (ModelInput) -&gt; Unit, onToggleFavorite: (ModelInput) -&gt; Unit, onDismiss: () -&gt; Unit )</ID>
@@ -373,13 +402,15 @@
     <ID>LongParameterList:SessionListScreen.kt$( session: Session, projectId: String?, projectName: String?, showProjectChip: Boolean, status: SessionStatus?, presence: SessionPresence, isShared: Boolean, onClick: () -&gt; Unit, onDelete: () -&gt; Unit, onRename: () -&gt; Unit, onShare: () -&gt; Unit, onViewChanges: () -&gt; Unit, onSummarize: () -&gt; Unit, onProjectClick: (String) -&gt; Unit, childCount: Int = 0, isExpanded: Boolean = false, onExpandToggle: (() -&gt; Unit)? = null, isSubAgent: Boolean = false )</ID>
     <ID>LongParameterList:SessionListScreen.kt$( viewModel: SessionListViewModel = koinViewModel(), filterProjectId: String? = null, onSessionClick: (sessionId: String, directory: String?) -&gt; Unit, onNewSession: (sessionId: String, directory: String?) -&gt; Unit, onSettings: () -&gt; Unit, onProjects: () -&gt; Unit = {}, onProjectClick: (directory: String) -&gt; Unit = {}, onViewChanges: (sessionId: String) -&gt; Unit = {}, onCreateSessionInWorkspace: (title: String?, directory: String?) -&gt; Unit = { title, directory -&gt; viewModel.createSession(title, directory) }, autoCreateSession: Boolean = false, autoCreateSessionTitle: String? = null, autoCreateSessionDirectory: String? = null, onAutoCreateSessionConsumed: () -&gt; Unit = {}, onNavigateBack: (() -&gt; Unit)? = null )</ID>
     <ID>LongParameterList:SessionWorkspaceClient.kt$SessionWorkspaceClient$( directory: String?, scope: String? = null, roots: Boolean? = null, start: Long? = null, search: String? = null, limit: Int? = null, )</ID>
+    <ID>LongParameterList:SettingsDataStore.kt$SavedServerRegistry$( url: String, name: String, username: String? = null, allowInsecure: Boolean = false, pinned: Boolean = false, defaultWorkspace: String? = null, lastConnectedAt: Long? = null, )</ID>
+    <ID>LongParameterList:SettingsDataStore.kt$SettingsDataStore$( url: String, name: String, username: String? = null, password: String? = null, allowInsecure: Boolean = false, pinned: Boolean = false, defaultWorkspace: String? = null, lastConnectedAt: Long? = null, )</ID>
     <ID>LongParameterList:SettingsScreen.kt$( icon: ImageVector, title: String, modifier: Modifier = Modifier, subtitle: String? = null, onClick: (() -&gt; Unit)? = null, showChevron: Boolean = false, tint: androidx.compose.ui.graphics.Color? = null, enabled: Boolean = true, testTag: String? = null )</ID>
     <ID>LongParameterList:SettingsScreen.kt$( viewModel: SettingsViewModel = koinViewModel(), onNavigateBack: () -&gt; Unit, onDisconnect: () -&gt; Unit, onProviderConfig: () -&gt; Unit = {}, onChatSettings: () -&gt; Unit = {}, onVisualSettings: () -&gt; Unit = {}, onAgentsConfig: () -&gt; Unit = {}, onSkills: () -&gt; Unit = {}, onNotificationSettings: () -&gt; Unit = {}, onConnectionSettings: () -&gt; Unit = {}, onLicenses: () -&gt; Unit = {} )</ID>
     <ID>LongParameterList:SoraCodeEditorView.kt$( initialContent: String, contentGeneration: Int, showLineNumbers: Boolean, editable: Boolean, textSizeSp: Float, filename: String, modifier: Modifier = Modifier, onTextChange: (String) -&gt; Unit, onSelectionChange: (line: Int, column: Int) -&gt; Unit = { _, _ -&gt; }, testTag: String? = null )</ID>
     <ID>LongParameterList:SyntaxHighlightedCode.kt$( code: String, filename: String, modifier: Modifier = Modifier, showLineNumbers: Boolean = true, fontSize: Int = 12, selectable: Boolean = false, )</ID>
     <ID>LongParameterList:TabBar.kt$( tabs: List&lt;TabInstance&gt;, activeTabId: String?, tabTitles: Map&lt;String, String&gt;, tabIcons: Map&lt;String, ImageVector&gt;, tabConnectionStates: Map&lt;String, SessionConnectionState&gt;, onTabClick: (String) -&gt; Unit, onTabClose: (String) -&gt; Unit, onAddClick: () -&gt; Unit, modifier: Modifier = Modifier )</ID>
-    <ID>LongParameterList:TabBar.kt$( title: String, icon: ImageVector, connectionState: SessionConnectionState?, isActive: Boolean, onClick: () -&gt; Unit, onClose: () -&gt; Unit, modifier: Modifier = Modifier )</ID>
-    <ID>LongParameterList:TabNavHost.kt$( navController: NavHostController, tabManager: TabManager, tabId: String, onDisconnect: () -&gt; Unit, onNewFilesTab: () -&gt; Unit = {}, onNewTerminalTab: () -&gt; Unit = {}, onCloseTab: () -&gt; Unit = {}, isActiveTab: Boolean = true, startRoute: String = Screen.Sessions.route, workspaceOwner: WorkspaceRepositoryOwner, onConnectionStateChanged: ((SessionConnectionState?) -&gt; Unit)? = null, modifier: androidx.compose.ui.Modifier = androidx.compose.ui.Modifier )</ID>
+    <ID>LongParameterList:TabBar.kt$( title: String, icon: ImageVector, connectionState: SessionConnectionState?, isActive: Boolean, closeable: Boolean = true, onClick: () -&gt; Unit, onClose: () -&gt; Unit, modifier: Modifier = Modifier )</ID>
+    <ID>LongParameterList:TabNavHost.kt$( navController: NavHostController, tabManager: TabManager, tabId: String, onDisconnect: () -&gt; Unit, onNewFilesTab: () -&gt; Unit = {}, onNewTerminalTab: () -&gt; Unit = {}, onCloseTab: () -&gt; Unit = {}, isActiveTab: Boolean = true, startRoute: String = Screen.Sessions.route, workspaceOwner: WorkspaceRepositoryOwner, serverRef: ServerRef, onConnectionStateChanged: ((SessionConnectionState?) -&gt; Unit)? = null, modifier: androidx.compose.ui.Modifier = androidx.compose.ui.Modifier )</ID>
     <ID>LongParameterList:TermuxExtraKeysBar.kt$( onKeyPress: (String) -&gt; Unit, ctrlActive: Boolean, altActive: Boolean, onCtrlToggle: () -&gt; Unit, onAltToggle: () -&gt; Unit, modifier: Modifier = Modifier, enabled: Boolean = true, onPaste: (() -&gt; Unit)? = null, )</ID>
     <ID>LongParameterList:ToolCallWidget.kt$( tool: Part.Tool, onClick: (() -&gt; Unit)?, showApprovalActions: Boolean = true, approvalRequestId: String = tool.callID, onToolApprove: (String) -&gt; Unit, onToolDeny: (String) -&gt; Unit, onOpenSubSession: ((String) -&gt; Unit)? = null, modifier: Modifier = Modifier )</ID>
     <ID>LongParameterList:ToolGroupWidget.kt$( tools: List&lt;Part.Tool&gt;, defaultState: ToolWidgetState, pendingPermissionIdsByCallId: Map&lt;String, String&gt; = emptyMap(), onToolApprove: (String) -&gt; Unit, onToolDeny: (String) -&gt; Unit, onOpenSubSession: ((String) -&gt; Unit)? = null, modifier: Modifier = Modifier )</ID>
@@ -404,9 +435,7 @@
     <ID>MagicNumber:ChatViewModel.kt$ChatViewModel$5000</ID>
     <ID>MagicNumber:ConnectionManager.kt$ConnectionManager$1000L</ID>
     <ID>MagicNumber:ConnectionManager.kt$ConnectionManager$30</ID>
-    <ID>MagicNumber:ConnectionManager.kt$ConnectionManager$443</ID>
     <ID>MagicNumber:ConnectionManager.kt$ConnectionManager$60</ID>
-    <ID>MagicNumber:ConnectionManager.kt$ConnectionManager$80</ID>
     <ID>MagicNumber:ConnectionManager.kt$ConnectionManager$8_000</ID>
     <ID>MagicNumber:ConnectionSettingsScreen.kt$0.5f</ID>
     <ID>MagicNumber:DiffViewerScreen.kt$4</ID>
@@ -487,6 +516,7 @@
     <ID>MagicNumber:HapticFeedback.kt$HapticFeedback$120L</ID>
     <ID>MagicNumber:HapticFeedback.kt$HapticFeedback$45L</ID>
     <ID>MagicNumber:HapticFeedback.kt$HapticFeedback$80L</ID>
+    <ID>MagicNumber:HomeScreen.kt$6</ID>
     <ID>MagicNumber:InlineDiffViewer.kt$4</ID>
     <ID>MagicNumber:MdnsDiscoveryManager.kt$MdnsDiscoveryManager$200</ID>
     <ID>MagicNumber:ModelAgentSelector.kt$0.85f</ID>
@@ -586,15 +616,20 @@
     <ID>MatchingDeclarationName:NotificationSettingsScreen.kt$NotificationSettingsViewModel : ViewModel</ID>
     <ID>MatchingDeclarationName:TodoDtos.kt$TodoDto</ID>
     <ID>MatchingDeclarationName:VisualSettingsScreen.kt$VisualSettingsViewModel : ViewModel</ID>
+    <ID>MaxLineLength:AttentionBadgeRegistryTest.kt$AttentionBadgeRegistryTest$registry.set(AttentionSignal(AttentionKey(alpha, workspace, "tab-a"), AttentionSeverity.Warning, "awaiting input"))</ID>
     <ID>MaxLineLength:ChatViewModelTest.kt$ChatViewModelTest$"file:/test/src/My%20File%20%25/%C3%BCmlaut/%E3%81%93%E3%82%93%E3%81%AB%E3%81%A1%E3%81%AF/hash%23query%3F.kt"</ID>
     <ID>MaxLineLength:ConnectionManager.kt$ConnectionManager$AppLog.w(TAG, "SSE remained in Error after ${settings.reconnectTimeoutSeconds}s; escalating to Disconnected: ${state.message}")</ID>
     <ID>MaxLineLength:ConnectionManager.kt$ConnectionManager$level = if (BuildConfig.DEBUG) HttpLoggingInterceptor.Level.BODY else HttpLoggingInterceptor.Level.NONE</ID>
     <ID>MaxLineLength:ConnectionManager.kt$ConnectionManager$level = if (BuildConfig.DEBUG) HttpLoggingInterceptor.Level.HEADERS else HttpLoggingInterceptor.Level.NONE</ID>
     <ID>MaxLineLength:FileExplorerScreen.kt$leadingIcon = { Icon(Icons.AutoMirrored.Filled.NoteAdd, contentDescription = null, tint = theme.textMuted) }</ID>
+    <ID>MaxLineLength:HomeScreen.kt$body = "${summary.openWork.size} bounded open work item${if (summary.openWork.size == 1) "" else "s"}; ${summary.workspaces.size} workspace summar${if (summary.workspaces.size == 1) "y" else "ies"} loaded without chat history."</ID>
+    <ID>MaxLineLength:HomeScreen.kt$body = "Attention appears as compact badges and dots on Home, tabs, servers, and workspaces — not as a feed."</ID>
+    <ID>MaxLineLength:HomeScreen.kt$description = "${workspace.serverRef.displayName} · ${workspace.openTabCount} open item${if (workspace.openTabCount == 1) "" else "s"}"</ID>
     <ID>MaxLineLength:InlineDiffViewer.kt$currentDiffContent?.let { ParsedDiffParser.parse(it).allHunks().flatMap { hunk -&gt; hunk.lines } }</ID>
     <ID>MaxLineLength:KoinModules.kt$"Workspace generation ${generation.value} does not match active generation ${activeGeneration?.value ?: "&lt;none&gt;"}"</ID>
     <ID>MaxLineLength:KoinModules.kt$"Workspace server ${serverRef.endpointKey} does not match active server ${activeServerRef.endpointKey}"</ID>
     <ID>MaxLineLength:KoinModules.kt$?:</ID>
+    <ID>MaxLineLength:MainTabScreen.kt$"Target: ${workspaceLabel(targetWorkspace, tabTitleLabels) ?: workspaceSubtitle(targetWorkspace)}"</ID>
     <ID>MaxLineLength:MainTabScreen.kt$restoreError = "Saved tabs belong to ${result.persistedEndpointKey}, not ${result.activeEndpointKey}. Starting fresh."</ID>
     <ID>MaxLineLength:MainTabScreen.kt$val hasUnread = sessionState.responseCompletedToken &gt; readToken &amp;&amp; sessionState.status !is SessionStatus.Busy</ID>
     <ID>MaxLineLength:MessageDtos.kt$MessageErrorDto$val name: String</ID>
@@ -603,6 +638,9 @@
     <ID>MaxLineLength:OfishSessionFactory.kt$OfishSessionFactory$val timestamp = OfishSessionNames.parseTimestamp(session.title) ?: (session.time.updated ?: session.time.created)</ID>
     <ID>MaxLineLength:ParsedDiff.kt$ParsedDiffParser$if</ID>
     <ID>MaxLineLength:PartDtos.kt$PartDto$val type: String</ID>
+    <ID>MaxLineLength:ServerConnectionRegistry.kt$ServerConnectionRegistry$fun connectionState(serverRef: ServerRef): StateFlow&lt;ConnectionState&gt;</ID>
+    <ID>MaxLineLength:ServerConnectionRegistryTest.kt$ServerConnectionRegistryTest$coEvery { manager.connect(server.toServerConfig(), any()) } returns Result.failure(IllegalStateException(message))</ID>
+    <ID>MaxLineLength:ServerScreen.kt$text = "${server.endpoint} · ${if (server.allowInsecure) "TLS checks off" else "TLS checks on"}"</ID>
     <ID>MaxLineLength:SessionListScreen.kt$text</ID>
     <ID>MaxLineLength:SessionListViewModelTest.kt$SessionListViewModelTest$Pair("/project", "apple") to listOf(FakeWorkspaceClient.sessionDto("project", title = "apple project", directory = "/project"))</ID>
     <ID>MaxLineLength:SessionListViewModelTest.kt$SessionListViewModelTest$Pair(null, "apple") to listOf(FakeWorkspaceClient.sessionDto("global", title = "apple global", directory = "/global"))</ID>
@@ -621,14 +659,20 @@
     <ID>MaxLineLength:SessionRepositoryImplTest.kt$SessionRepositoryImplTest$FakeWorkspaceClient.sessionDto(id = "shared", title = "older match", directory = "/global", updatedAt = 1L)</ID>
     <ID>MaxLineLength:SessionRepositoryImplTest.kt$SessionRepositoryImplTest$projects = listOf(FakeWorkspaceClient.projectDto("p1", "/repo/p1"), FakeWorkspaceClient.projectDto("p2", "/repo/p2"))</ID>
     <ID>MaxLineLength:SettingsDataStore.kt$SettingsDataStore$?:</ID>
+    <ID>MaxLineLength:TabManager.kt$TabManager$return missingServerEndpointKeys.firstOrNull()?.let { RestoreResult.MissingServer(it) } ?: RestoreResult.Empty</ID>
+    <ID>MaxLineLength:TabManager.kt$TabManager$val serverEndpointKey = persisted.resolvedServerEndpointKey(state.serverEndpointKey) ?: return@mapNotNull null</ID>
+    <ID>MaxLineLength:TabManagerPersistenceTest.kt$TabManagerPersistenceTest$assertEquals(listOf(alpha.endpointKey, beta.endpointKey, local.endpointKey), restoredWorkTabs.map { it.serverEndpointKey })</ID>
+    <ID>MaxLineLength:TabManagerPersistenceTest.kt$TabManagerPersistenceTest$assertEquals(listOf(server.endpointKey, otherServer.endpointKey), listOf(first.serverEndpointKey, second.serverEndpointKey))</ID>
     <ID>MaxLineLength:TabNavHost.kt$TouchWorkspaceViewModel(backStackEntry, navController, workspaceRoute, workspaceOwner, backStackEntry.destination.route)</ID>
     <ID>MaxLineLength:ToolGroupWidget.kt$onApprove = { onToolApprove(pendingPermissionIdsByCallId[tool.callID] ?: tool.callID) }</ID>
     <ID>MaxLineLength:ToolGroupWidget.kt$toolList.any { it.state is ToolState.Pending || it.callID in pendingPermissionIdsByCallId.keys } -&gt; AggregateToolState.PENDING</ID>
     <ID>MaxLineLength:WorkspaceFileRepositoryTest.kt$WorkspaceFileRepositoryTest$uri = "file:///src/My%20File%20%25/%C3%BCmlaut/%E3%81%93%E3%82%93%E3%81%AB%E3%81%A1%E3%81%AF/hash%23query%3F.kt"</ID>
     <ID>MaxLineLength:WorkspaceRepositoryOwner.kt$WorkspaceRepositoryOwner$"WorkspaceRepositoryOwner.$event tabId=$tabId workspaceKey=${workspace.key} server=${workspace.server.endpointKey} generation=${generation.value} identity=$identityHash"</ID>
+    <ID>MaximumLineLength:AttentionBadgeRegistryTest.kt$AttentionBadgeRegistryTest$ </ID>
     <ID>MaximumLineLength:ChatViewModelTest.kt$ChatViewModelTest$ </ID>
     <ID>MaximumLineLength:ConnectionManager.kt$ConnectionManager$ </ID>
     <ID>MaximumLineLength:FileExplorerScreen.kt$ </ID>
+    <ID>MaximumLineLength:HomeScreen.kt$ </ID>
     <ID>MaximumLineLength:InlineDiffViewer.kt$ </ID>
     <ID>MaximumLineLength:KoinModules.kt$ </ID>
     <ID>MaximumLineLength:MainTabScreen.kt$ </ID>
@@ -637,11 +681,16 @@
     <ID>MaximumLineLength:OfishSessionFactory.kt$OfishSessionFactory$ </ID>
     <ID>MaximumLineLength:ParsedDiff.kt$ParsedDiffParser$ </ID>
     <ID>MaximumLineLength:PartDtos.kt$PartDto$ </ID>
+    <ID>MaximumLineLength:ServerConnectionRegistry.kt$ServerConnectionRegistry$ </ID>
+    <ID>MaximumLineLength:ServerConnectionRegistryTest.kt$ServerConnectionRegistryTest$ </ID>
+    <ID>MaximumLineLength:ServerScreen.kt$ </ID>
     <ID>MaximumLineLength:SessionListScreen.kt$ </ID>
     <ID>MaximumLineLength:SessionListViewModelTest.kt$SessionListViewModelTest$ </ID>
     <ID>MaximumLineLength:SessionRepositoryImpl.kt$SessionRepositoryImpl$ </ID>
     <ID>MaximumLineLength:SessionRepositoryImplTest.kt$SessionRepositoryImplTest$ </ID>
     <ID>MaximumLineLength:SettingsDataStore.kt$SettingsDataStore$ </ID>
+    <ID>MaximumLineLength:TabManager.kt$TabManager$ </ID>
+    <ID>MaximumLineLength:TabManagerPersistenceTest.kt$TabManagerPersistenceTest$ </ID>
     <ID>MaximumLineLength:TabNavHost.kt$ </ID>
     <ID>MaximumLineLength:ToolGroupWidget.kt$ </ID>
     <ID>MaximumLineLength:WorkspaceFileRepositoryTest.kt$WorkspaceFileRepositoryTest$ </ID>
@@ -650,12 +699,15 @@
     <ID>MultiLineIfElse:FilePickerDialog.kt$stringResource(R.string.empty_folder)</ID>
     <ID>NestedBlockDepth:OfishMutationClient.kt$OfishMutationClient$private suspend fun uploadInSession( sessionId: String, path: String, request: FileUploadRequest, capabilities: OfishCapabilities, ): FileOperationResult&lt;FileUploadResult&gt;</ID>
     <ID>NestedBlockDepth:StreamingMarkdown.kt$internal fun parseMarkdownBlocks(text: String): List&lt;MarkdownBlock&gt;</ID>
+    <ID>NoBlankLineBeforeRbrace:TabManagerPersistenceTest.kt$TabManagerPersistenceTest$ </ID>
     <ID>NoBlankLineBeforeRbrace:VisualSettingsScreen.kt$ </ID>
     <ID>NoConsecutiveBlankLines:ChatViewModelTest.kt$ChatViewModelTest$ </ID>
     <ID>NoConsecutiveBlankLines:ComponentPreviews.kt$ </ID>
+    <ID>NoConsecutiveBlankLines:TabState.kt$TabState$ </ID>
     <ID>NoSemicolons:CommandPalette.kt$;</ID>
     <ID>NoSemicolons:TextMateAnnotatedStringTest.kt$TextMateAnnotatedStringTest.Companion$;</ID>
     <ID>NoTrailingSpaces:ToolGroupWidget.kt$ </ID>
+    <ID>NoUnusedImports:ServerConnectionRegistryTest.kt$dev.blazelight.p4oc.core.network.ServerConnectionRegistryTest.kt</ID>
     <ID>NoWildcardImports:AgentsConfigScreen.kt$import androidx.compose.foundation.layout.*</ID>
     <ID>NoWildcardImports:AgentsConfigScreen.kt$import androidx.compose.material.icons.filled.*</ID>
     <ID>NoWildcardImports:AgentsConfigScreen.kt$import androidx.compose.material3.*</ID>
@@ -843,7 +895,7 @@
     <ID>ReturnCount:StreamingMarkdown.kt$private fun parseTable(lines: List&lt;String&gt;, start: Int): ParsedTable?</ID>
     <ID>ReturnCount:StreamingMarkdown.kt$private fun parseTableDelimiter(line: String, expectedCells: Int): Int?</ID>
     <ID>ReturnCount:TabChatRouteCodec.kt$TabChatRouteCodec$fun decode(route: String): TabChatRoute?</ID>
-    <ID>ReturnCount:TabManager.kt$TabManager$fun restoreState(state: PersistedTabState, activeServer: ServerRef): RestoreResult</ID>
+    <ID>ReturnCount:TabManager.kt$TabManager$fun restoreState( state: PersistedTabState, availableServers: Map&lt;String, ServerRef&gt;, fallbackServer: ServerRef? = null, ): RestoreResult</ID>
     <ID>ReturnCount:TermuxTerminalView.kt$KeyInterceptingContainer$private fun handleKeyDown(event: KeyEvent): Boolean</ID>
     <ID>ReturnCount:TermuxTerminalView.kt$TerminalInputView$override fun onKeyDown(keyCode: Int, event: KeyEvent): Boolean</ID>
     <ID>ReturnCount:TermuxTerminalView.kt$TerminalInputView.&lt;no name provided&gt;$override fun sendKeyEvent(event: KeyEvent): Boolean</ID>
@@ -855,6 +907,8 @@
     <ID>ReturnCount:ToolStateExt.kt$private fun parseQuestionOption(json: JsonObject): QuestionOption?</ID>
     <ID>ReturnCount:UploadOrchestrator.kt$UploadOrchestrator$private suspend fun uploadOne(index: Int)</ID>
     <ID>ReturnCount:UploadVisuals.kt$fun getMimeTypeLabel(mimeType: String?): String</ID>
+    <ID>SpacingBetweenDeclarationsWithAnnotations:SettingsDataStore.kt$PersistedWorkspaceKey</ID>
+    <ID>SpacingBetweenDeclarationsWithAnnotations:TabManagerPersistenceTest.kt$TabManagerPersistenceTest$@Test fun `pinned Home is leftmost non-closeable and not duplicated`()</ID>
     <ID>SwallowedException:ChatInputBar.kt$e: Exception</ID>
     <ID>SwallowedException:Mappers.kt$MessageMapper$e: Exception</ID>
     <ID>SwallowedException:SettingsDataStore.kt$SettingsDataStore$e: Exception</ID>
@@ -1050,6 +1104,7 @@
     <ID>Wrapping:ServerScreen.kt$Text( stringResource(R.string.field_server_url_placeholder), fontFamily = FontFamily.Monospace )</ID>
     <ID>Wrapping:SessionListViewModel.kt$SessionListViewModel$-&gt;</ID>
     <ID>Wrapping:SessionListViewModel.kt$SessionListViewModel$it.copy( isLoading = false, loadingText = null, loadingProgress = null, loadingCounts = null, error = "Switch to $directory before creating a session" )</ID>
+    <ID>Wrapping:TabManagerPersistenceTest.kt$TabManagerPersistenceTest$it.serverEndpointKey</ID>
     <ID>Wrapping:ToolGroupWidget.kt$it.state is ToolState.Pending || it.callID in pendingPermissionIdsByCallId.keys</ID>
   </CurrentIssues>
 </SmellBaseline>

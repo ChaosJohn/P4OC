@@ -76,6 +76,35 @@ class SessionRepositoryProviderTest {
     }
 
     @Test
+    fun `same directory on different servers gets separate repositories`() {
+        val provider = provider()
+        val otherServer = ServerRef.fromEndpointKey("http://other.test:4096")
+        val otherWorkspace = Workspace(server = otherServer, directory = workspace.directory.orEmpty())
+
+        val first = provider.acquire(workspace, generation)
+        val second = provider.acquire(otherWorkspace, generation)
+
+        assertNotSame(first.repository, second.repository)
+        assertNotSame(first.workspaceClient, second.workspaceClient)
+    }
+
+    @Test
+    fun `reconnect generation recreates only affected server workspace owner`() {
+        val provider = provider()
+        val otherServer = ServerRef.fromEndpointKey("http://other.test:4096")
+        val otherWorkspace = Workspace(server = otherServer, directory = workspace.directory.orEmpty())
+        val first = provider.acquire(workspace, generation)
+        val other = provider.acquire(otherWorkspace, generation)
+
+        provider.release(workspace, generation)
+        val afterReconnect = provider.acquire(workspace, ServerGeneration(2))
+        val otherAgain = provider.acquire(otherWorkspace, generation)
+
+        assertNotSame(first.repository, afterReconnect.repository)
+        assertSame(other.repository, otherAgain.repository)
+    }
+
+    @Test
     fun `provider routes scoped events to shared repository`() = runTest {
         val event = sessionCreatedEvent("s1")
         val provider = provider(

@@ -1,0 +1,107 @@
+package dev.blazelight.p4oc.core.datastore
+
+import org.junit.Assert.assertEquals
+import org.junit.Assert.assertFalse
+import org.junit.Assert.assertTrue
+import org.junit.Test
+
+class SavedServerRegistryTest {
+
+    @Test
+    fun `fromConnection preserves no-port endpoint for display and canonicalizes endpoint key`() {
+        val server = SavedServerRegistry.fromConnection(
+            url = "https://my-host.example.com",
+            name = "Remote",
+            username = "opencode",
+        )
+
+        assertEquals("https://my-host.example.com", server.endpoint)
+        assertEquals("https://my-host.example.com:4096", server.endpointKey)
+        assertEquals(server.endpointKey, server.id)
+        assertEquals("Remote", server.displayName)
+        assertEquals("opencode", server.username)
+    }
+
+    @Test
+    fun `merge dedupes equivalent endpoint forms by endpoint key`() {
+        val bare = SavedServerRegistry.fromConnection(
+            url = "https://my-host.example.com",
+            name = "Remote",
+        )
+        val explicit = SavedServerRegistry.fromConnection(
+            url = "https://my-host.example.com:4096",
+            name = "Updated Remote",
+            allowInsecure = true,
+            pinned = true,
+        )
+
+        val merged = SavedServerRegistry.merge(listOf(bare, explicit))
+
+        assertEquals(1, merged.size)
+        assertEquals("https://my-host.example.com", merged.single().endpoint)
+        assertEquals("https://my-host.example.com:4096", merged.single().endpointKey)
+        assertTrue(merged.single().allowInsecure)
+        assertTrue(merged.single().pinned)
+    }
+
+    @Test
+    fun `upsert replaces existing server by stable id`() {
+        val original = SavedServerRegistry.fromConnection(
+            url = "http://alpha.example.com",
+            name = "Alpha",
+        )
+        val beta = SavedServerRegistry.fromConnection(
+            url = "http://beta.example.com",
+            name = "Beta",
+        )
+        val edited = original.copy(
+            displayName = "Alpha edited",
+            username = "jasmin",
+            defaultWorkspace = "/work/p4oc",
+        )
+
+        val updated = SavedServerRegistry.upsert(listOf(original, beta), edited)
+
+        assertEquals(2, updated.size)
+        assertEquals("Alpha edited", updated.first { it.id == original.id }.displayName)
+        assertEquals("jasmin", updated.first { it.id == original.id }.username)
+        assertEquals("/work/p4oc", updated.first { it.id == original.id }.defaultWorkspace)
+        assertEquals("Beta", updated.first { it.id == beta.id }.displayName)
+    }
+
+    @Test
+    fun `merge surfaces migrated last connection and recent servers without data loss`() {
+        val lastConnection = SavedServerRegistry.fromConnection(
+            url = "https://alpha.example.com",
+            name = "Alpha last",
+            username = "last-user",
+        )
+        val recentDuplicate = SavedServerRegistry.fromConnection(
+            url = "https://alpha.example.com:4096",
+            name = "Alpha recent",
+            allowInsecure = true,
+        )
+        val recentOnly = SavedServerRegistry.fromConnection(
+            url = "http://beta.example.com:9999",
+            name = "Beta recent",
+        )
+
+        val migrated = SavedServerRegistry.merge(listOf(lastConnection, recentDuplicate, recentOnly))
+
+        assertEquals(2, migrated.size)
+        val alpha = migrated.first { it.endpointKey == "https://alpha.example.com:4096" }
+        assertEquals("https://alpha.example.com", alpha.endpoint)
+        assertEquals("last-user", alpha.username)
+        assertTrue(alpha.allowInsecure)
+        assertTrue(migrated.any { it.displayName == "Beta recent" })
+    }
+
+    @Test
+    fun `saved server model has no password or api key field`() {
+        val propertyNames = SavedServer::class.java.declaredFields.map { it.name }
+
+        assertFalse(propertyNames.any { it.contains("password", ignoreCase = true) })
+        assertFalse(propertyNames.any { it.contains("apiKey", ignoreCase = true) })
+        assertFalse(propertyNames.any { it.contains("token", ignoreCase = true) })
+    }
+}

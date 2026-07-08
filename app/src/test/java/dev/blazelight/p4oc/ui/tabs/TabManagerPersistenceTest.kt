@@ -20,6 +20,7 @@ class TabManagerPersistenceTest {
         val tab = manager.createTab(
             startRoute = Screen.Sessions.route,
             workspaceKey = WorkspaceKey.Global,
+            serverRef = server,
             focus = true,
         )
         manager.updateTabWorkspace(tab.id, WorkspaceKey.Directory("/repo/a"))
@@ -33,6 +34,7 @@ class TabManagerPersistenceTest {
         assertEquals("s1", saved.tabs.single().sessionId)
         assertEquals(PersistedWorkspaceKey.Type.DIRECTORY, saved.tabs.single().workspaceKey?.type)
         assertEquals("/repo/a", saved.tabs.single().workspaceKey?.value)
+        assertEquals(server.endpointKey, saved.tabs.single().serverEndpointKey)
     }
 
     @Test
@@ -56,9 +58,11 @@ class TabManagerPersistenceTest {
 
         assertTrue(result is RestoreResult.Restored)
         assertEquals("tab-1", manager.activeTabId.value)
-        assertEquals("session with space", manager.tabs.value.single().sessionId)
-        assertEquals("/repo/a b", manager.tabs.value.single().workspaceDirectory)
-        assertEquals("chat/session%20with%20space", manager.tabs.value.single().startRoute)
+        val workTab = manager.tabs.value.single { !it.isPinnedHome }
+        assertEquals("session with space", workTab.sessionId)
+        assertEquals("/repo/a b", workTab.workspaceDirectory)
+        assertEquals(server.endpointKey, workTab.serverEndpointKey)
+        assertEquals("chat/session%20with%20space", workTab.startRoute)
     }
 
     @Test
@@ -79,7 +83,8 @@ class TabManagerPersistenceTest {
         val result = manager.restoreState(state, server)
 
         assertTrue(result is RestoreResult.Empty)
-        assertFalse(manager.hasTabs())
+        assertEquals(listOf(TabInstance.HOME_TAB_ID), manager.tabs.value.map { it.id })
+        assertEquals(TabInstance.HOME_TAB_ID, manager.activeTabId.value)
     }
 
     @Test
@@ -111,25 +116,35 @@ class TabManagerPersistenceTest {
 
         assertTrue(result is RestoreResult.Restored)
         assertEquals(2, (result as RestoreResult.Restored).count)
-        assertEquals(listOf("directory-tab", "global-tab"), manager.tabs.value.map { it.id })
+        val workTabs = manager.tabs.value.filterNot { it.isPinnedHome }
+        assertEquals(listOf("directory-tab", "global-tab"), workTabs.map { it.id })
         assertEquals("directory-tab", manager.activeTabId.value)
-        assertEquals("/repo/valid", manager.tabs.value[0].workspaceDirectory)
-        assertEquals(WorkspaceKey.Global, manager.tabs.value[1].workspaceKey)
+        assertEquals("/repo/valid", workTabs[0].workspaceDirectory)
+        assertEquals(WorkspaceKey.Global, workTabs[1].workspaceKey)
     }
 
     @Test
-    fun `restoreState rejects mismatched active server without tabs`() {
+    fun `restoreState reports missing server without restoring wrong server`() {
         val manager = TabManager()
+        val oldServer = ServerRef.fromEndpointKey("http://old.example:4096")
         val state = PersistedTabState(
-            serverEndpointKey = "http://old.example",
+            serverEndpointKey = oldServer.endpointKey,
             activeTabId = "tab-1",
-            tabs = listOf(PersistedTab(id = "tab-1", startRoute = Screen.Sessions.route)),
+            tabs = listOf(
+                PersistedTab(
+                    id = "tab-1",
+                    startRoute = Screen.Sessions.route,
+                    workspaceKey = PersistedWorkspaceKey(PersistedWorkspaceKey.Type.GLOBAL),
+                    serverEndpointKey = oldServer.endpointKey,
+                ),
+            ),
         )
 
-        val result = manager.restoreState(state, server)
+        val result = manager.restoreState(state, mapOf(server.endpointKey to server))
 
-        assertTrue(result is RestoreResult.ServerMismatch)
-        assertFalse(manager.hasTabs())
+        assertTrue(result is RestoreResult.MissingServer)
+        assertEquals(oldServer.endpointKey, (result as RestoreResult.MissingServer).endpointKey)
+        assertEquals(listOf(TabInstance.HOME_TAB_ID), manager.tabs.value.map { it.id })
     }
 
     @Test
@@ -149,11 +164,201 @@ class TabManagerPersistenceTest {
     }
 
     @Test
+    fun `restoreState restores mixed-server tabs when all servers are available`() {
+        val manager = TabManager()
+        val beta = ServerRef.fromEndpointKey("http://beta.example:4096")
+        val state = PersistedTabState(
+            serverEndpointKey = server.endpointKey,
+            activeTabId = "beta-files",
+            tabs = listOf(
+                PersistedTab(
+                    id = "alpha-chat",
+                    startRoute = Screen.Sessions.route,
+                    sessionId = "s-alpha",
+                    workspaceKey = PersistedWorkspaceKey(PersistedWorkspaceKey.Type.DIRECTORY, "/alpha"),
+                    serverEndpointKey = server.endpointKey,
+                ),
+                PersistedTab(
+                    id = "beta-files",
+                    startRoute = Screen.Files.route,
+                    workspaceKey = PersistedWorkspaceKey(PersistedWorkspaceKey.Type.DIRECTORY, "/beta"),
+                    serverEndpointKey = beta.endpointKey,
+                ),
+            ),
+        )
+
+        val result = manager.restoreState(
+            state,
+            mapOf(server.endpointKey to server, beta.endpointKey to beta),
+        )
+
+        assertTrue(result is RestoreResult.Restored)
+        assertEquals("beta-files", manager.activeTabId.value)
+        val workTabs = manager.tabs.value.filterNot { it.isPinnedHome }
+        assertEquals(listOf(server.endpointKey, beta.endpointKey), workTabs.map { it.serverEndpointKey })
+        assertEquals(listOf("/alpha", "/beta"), workTabs.map { it.workspaceDirectory })
+    }
+
+    @Test
+    fun `restoreState restores available tabs and reports unavailable mixed server`() {
+        val manager = TabManager()
+        val missing = ServerRef.fromEndpointKey("http://missing.example:4096")
+        val state = PersistedTabState(
+            serverEndpointKey = server.endpointKey,
+            activeTabId = "missing-files",
+            tabs = listOf(
+                PersistedTab(
+                    id = "alpha-chat",
+                    startRoute = Screen.Sessions.route,
+                    sessionId = "s-alpha",
+                    workspaceKey = PersistedWorkspaceKey(PersistedWorkspaceKey.Type.DIRECTORY, "/alpha"),
+                    serverEndpointKey = server.endpointKey,
+                ),
+                PersistedTab(
+                    id = "missing-files",
+                    startRoute = Screen.Files.route,
+                    workspaceKey = PersistedWorkspaceKey(PersistedWorkspaceKey.Type.DIRECTORY, "/missing"),
+                    serverEndpointKey = missing.endpointKey,
+                ),
+            ),
+        )
+
+        val result = manager.restoreState(state, mapOf(server.endpointKey to server))
+
+        assertTrue(result is RestoreResult.MissingServer)
+        assertEquals(missing.endpointKey, (result as RestoreResult.MissingServer).endpointKey)
+        assertEquals(1, result.restoredCount)
+        assertEquals(listOf(TabInstance.HOME_TAB_ID, "alpha-chat"), manager.tabs.value.map { it.id })
+        assertEquals("alpha-chat", manager.activeTabId.value)
+
+    }
+    @Test
+    fun `pinned Home is leftmost non-closeable and not duplicated`() {
+        val manager = TabManager()
+
+        manager.ensureHomeTab(focus = true)
+        manager.ensureHomeTab(focus = false)
+        val work = manager.createTab(
+            startRoute = Screen.Files.route,
+            workspaceKey = WorkspaceKey.Global,
+            serverRef = server,
+            focus = true,
+        )
+
+        assertEquals(listOf(TabInstance.HOME_TAB_ID, work.id), manager.tabs.value.map { it.id })
+        manager.closeTab(TabInstance.HOME_TAB_ID)
+        assertEquals(listOf(TabInstance.HOME_TAB_ID, work.id), manager.tabs.value.map { it.id })
+    }
+
+    @Test
+    fun `saveState does not persist pinned Home as normal tab`() {
+        val manager = TabManager()
+        manager.ensureHomeTab(focus = true)
+        manager.createTab(
+            startRoute = Screen.Files.route,
+            workspaceKey = WorkspaceKey.Global,
+            serverRef = server,
+            focus = true,
+        )
+
+        val saved = manager.saveState(server)!!
+
+        assertEquals(1, saved.tabs.size)
+        assertEquals(Screen.Files.route, saved.tabs.single().startRoute)
+    }
+
+    @Test
+    fun `app restart restores Home plus Alpha chat Beta files and Local terminal safely`() {
+        val alpha = ServerRef.fromEndpointKey("http://alpha.example:4096")
+        val beta = ServerRef.fromEndpointKey("http://beta.example:4096")
+        val local = ServerRef.fromEndpointKey("http://localhost:4096")
+        val beforeRestart = TabManager()
+        beforeRestart.ensureHomeTab(focus = false)
+        val alphaChat = beforeRestart.createTab(
+            startRoute = Screen.Chat.createRoute("alpha-session"),
+            workspaceKey = WorkspaceKey.Directory("/alpha"),
+            serverRef = alpha,
+            focus = true,
+        )
+        beforeRestart.updateTabSession(alphaChat.id, "alpha-session", "Alpha chat")
+        beforeRestart.createTab(
+            startRoute = Screen.Files.route,
+            workspaceKey = WorkspaceKey.Directory("/beta"),
+            serverRef = beta,
+            focus = true,
+        )
+        beforeRestart.createTab(
+            startRoute = Screen.Terminal.createRoute("pty-local"),
+            workspaceKey = WorkspaceKey.Directory("/local"),
+            serverRef = local,
+            focus = true,
+        )
+        val persisted = beforeRestart.saveState(alpha)!!
+
+        val afterRestart = TabManager()
+        val result = afterRestart.restoreState(
+            persisted,
+            mapOf(alpha.endpointKey to alpha, beta.endpointKey to beta, local.endpointKey to local),
+        )
+
+        assertTrue(result is RestoreResult.Restored)
+        assertEquals(TabInstance.HOME_TAB_ID, afterRestart.tabs.value.first().id)
+        val restoredWorkTabs = afterRestart.tabs.value.filterNot { it.isPinnedHome }
+        assertEquals(listOf(alpha.endpointKey, beta.endpointKey, local.endpointKey), restoredWorkTabs.map { it.serverEndpointKey })
+        assertEquals(listOf("/alpha", "/beta", "/local"), restoredWorkTabs.map { it.workspaceDirectory })
+        assertEquals("chat/alpha-session", restoredWorkTabs[0].startRoute)
+        assertEquals(Screen.Files.route, restoredWorkTabs[1].startRoute)
+        assertEquals(Screen.Sessions.route, restoredWorkTabs[2].startRoute)
+    }
+
+    @Test
+    fun `focusOrCreateFilesTab focuses existing files tab for server workspace`() {
+        val manager = TabManager()
+        val workspace = WorkspaceKey.Directory("/repo")
+        val first = manager.focusOrCreateFilesTab(server, workspace)
+        val second = manager.focusOrCreateFilesTab(server, workspace)
+
+        assertEquals(first.id, second.id)
+        assertEquals(first.id, manager.activeTabId.value)
+        assertEquals(1, manager.tabs.value.count { it.startRoute == Screen.Files.route && !it.isPinnedHome })
+    }
+
+    @Test
+    fun `files focus helper separates identical workspaces on different servers`() {
+        val manager = TabManager()
+        val workspace = WorkspaceKey.Directory("/repo")
+        val otherServer = ServerRef.fromEndpointKey("http://other.example:4096")
+        val first = manager.focusOrCreateFilesTab(server, workspace)
+        val second = manager.focusOrCreateFilesTab(otherServer, workspace)
+
+        assertEquals(2, manager.tabs.value.count { it.startRoute == Screen.Files.route && !it.isPinnedHome })
+        assertEquals(listOf(server.endpointKey, otherServer.endpointKey), listOf(first.serverEndpointKey, second.serverEndpointKey))
+    }
+
+    @Test
+    fun `terminal tabs are found by explicit server workspace`() {
+        val manager = TabManager()
+        val workspace = WorkspaceKey.Directory("/repo")
+        val otherWorkspace = WorkspaceKey.Directory("/other")
+        manager.createTab(Screen.Terminal.createRoute("pty-1"), workspace, server, focus = true)
+        manager.createTab(Screen.Terminal.createRoute("pty-2"), otherWorkspace, server, focus = true)
+
+        assertEquals(listOf("terminal/pty-1"), manager.findTerminalTabs(server, workspace).map { it.startRoute })
+    }
+
+    @Test
+    fun `createPtyRequestForWorkspace uses target workspace cwd`() {
+        assertEquals("/repo", createPtyRequestForWorkspace(WorkspaceKey.Directory("/repo")).cwd)
+        assertEquals(null, createPtyRequestForWorkspace(WorkspaceKey.Global).cwd)
+    }
+
+    @Test
     fun `terminal routes are not persisted as resurrectable tabs`() {
         val manager = TabManager()
         manager.createTab(
             startRoute = Screen.Terminal.createRoute("pty-1"),
             workspaceKey = WorkspaceKey.Global,
+            serverRef = server,
             focus = true,
         )
 
@@ -162,3 +367,6 @@ class TabManagerPersistenceTest {
         assertEquals(Screen.Sessions.route, saved.tabs.single().startRoute)
     }
 }
+
+@Suppress("unused")
+private fun mixedServerPersistenceCompileAnchor() {}

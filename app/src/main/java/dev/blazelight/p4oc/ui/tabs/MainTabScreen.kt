@@ -6,8 +6,6 @@ import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.pager.HorizontalPager
 import androidx.compose.foundation.pager.rememberPagerState
-import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.automirrored.filled.List
 import androidx.compose.material.icons.filled.*
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
@@ -16,7 +14,6 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.platform.LocalLifecycleOwner
-import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.semantics.Role
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.lifecycle.Lifecycle
@@ -71,9 +68,17 @@ fun MainTabScreen(
     val activeTabId by tabManager.activeTabId.collectAsState()
     val showTabWarning by tabManager.showTabWarning.collectAsState()
     val connectionState by connectionManager.connectionState.collectAsState()
+    val currentServerRef = remember(connectionManager.currentBaseUrl) {
+        connectionManager.currentBaseUrl?.let { ServerRef.fromEndpoint(it) }
+    }
 
     var wasEverConnected by remember { mutableStateOf(false) }
+
+    LaunchedEffect(Unit) {
+        tabManager.ensureHomeTab(focus = false)
+    }
     var restoreError by remember { mutableStateOf<String?>(null) }
+    var showStartWorkSheet by remember { mutableStateOf(false) }
     var showFilesTabPrompt by remember { mutableStateOf(false) }
 
     // Foreground resume is delegated to ConnectionManager so reconnect policy
@@ -112,12 +117,13 @@ fun MainTabScreen(
                     is RestoreResult.ServerMismatch -> {
                         restoreError = "Saved tabs belong to ${result.persistedEndpointKey}, not ${result.activeEndpointKey}. Starting fresh."
                     }
+                    is RestoreResult.MissingServer -> {
+                        restoreError = "Saved tabs reference unavailable server ${result.endpointKey}. Starting fresh."
+                    }
                 }
             }
-
             if (!tabManager.hasTabs()) {
-                val initialTab = TabInstance(TabState(workspaceKey = WorkspaceKey.Global))
-                tabManager.registerTab(initialTab, focus = true)
+                tabManager.ensureHomeTab(focus = true)
             }
         }
     }
@@ -279,6 +285,14 @@ fun MainTabScreen(
         showFilesTabPrompt = true
     }
 
+    fun requestFilesTab(workspaceKey: WorkspaceKey) {
+        val targetServer = tabManager.activeTab?.serverRef ?: currentServerRef ?: return
+        tabManager.focusOrCreateFilesTab(
+            serverRef = targetServer,
+            workspaceKey = workspaceKey,
+        )
+    }
+
     LaunchedEffect(showTabWarning) {
         if (showTabWarning) {
             snackbarHostState.showSnackbar(
@@ -312,12 +326,8 @@ fun MainTabScreen(
                 .statusBarsPadding()
                 .consumeWindowInsets(WindowInsets.statusBars)
         ) {
-            // Tab bar (no longer needs its own statusBarsPadding)
-            // Wrapped in a Box so the New-tab DropdownMenu can anchor to the top-end,
-            // which visually aligns it near the + button inside TabBar.
-            var newTabMenuExpanded by remember { mutableStateOf(false) }
-            // Top-level plus actions are server/global by default; contextual tab actions inherit below.
-            val globalWorkspaceKey = WorkspaceKey.Global
+            // Tab bar (no longer needs its own statusBarsPadding).
+            // Top-level plus actions inherit the active tab target when possible.
             Box(modifier = Modifier.fillMaxWidth()) {
                 TabBar(
                     tabs = tabs,
@@ -330,91 +340,9 @@ fun MainTabScreen(
                     },
                     onTabClose = closeTab,
                     onAddClick = {
-                        newTabMenuExpanded = true
+                        showStartWorkSheet = true
                     },
                 )
-                // Anchor the dropdown to the top-end of the TabBar (where the + button lives).
-                Box(modifier = Modifier.align(Alignment.TopEnd)) {
-                    DropdownMenu(
-                        expanded = newTabMenuExpanded,
-                        onDismissRequest = { newTabMenuExpanded = false },
-                        modifier = Modifier.testTag("tab_bar_add_menu")
-                    ) {
-                        DropdownMenuItem(
-                            text = { Text("New Sessions tab") },
-                            leadingIcon = {
-                                Icon(
-                                    imageVector = Icons.AutoMirrored.Filled.List,
-                                    contentDescription = null
-                                )
-                            },
-                            onClick = {
-                                newTabMenuExpanded = false
-                                tabManager.createTab(
-                                    startRoute = Screen.Sessions.route,
-                                    workspaceKey = globalWorkspaceKey,
-                                    focus = true,
-                                )
-                            },
-                            modifier = Modifier.testTag("tab_bar_add_menu_sessions")
-                        )
-                        DropdownMenuItem(
-                            text = { Text("New Files tab") },
-                            leadingIcon = {
-                                Icon(
-                                    imageVector = Icons.Default.Folder,
-                                    contentDescription = null
-                                )
-                            },
-                            onClick = {
-                                newTabMenuExpanded = false
-                                requestFilesTab()
-                            },
-                            modifier = Modifier.testTag("tab_bar_add_menu_files")
-                        )
-                        DropdownMenuItem(
-                            text = { Text("New Terminal tab") },
-                            leadingIcon = {
-                                Icon(
-                                    imageVector = Icons.Default.Terminal,
-                                    contentDescription = null
-                                )
-                            },
-                            onClick = {
-                                newTabMenuExpanded = false
-                                // Terminal tabs require a server-side PTY, mirroring the
-                                // existing onNewTerminalTab callback flow further below.
-                                coroutineScope.launch {
-                                    val api = connectionManager.getApi() ?: run {
-                                        AppLog.e(TAG, "Cannot create terminal: not connected")
-                                        snackbarHostState.showSnackbar("Not connected to server")
-                                        return@launch
-                                    }
-                                    val result = safeApiCall {
-                                        api.createPtySession(createPtyRequestForWorkspace(globalWorkspaceKey))
-                                    }
-                                    when (result) {
-                                        is ApiResult.Success -> {
-                                            val ptyId = result.data.id
-                                            tabManager.createTab(
-                                                startRoute = Screen.Terminal.createRoute(ptyId),
-                                                workspaceKey = globalWorkspaceKey,
-                                                focus = true,
-                                            )
-                                        }
-                                        is ApiResult.Error -> {
-                                            AppLog.e(TAG, "Failed to create PTY: ${result.message}")
-                                            snackbarHostState.showSnackbar(
-                                                "Failed to create terminal: ${result.message}"
-                                            )
-                                        }
-                                    }
-                                }
-                            },
-                            modifier = Modifier.testTag("tab_bar_add_menu_terminal")
-                        )
-                    }
-                }
             }
 
             // Pager state for swipe between tabs
@@ -483,6 +411,7 @@ fun MainTabScreen(
                                 navController = navController,
                                 tabManager = tabManager,
                                 tabId = tab.id,
+                                serverRef = tab.serverRef ?: currentServerRef ?: return@SaveableStateProvider,
                                 onDisconnect = onDisconnect,
                                 onCloseTab = { closeTab(tab.id) },
                                 startRoute = tab.startRoute,
@@ -513,6 +442,7 @@ fun MainTabScreen(
                                                 tabManager.createTab(
                                                     startRoute = Screen.Terminal.createRoute(ptyId),
                                                     workspaceKey = workspaceKey,
+                                                    serverRef = tab.serverRef ?: currentServerRef ?: return@launch,
                                                     focus = true,
                                                 )
                                             }
@@ -548,15 +478,125 @@ fun MainTabScreen(
         }
     }
 
+    if (showStartWorkSheet) {
+        val startContext = startWorkContextFor(tabManager.activeTab)
+        val targetWorkspace = startContext.defaultWorkspace ?: WorkspaceKey.Global
+        val targetServer = startContext.defaultServer ?: currentServerRef
+        TuiAlertDialog(
+            onDismissRequest = { showStartWorkSheet = false },
+            title = "Start work",
+            confirmButton = {
+                TuiTextButton(onClick = { showStartWorkSheet = false }) {
+                    Text("Cancel")
+                }
+            },
+        ) {
+            Column(verticalArrangement = Arrangement.spacedBy(Spacing.sm)) {
+                Text(
+                    text = if (startContext.hasExplicitTarget) {
+                        "Target: ${workspaceLabel(targetWorkspace, tabTitleLabels) ?: workspaceSubtitle(targetWorkspace)}"
+                    } else {
+                        "Choose an action. Current server/workspace will be explicit before creation."
+                    },
+                    color = theme.textMuted,
+                    style = MaterialTheme.typography.bodySmall,
+                )
+                StartWorkActionRow(
+                    label = "New chat",
+                    description = "Start a chat in the target workspace.",
+                    marker = "C",
+                    onClick = {
+                        showStartWorkSheet = false
+                        val serverRef = targetServer
+                        if (serverRef != null) {
+                            tabManager.createTab(
+                                startRoute = Screen.Sessions.route,
+                                workspaceKey = targetWorkspace,
+                                serverRef = serverRef,
+                                focus = true,
+                            )
+                        } else {
+                            showFilesTabPrompt = true
+                        }
+                    },
+                )
+                StartWorkActionRow(
+                    label = "Browse sessions",
+                    description = "Open existing sessions in Home's current context.",
+                    marker = "S",
+                    onClick = {
+                        showStartWorkSheet = false
+                        tabManager.ensureHomeTab(focus = true)
+                    },
+                )
+                StartWorkActionRow(
+                    label = "Files tab",
+                    description = "Open files for the target workspace.",
+                    marker = "F",
+                    onClick = {
+                        showStartWorkSheet = false
+                        if (targetServer != null) {
+                            tabManager.focusOrCreateFilesTab(
+                                serverRef = targetServer,
+                                workspaceKey = targetWorkspace,
+                            )
+                        } else {
+                            showFilesTabPrompt = true
+                        }
+                    },
+                )
+                StartWorkActionRow(
+                    label = "Terminal",
+                    description = "Create a terminal for the target workspace.",
+                    marker = "T",
+                    onClick = {
+                        showStartWorkSheet = false
+                        coroutineScope.launch {
+                            val api = connectionManager.getApi() ?: run {
+                                snackbarHostState.showSnackbar("Not connected to server")
+                                return@launch
+                            }
+                            val serverRef = targetServer ?: run {
+                                snackbarHostState.showSnackbar("No server target selected")
+                                return@launch
+                            }
+                            val result = safeApiCall {
+                                api.createPtySession(createPtyRequestForWorkspace(targetWorkspace))
+                            }
+                            if (result is ApiResult.Success) {
+                                tabManager.createTab(
+                                    startRoute = Screen.Terminal.createRoute(result.data.id),
+                                    workspaceKey = targetWorkspace,
+                                    serverRef = serverRef,
+                                    focus = true,
+                                )
+                            } else if (result is ApiResult.Error) {
+                                snackbarHostState.showSnackbar("Failed to create terminal: ${result.message}")
+                            }
+                        }
+                    },
+                )
+                StartWorkActionRow(
+                    label = "Choose another target",
+                    description = "Pick a different workspace target before creating work.",
+                    marker = "…",
+                    onClick = {
+                        showStartWorkSheet = false
+                        showFilesTabPrompt = true
+                    },
+                )
+            }
+        }
+    }
+
     if (showFilesTabPrompt) {
         val openWorkspaceKeys = tabs
             .mapNotNull { it.workspaceKey }
             .distinct()
         fun openFilesTab(workspaceKey: WorkspaceKey) {
-            tabManager.createTab(
-                startRoute = Screen.Files.route,
+            tabManager.focusOrCreateFilesTab(
+                serverRef = currentServerRef ?: return,
                 workspaceKey = workspaceKey,
-                focus = true,
             )
             showFilesTabPrompt = false
         }
@@ -603,6 +643,21 @@ private fun workspaceSubtitle(workspaceKey: WorkspaceKey): String = when (worksp
     is WorkspaceKey.Directory -> workspaceKey.value
     WorkspaceKey.Global -> "No project context"
     is WorkspaceKey.SessionScoped -> "Session-scoped workspace"
+}
+
+@Composable
+private fun StartWorkActionRow(
+    label: String,
+    description: String,
+    marker: String,
+    onClick: () -> Unit,
+) {
+    FilesWorkspaceOption(
+        title = label,
+        subtitle = description,
+        marker = marker,
+        onClick = onClick,
+    )
 }
 
 @Composable

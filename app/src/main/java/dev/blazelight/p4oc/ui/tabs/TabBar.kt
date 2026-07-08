@@ -87,6 +87,7 @@ fun TabBar(
                         icon = icon,
                         connectionState = connectionState,
                         isActive = isActive,
+                        closeable = !tab.isPinnedHome,
                         onClick = { onTabClick(tab.id) },
                         onClose = { onTabClose(tab.id) }
                     )
@@ -118,6 +119,7 @@ private fun TabIndicator(
     icon: ImageVector,
     connectionState: SessionConnectionState?,
     isActive: Boolean,
+    closeable: Boolean = true,
     onClick: () -> Unit,
     onClose: () -> Unit,
     modifier: Modifier = Modifier
@@ -172,8 +174,8 @@ private fun TabIndicator(
                 modifier = Modifier.widthIn(max = Sizing.panelWidthSm)
             )
 
-            // Close button only shows on the active tab.
-            if (isActive) {
+            // Close button only shows on the active closeable tab.
+            if (isActive && closeable) {
                 Icon(
                     imageVector = Icons.Default.Close,
                     contentDescription = "Close tab",

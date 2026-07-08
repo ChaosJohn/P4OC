@@ -7,6 +7,7 @@ import androidx.datastore.preferences.core.*
 import androidx.datastore.preferences.preferencesDataStore
 import dev.blazelight.p4oc.core.log.AppLog
 import dev.blazelight.p4oc.core.security.CredentialStore
+import dev.blazelight.p4oc.core.network.ServerUrl
 import dev.blazelight.p4oc.data.remote.dto.ModelInput
 import dev.blazelight.p4oc.domain.server.WorkspaceKey
 import dev.blazelight.p4oc.domain.session.SessionId
@@ -45,6 +46,7 @@ class SettingsDataStore constructor(
         const val DEFAULT_THEME_NAME = "catppuccin"
         private val KEY_ONBOARDING_COMPLETED = booleanPreferencesKey("onboarding_completed")
         private val KEY_RECENT_SERVERS = stringPreferencesKey("recent_servers")
+        private val KEY_SAVED_SERVERS = stringPreferencesKey("saved_servers_v1")
         private val KEY_TAB_STATE = stringPreferencesKey("tab_state_v1")
 
         // Visual settings keys
@@ -321,6 +323,78 @@ class SettingsDataStore constructor(
         }
     }
 
+    val savedServers: Flow<List<SavedServer>> = context.dataStore.data.map { prefs ->
+        savedServersFromPreferences(prefs)
+    }
+
+    suspend fun getSavedServers(): List<SavedServer> = savedServersFromPreferences(context.dataStore.data.first())
+
+    suspend fun findSavedServer(id: String): SavedServer? = getSavedServers().firstOrNull { it.id == id }
+
+    suspend fun findSavedServerByEndpointKey(endpointKey: String): SavedServer? =
+        getSavedServers().firstOrNull { it.endpointKey == endpointKey }
+
+    suspend fun upsertSavedServer(server: SavedServer) {
+        val normalized = SavedServerRegistry.normalize(server)
+        context.dataStore.edit { prefs ->
+            val current = savedServersFromPreferences(prefs)
+            val updated = SavedServerRegistry.upsert(current, normalized)
+            prefs[KEY_SAVED_SERVERS] = json.encodeToString(updated)
+        }
+    }
+
+    suspend fun addSavedServer(
+        url: String,
+        name: String,
+        username: String? = null,
+        password: String? = null,
+        allowInsecure: Boolean = false,
+        pinned: Boolean = false,
+        defaultWorkspace: String? = null,
+        lastConnectedAt: Long? = null,
+    ): SavedServer {
+        val server = SavedServerRegistry.fromConnection(
+            url = url,
+            name = name,
+            username = username,
+            allowInsecure = allowInsecure,
+            pinned = pinned,
+            defaultWorkspace = defaultWorkspace,
+            lastConnectedAt = lastConnectedAt,
+        )
+        upsertSavedServer(server)
+        if (password != null) {
+            credentialStore.setServerPassword(server.id, password)
+            credentialStore.setServerPassword(server.endpoint, password)
+        }
+        return server
+    }
+
+    suspend fun updateSavedServer(server: SavedServer) = upsertSavedServer(server)
+
+    suspend fun removeSavedServer(id: String, removeCredentials: Boolean = true) {
+        var removed: SavedServer? = null
+        context.dataStore.edit { prefs ->
+            val current = savedServersFromPreferences(prefs)
+            removed = current.firstOrNull { it.id == id }
+            val updated = current.filterNot { it.id == id }
+            if (updated.isEmpty()) {
+                prefs.remove(KEY_SAVED_SERVERS)
+            } else {
+                prefs[KEY_SAVED_SERVERS] = json.encodeToString(updated)
+            }
+        }
+        if (removeCredentials) {
+            removed?.let { server ->
+                credentialStore.removeServerPassword(server.id)
+                credentialStore.removeServerPassword(server.endpoint)
+            }
+        }
+    }
+
+    suspend fun getSavedServerPassword(server: SavedServer): String? =
+        credentialStore.getServerPassword(server.id) ?: credentialStore.getServerPassword(server.endpoint)
+
     /**
      * Add a recent server. Password is stored in CredentialStore, not in the JSON.
      */
@@ -572,6 +646,43 @@ class SettingsDataStore constructor(
         }
     }
 
+    private fun parseSavedServersLenient(stored: String): List<SavedServer> {
+        if (stored.isBlank()) return emptyList()
+        return runCatching { json.decodeFromString<List<SavedServer>>(stored) }.getOrDefault(emptyList())
+    }
+
+    private fun savedServersFromPreferences(prefs: Preferences): List<SavedServer> {
+        val stored = prefs[KEY_SAVED_SERVERS].orEmpty()
+        val saved = parseSavedServersLenient(stored)
+
+        val lastConnection = prefs[KEY_SERVER_URL]?.let { url ->
+            SavedServerRegistry.fromConnection(
+                url = url,
+                name = prefs[KEY_SERVER_NAME].orEmpty(),
+                username = prefs[KEY_USERNAME],
+                allowInsecure = prefs[KEY_ALLOW_INSECURE] ?: false,
+                lastConnectedAt = null,
+            )
+        }
+
+        val recent = prefs[KEY_RECENT_SERVERS]
+            ?.let(::parseRecentServersLenient)
+            .orEmpty()
+            .mapNotNull { recentServer ->
+                runCatching {
+                    SavedServerRegistry.fromConnection(
+                        url = recentServer.url,
+                        name = recentServer.name,
+                        username = recentServer.username,
+                        allowInsecure = recentServer.allowInsecure,
+                        lastConnectedAt = null,
+                    )
+                }.getOrNull()
+            }
+
+        return SavedServerRegistry.merge(saved + listOfNotNull(lastConnection) + recent)
+    }
+
     private fun parsePersistedTabState(stored: String): PersistedTabState? = try {
         migrateLegacyPersistedTabState(stored) ?: json.decodeFromString<PersistedTabState>(stored)
     } catch (e: Exception) {
@@ -590,6 +701,7 @@ class SettingsDataStore constructor(
                 sessionId = tab.sessionId,
                 sessionTitle = tab.sessionTitle,
                 workspaceKey = workspaceKey,
+                serverEndpointKey = legacy.serverEndpointKey,
             )
         }
         return PersistedTabState(
@@ -640,6 +752,93 @@ data class RecentServer(
 )
 
 @Serializable
+data class SavedServer(
+    val id: String,
+    val endpoint: String,
+    val endpointKey: String,
+    val displayName: String,
+    val username: String? = null,
+    val allowInsecure: Boolean = false,
+    val pinned: Boolean = false,
+    val defaultWorkspace: String? = null,
+    val lastConnectedAt: Long? = null,
+)
+
+internal object SavedServerRegistry {
+    fun fromConnection(
+        url: String,
+        name: String,
+        username: String? = null,
+        allowInsecure: Boolean = false,
+        pinned: Boolean = false,
+        defaultWorkspace: String? = null,
+        lastConnectedAt: Long? = null,
+    ): SavedServer {
+        val endpoint = ServerUrl.normalizeConnectUrl(url)
+            ?: throw IllegalArgumentException("Invalid server endpoint: $url")
+        val endpointKey = ServerUrl.endpointKey(endpoint)
+            ?: throw IllegalArgumentException("Invalid server endpoint: $url")
+        return SavedServer(
+            id = endpointKey,
+            endpoint = endpoint,
+            endpointKey = endpointKey,
+            displayName = name.takeIf { it.isNotBlank() } ?: endpoint,
+            username = username,
+            allowInsecure = allowInsecure,
+            pinned = pinned,
+            defaultWorkspace = defaultWorkspace?.takeIf { it.isNotBlank() },
+            lastConnectedAt = lastConnectedAt,
+        )
+    }
+
+    fun normalize(server: SavedServer): SavedServer {
+        val endpoint = ServerUrl.normalizeConnectUrl(server.endpoint)
+            ?: throw IllegalArgumentException("Invalid server endpoint: ${server.endpoint}")
+        val endpointKey = ServerUrl.endpointKey(endpoint)
+            ?: throw IllegalArgumentException("Invalid server endpoint: ${server.endpoint}")
+        return server.copy(
+            id = server.id.ifBlank { endpointKey },
+            endpoint = endpoint,
+            endpointKey = endpointKey,
+            displayName = server.displayName.takeIf { it.isNotBlank() } ?: endpoint,
+            defaultWorkspace = server.defaultWorkspace?.takeIf { it.isNotBlank() },
+        )
+    }
+
+    fun upsert(current: List<SavedServer>, server: SavedServer): List<SavedServer> {
+        val normalized = normalize(server)
+        val withoutSameIdentity = current.filterNot {
+            it.id == normalized.id || it.endpointKey == normalized.endpointKey
+        }
+        return merge(listOf(normalized) + withoutSameIdentity)
+    }
+
+    fun merge(servers: List<SavedServer>): List<SavedServer> {
+        val byIdentity = linkedMapOf<String, SavedServer>()
+        servers.map(::normalize).forEach { server ->
+            val existingKey = byIdentity.entries.firstOrNull { (_, existing) ->
+                existing.id == server.id || existing.endpointKey == server.endpointKey
+            }?.key
+            if (existingKey == null) {
+                byIdentity[server.id] = server
+            } else {
+                byIdentity[existingKey] = mergeServer(byIdentity.getValue(existingKey), server)
+            }
+        }
+        return byIdentity.values.toList()
+    }
+
+    private fun mergeServer(primary: SavedServer, fallback: SavedServer): SavedServer = primary.copy(
+        displayName = primary.displayName.takeIf { it.isNotBlank() } ?: fallback.displayName,
+        username = primary.username ?: fallback.username,
+        allowInsecure = primary.allowInsecure || fallback.allowInsecure,
+        pinned = primary.pinned || fallback.pinned,
+        defaultWorkspace = primary.defaultWorkspace ?: fallback.defaultWorkspace,
+        lastConnectedAt = listOfNotNull(primary.lastConnectedAt, fallback.lastConnectedAt).maxOrNull(),
+    )
+}
+
+@Serializable
 data class PersistedTabState(
     val version: Int = CURRENT_VERSION,
     val serverEndpointKey: String,
@@ -682,10 +881,11 @@ data class PersistedTab(
     val sessionId: String? = null,
     val sessionTitle: String? = null,
     val workspaceKey: PersistedWorkspaceKey? = null,
+    val serverEndpointKey: String? = null,
 ) {
     fun resolvedWorkspaceKey(): WorkspaceKey? = workspaceKey?.toWorkspaceKey()
+    fun resolvedServerEndpointKey(fallback: String? = null): String? = serverEndpointKey ?: fallback
 }
-
 @Serializable
 data class PersistedWorkspaceKey(
     val type: Type,
