@@ -78,7 +78,7 @@ fun HomeScreen(
                     color = theme.text,
                 )
                 Text(
-                    text = "Open existing work, resume sessions, and browse workspaces.",
+                    text = "Resume existing work, browse sessions, and reopen workspaces.",
                     style = MaterialTheme.typography.bodySmall,
                     color = theme.textMuted,
                 )
@@ -87,7 +87,7 @@ fun HomeScreen(
 
         HomeSection(
             title = "Open work",
-            body = "${summary.openWork.size} bounded open work item${if (summary.openWork.size == 1) "" else "s"}; ${summary.workspaces.size} workspace summar${if (summary.workspaces.size == 1) "y" else "ies"} loaded without chat history.",
+            body = homeOpenWorkSummary(summary.openWork.size, summary.workspaces.size),
         )
 
         HomeSection(
@@ -133,11 +133,23 @@ fun HomeScreen(
             testTag = "home_open_terminal",
         )
 
-        HomeSection(
-            title = "Attention",
-            body = "Attention appears as compact badges and dots on Home, tabs, servers, and workspaces — not as a feed.",
-        )
+        if (summary.openWork.isEmpty() && summary.workspaces.isEmpty()) {
+            HomeSection(
+                title = "Tip",
+                body = "Use + to start a new chat, files tab, or terminal when there is nothing to resume.",
+            )
+        }
     }
+}
+
+private fun homeOpenWorkSummary(openWorkCount: Int, workspaceCount: Int): String = when {
+    openWorkCount == 0 && workspaceCount == 0 ->
+        "No open work yet. Browse sessions or use + to start something new."
+    openWorkCount == 0 ->
+        "$workspaceCount recent workspace${if (workspaceCount == 1) "" else "s"} ready to reopen."
+    else ->
+        "$openWorkCount open item${if (openWorkCount == 1) "" else "s"} ready to resume " +
+            "across $workspaceCount workspace${if (workspaceCount == 1) "" else "s"}."
 }
 
 @Composable

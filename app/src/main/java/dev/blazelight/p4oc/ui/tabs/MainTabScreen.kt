@@ -545,11 +545,15 @@ fun MainTabScreen(
             },
         ) {
             Column(verticalArrangement = Arrangement.spacedBy(Spacing.sm)) {
+                val targetLabel = workspaceLabel(targetWorkspace, tabTitleLabels)
+                    ?: workspaceSubtitle(targetWorkspace)
                 Text(
                     text = if (startContext.hasExplicitTarget) {
-                        "Target: ${workspaceLabel(targetWorkspace, tabTitleLabels) ?: workspaceSubtitle(targetWorkspace)}"
+                        "Target: $targetLabel"
+                    } else if (targetServer != null) {
+                        "Target: ${targetServer.displayName} · $targetLabel"
                     } else {
-                        "Choose an action. Current server/workspace will be explicit before creation."
+                        "Choose a target before creating work."
                     },
                     color = theme.textMuted,
                     style = MaterialTheme.typography.bodySmall,

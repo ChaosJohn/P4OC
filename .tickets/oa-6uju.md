@@ -54,3 +54,11 @@ Each scenario reports its actual evidence state:
 - Search the generated guide for `Missing` and verify nearby Result text does not overclaim.
 - Verify every referenced image exists or is intentionally labeled missing/partial.
 - Open the guide in Firefox and visually inspect the corrected scenarios.
+
+## Verification Notes
+
+- 2026-07-09: Corrected `local-adb-screenshots/release-v013-to-current/index.html` so `Draft persistence across tab switch`, `Chat scroll restoration`, `Rotation and ViewModel recreation`, and `Portrait state after rotation` now report partial/missing current evidence instead of `captured before/after`.
+- 2026-07-09: Fixed stale `Upgrade tab survival` before-image reference from `before/023_old_pre_upgrade_visible_tab_bar.png` to existing `before/23_old_pre_upgrade_visible_tab_bar.png`.
+- 2026-07-09: Corrected `Provider/model settings` to partial because the before screenshot is missing.
+- 2026-07-09: Removed screenshot-count-gate wording from the guide gallery copy.
+- 2026-07-09: Verified with regex search that no `Missing after/055` through `Missing after/058` scenario still says `captured before/after`.
