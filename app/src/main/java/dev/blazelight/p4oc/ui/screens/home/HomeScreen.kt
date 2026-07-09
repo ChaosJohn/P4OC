@@ -29,6 +29,9 @@ import dev.blazelight.p4oc.domain.server.WorkspaceKey
 import dev.blazelight.p4oc.ui.theme.Spacing
 import dev.blazelight.p4oc.ui.theme.TuiShapes
 
+private const val HOME_SERVER_CARD_LIMIT = 2
+private const val HOME_WORKSPACE_LIMIT = 4
+
 @Composable
 fun HomeScreen(
     summary: HomeSummaryState,
@@ -62,94 +65,146 @@ fun HomeScreen(
             .testTag("home_screen"),
         verticalArrangement = Arrangement.spacedBy(Spacing.md),
     ) {
-        Row(
-            horizontalArrangement = Arrangement.spacedBy(Spacing.sm),
-            verticalAlignment = Alignment.CenterVertically,
-        ) {
-            Icon(
-                imageVector = Icons.Default.Home,
-                contentDescription = null,
-                tint = theme.text,
-            )
-            Column(verticalArrangement = Arrangement.spacedBy(Spacing.xxs)) {
-                Text(
-                    text = "Home",
-                    style = MaterialTheme.typography.titleMedium,
-                    color = theme.text,
-                )
-                Text(
-                    text = "Resume existing work, browse sessions, and reopen workspaces.",
-                    style = MaterialTheme.typography.bodySmall,
-                    color = theme.textMuted,
+        homeHeader(
+            serverCount = summary.servers.size,
+            openWorkCount = summary.openWork.size,
+        )
+
+        if (summary.servers.isNotEmpty()) {
+            sectionLabel("Servers")
+            Row(
+                horizontalArrangement = Arrangement.spacedBy(Spacing.sm),
+                modifier = Modifier.fillMaxWidth(),
+            ) {
+                summary.servers.take(HOME_SERVER_CARD_LIMIT).forEach { server ->
+                    serverCard(
+                        server = server,
+                        modifier = Modifier.weight(1f),
+                    )
+                }
+            }
+        }
+
+        sectionLabel("Resume")
+        if (summary.workspaces.isEmpty()) {
+            emptyHomeCard()
+        } else {
+            summary.workspaces.take(HOME_WORKSPACE_LIMIT).forEach { workspace ->
+                workspaceRow(
+                    workspace = workspace,
+                    onClick = {
+                        selectedWorkspace = workspace
+                        onWorkspaceSelected(workspace)
+                    },
                 )
             }
         }
 
-        HomeSection(
-            title = "Open work",
-            body = homeOpenWorkSummary(summary.openWork.size, summary.workspaces.size),
-        )
-
-        HomeSection(
-            title = "Servers",
-            body = summary.servers.joinToString { "${it.displayName}: ${it.openTabCount} tabs" }
-                .ifBlank { "No saved servers yet." },
-        )
-
-        summary.workspaces.take(6).forEach { workspace ->
-            HomeActionRow(
-                label = workspace.workspaceKey.displayLabel(),
-                description = "${workspace.serverRef.displayName} · ${workspace.openTabCount} open item${if (workspace.openTabCount == 1) "" else "s"}",
-                icon = { Icon(Icons.Default.Folder, contentDescription = null, tint = theme.textMuted) },
-                onClick = {
-                    selectedWorkspace = workspace
-                    onWorkspaceSelected(workspace)
-                },
-                testTag = "home_workspace_${workspace.serverRef.endpointKey}_${workspace.workspaceKey.displayLabel()}",
-            )
-        }
-
+        sectionLabel("Browse")
         HomeActionRow(
-            label = "Browse sessions",
-            description = "Search, resume, rename, share, summarize, delete, or view changes.",
+            label = "Sessions",
+            description = "Find previous chats and workspace history.",
             icon = { Icon(Icons.Default.ViewList, contentDescription = null, tint = theme.textMuted) },
             onClick = onBrowseSessions,
             testTag = "home_browse_sessions",
         )
 
-        HomeActionRow(
-            label = "Open files",
-            description = "Open the current workspace files tab.",
-            icon = { Icon(Icons.Default.Folder, contentDescription = null, tint = theme.textMuted) },
-            onClick = onOpenFiles,
-            testTag = "home_open_files",
-        )
-
-        HomeActionRow(
-            label = "Open terminal",
-            description = "Create a terminal in the current workspace context.",
-            icon = { Icon(Icons.Default.Terminal, contentDescription = null, tint = theme.textMuted) },
-            onClick = onOpenTerminal,
-            testTag = "home_open_terminal",
-        )
-
-        if (summary.openWork.isEmpty() && summary.workspaces.isEmpty()) {
-            HomeSection(
-                title = "Tip",
-                body = "Use + to start a new chat, files tab, or terminal when there is nothing to resume.",
+        Row(horizontalArrangement = Arrangement.spacedBy(Spacing.sm)) {
+            HomeActionRow(
+                label = "Files",
+                description = "Open file browser.",
+                icon = { Icon(Icons.Default.Folder, contentDescription = null, tint = theme.textMuted) },
+                onClick = onOpenFiles,
+                testTag = "home_open_files",
+                modifier = Modifier.weight(1f),
+            )
+            HomeActionRow(
+                label = "Terminal",
+                description = "Open shell.",
+                icon = { Icon(Icons.Default.Terminal, contentDescription = null, tint = theme.textMuted) },
+                onClick = onOpenTerminal,
+                testTag = "home_open_terminal",
+                modifier = Modifier.weight(1f),
             )
         }
     }
 }
 
-private fun homeOpenWorkSummary(openWorkCount: Int, workspaceCount: Int): String = when {
-    openWorkCount == 0 && workspaceCount == 0 ->
-        "No open work yet. Browse sessions or use + to start something new."
-    openWorkCount == 0 ->
-        "$workspaceCount recent workspace${if (workspaceCount == 1) "" else "s"} ready to reopen."
-    else ->
-        "$openWorkCount open item${if (openWorkCount == 1) "" else "s"} ready to resume " +
-            "across $workspaceCount workspace${if (workspaceCount == 1) "" else "s"}."
+@Composable
+private fun homeHeader(serverCount: Int, openWorkCount: Int) {
+    val theme = LocalOpenCodeTheme.current
+    Surface(
+        modifier = Modifier.fillMaxWidth(),
+        shape = RectangleShape,
+        color = theme.backgroundElement,
+    ) {
+        Row(
+            modifier = Modifier.padding(Spacing.md),
+            horizontalArrangement = Arrangement.spacedBy(Spacing.md),
+            verticalAlignment = Alignment.CenterVertically,
+        ) {
+            Icon(Icons.Default.Home, contentDescription = null, tint = theme.accent)
+            Column(verticalArrangement = Arrangement.spacedBy(Spacing.xxs)) {
+                Text("Home", style = MaterialTheme.typography.titleMedium, color = theme.text)
+                Text(
+                    "$openWorkCount open · $serverCount server${if (serverCount == 1) "" else "s"}",
+                    style = MaterialTheme.typography.bodySmall,
+                    color = theme.textMuted,
+                )
+            }
+        }
+    }
+}
+
+@Composable
+private fun sectionLabel(text: String) {
+    val theme = LocalOpenCodeTheme.current
+    Text(
+        text = text.uppercase(),
+        style = MaterialTheme.typography.labelMedium,
+        color = theme.textMuted,
+    )
+}
+
+@Composable
+private fun serverCard(server: ServerSummary, modifier: Modifier = Modifier) {
+    val theme = LocalOpenCodeTheme.current
+    Surface(
+        modifier = modifier,
+        shape = RectangleShape,
+        color = theme.backgroundElement,
+    ) {
+        Column(
+            modifier = Modifier.padding(Spacing.sm),
+            verticalArrangement = Arrangement.spacedBy(Spacing.xxs),
+        ) {
+            Text(server.displayName, style = MaterialTheme.typography.labelMedium, color = theme.text)
+            Text(
+                "${server.openTabCount} open",
+                style = MaterialTheme.typography.bodySmall,
+                color = theme.textMuted,
+            )
+        }
+    }
+}
+
+@Composable
+private fun workspaceRow(workspace: WorkspaceSummary, onClick: () -> Unit) {
+    HomeActionRow(
+        label = workspace.workspaceKey.displayLabel(),
+        description = "${workspace.serverRef.displayName} · ${workspace.openTabCount} open",
+        icon = { Icon(Icons.Default.Folder, contentDescription = null, tint = LocalOpenCodeTheme.current.textMuted) },
+        onClick = onClick,
+        testTag = "home_workspace_${workspace.serverRef.endpointKey}_${workspace.workspaceKey.displayLabel()}",
+    )
+}
+
+@Composable
+private fun emptyHomeCard() {
+    HomeSection(
+        title = "No open work",
+        body = "Browse sessions to resume work, or use + to start something new.",
+    )
 }
 
 @Composable

@@ -79,4 +79,5 @@ Start Work should make target explicit:
 - 2026-07-09: Replaced Home implementation copy with task-oriented copy. Banned phrases `bounded`, `without chat history`, `workspace summaries loaded`, and `Current server/workspace will be explicit` no longer appear in `HomeScreen.kt` or `MainTabScreen.kt`.
 - 2026-07-09: Start Work now shows an explicit target when a server/default workspace exists, or asks the user to choose a target before creating work.
 - 2026-07-09: `JAVA_HOME=/usr/lib/jvm/java-17-openjdk ./gradlew :app:compileDebugKotlin && JAVA_HOME=/usr/lib/jvm/java-17-openjdk ./gradlew :app:detekt` passed.
+- 2026-07-09: Home was structurally changed toward the approved mockup: compact header, Servers cards, Resume workspace rows, Browse actions, and no persistent Attention explainer block.
 - 2026-07-09: Device screenshot verification is still required before closing because `adb devices` currently has no connected device. Capture Home empty, Home with open work, Start Work from Home, and Start Work from active workspace before closing.
