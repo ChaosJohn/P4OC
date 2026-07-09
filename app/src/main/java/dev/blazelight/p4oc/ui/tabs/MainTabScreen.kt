@@ -38,6 +38,8 @@ import dev.blazelight.p4oc.domain.workspace.Workspace
 import dev.blazelight.p4oc.ui.components.TuiAlertDialog
 import dev.blazelight.p4oc.ui.components.TuiTextButton
 import dev.blazelight.p4oc.ui.navigation.Screen
+import dev.blazelight.p4oc.ui.screens.home.HomeScreen
+import dev.blazelight.p4oc.ui.screens.home.HomeSummaryBuilder
 import dev.blazelight.p4oc.ui.theme.LocalOpenCodeTheme
 import dev.blazelight.p4oc.ui.theme.Spacing
 import dev.blazelight.p4oc.ui.theme.TuiShapes
@@ -70,6 +72,16 @@ fun MainTabScreen(
     val connectionState by connectionManager.connectionState.collectAsState()
     val currentServerRef = remember(connectionManager.currentBaseUrl) {
         connectionManager.currentBaseUrl?.let { ServerRef.fromEndpoint(it) }
+    }
+    val savedServers by settingsDataStore.savedServers.collectAsState(initial = emptyList())
+    val homeConnectionStates = remember(savedServers, connectionState, currentServerRef?.endpointKey) {
+        savedServers.associate { savedServer ->
+            savedServer.endpointKey to if (savedServer.endpointKey == currentServerRef?.endpointKey) {
+                connectionState
+            } else {
+                ConnectionState.Disconnected
+            }
+        }
     }
 
     var wasEverConnected by remember { mutableStateOf(false) }
@@ -406,7 +418,48 @@ fun MainTabScreen(
 
                         val isActive = tab.id == activeTabId
                         val workspaceOwner = workspaceOwners[tab.id]
-                        if (workspaceOwner != null) {
+                        if (tab.isPinnedHome) {
+                            HomeScreen(
+                                summary = HomeSummaryBuilder.build(
+                                    savedServers = savedServers,
+                                    connectionStates = homeConnectionStates,
+                                    tabs = tabs,
+                                ),
+                                onBrowseSessions = {
+                                    tabManager.createTab(
+                                        startRoute = Screen.Sessions.route,
+                                        workspaceKey = WorkspaceKey.Global,
+                                        serverRef = currentServerRef ?: return@HomeScreen,
+                                        focus = true,
+                                    )
+                                },
+                                onOpenFiles = { requestFilesTab(WorkspaceKey.Global) },
+                                onOpenTerminal = {
+                                    coroutineScope.launch {
+                                        val api = connectionManager.getApi() ?: run {
+                                            snackbarHostState.showSnackbar("Not connected to server")
+                                            return@launch
+                                        }
+                                        val result = safeApiCall {
+                                            api.createPtySession(createPtyRequestForWorkspace(WorkspaceKey.Global))
+                                        }
+                                        if (result is ApiResult.Success) {
+                                            tabManager.createTab(
+                                                startRoute = Screen.Terminal.createRoute(result.data.id),
+                                                workspaceKey = WorkspaceKey.Global,
+                                                serverRef = currentServerRef ?: return@launch,
+                                                focus = true,
+                                            )
+                                        } else if (result is ApiResult.Error) {
+                                            snackbarHostState.showSnackbar(
+                                                "Failed to create terminal: ${result.message}",
+                                            )
+                                        }
+                                    }
+                                },
+                                modifier = Modifier.fillMaxSize(),
+                            )
+                        } else if (workspaceOwner != null) {
                             TabNavHost(
                                 navController = navController,
                                 tabManager = tabManager,

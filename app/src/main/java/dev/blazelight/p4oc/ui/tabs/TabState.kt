@@ -103,7 +103,7 @@ class TabInstance(
         const val HOME_TAB_ID = "pinned-home"
 
         fun home(): TabInstance = TabInstance(
-            TabState(id = HOME_TAB_ID, pinnedHome = true),
+            TabState(id = HOME_TAB_ID, workspaceKey = WorkspaceKey.Global, pinnedHome = true),
             startRoute = Screen.Home.route,
         )
     }

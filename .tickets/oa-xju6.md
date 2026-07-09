@@ -1,6 +1,6 @@
 ---
 id: oa-xju6
-status: open
+status: closed
 deps: []
 links: []
 created: 2026-07-08T14:42:17Z

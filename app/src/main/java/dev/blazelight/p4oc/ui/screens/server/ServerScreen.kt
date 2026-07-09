@@ -35,10 +35,12 @@ import dev.blazelight.p4oc.core.datastore.SavedServer
 import dev.blazelight.p4oc.core.network.DiscoveredServer
 import dev.blazelight.p4oc.core.network.DiscoveryState
 import dev.blazelight.p4oc.ui.components.TuiLoadingIndicator
+import dev.blazelight.p4oc.ui.tabs.TabManager
 import dev.blazelight.p4oc.ui.theme.LocalOpenCodeTheme
 import dev.blazelight.p4oc.ui.theme.Sizing
 import dev.blazelight.p4oc.ui.theme.Spacing
 import org.koin.androidx.compose.koinViewModel
+import org.koin.compose.koinInject
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
@@ -50,6 +52,9 @@ fun ServerScreen(
 ) {
     val theme = LocalOpenCodeTheme.current
     val uiState by viewModel.uiState.collectAsStateWithLifecycle()
+    val tabManager: TabManager = koinInject()
+    val tabs by tabManager.tabs.collectAsState()
+    val openTabEndpointKeys = tabs.mapNotNull { it.serverEndpointKey }.toSet()
 
     // Start/stop mDNS discovery with screen lifecycle
     DisposableEffect(Unit) {
@@ -125,7 +130,7 @@ fun ServerScreen(
                 SavedServersSection(
                     servers = uiState.savedServers,
                     isConnecting = uiState.isConnecting,
-                    hasOpenTabs = false,
+                    openTabEndpointKeys = openTabEndpointKeys,
                     onServerClick = { saved ->
                         viewModel.setRemoteUrl(saved.endpoint)
                         viewModel.setUsername(saved.username ?: "opencode")
@@ -495,7 +500,7 @@ private fun SetupCodeBlock(command: String) {
 private fun SavedServersSection(
     servers: List<SavedServer>,
     isConnecting: Boolean,
-    hasOpenTabs: Boolean,
+    openTabEndpointKeys: Set<String>,
     onServerClick: (SavedServer) -> Unit,
     onRemoveServer: (SavedServer) -> Unit,
 ) {
@@ -550,7 +555,7 @@ private fun SavedServersSection(
                         )
                     }
                     Text(
-                        text = if (hasOpenTabs) "warn remove" else "remove",
+                        text = if (server.endpointKey in openTabEndpointKeys) "warn remove" else "remove",
                         color = theme.warning,
                         fontFamily = FontFamily.Monospace,
                         modifier = Modifier.clickable(role = Role.Button) { onRemoveServer(server) },

@@ -23,9 +23,11 @@ import androidx.navigation.compose.navigation
 import androidx.navigation.navArgument
 import dev.blazelight.p4oc.core.datastore.SettingsDataStore
 import dev.blazelight.p4oc.core.datastore.VisualSettings
+import dev.blazelight.p4oc.core.network.ConnectionManager
+import dev.blazelight.p4oc.core.network.ConnectionState
 import dev.blazelight.p4oc.domain.model.SessionConnectionState
-import dev.blazelight.p4oc.domain.server.WorkspaceKey
 import dev.blazelight.p4oc.domain.server.ServerRef
+import dev.blazelight.p4oc.domain.server.WorkspaceKey
 import dev.blazelight.p4oc.ui.navigation.Screen
 import dev.blazelight.p4oc.ui.screens.chat.ChatScreen
 import dev.blazelight.p4oc.ui.screens.diff.DiffViewerScreen
@@ -83,6 +85,18 @@ fun TabNavHost(
     // Read visual settings for sub-agent tab behavior
     val settingsDataStore: SettingsDataStore = koinInject()
     val visualSettings by settingsDataStore.visualSettings.collectAsState(initial = VisualSettings())
+    val savedServers by settingsDataStore.savedServers.collectAsState(initial = emptyList())
+    val connectionManager: ConnectionManager = koinInject()
+    val connectionState by connectionManager.connectionState.collectAsState()
+    val homeConnectionStates = remember(savedServers, connectionState, serverRef.endpointKey) {
+        savedServers.associate { savedServer ->
+            savedServer.endpointKey to if (savedServer.endpointKey == serverRef.endpointKey) {
+                connectionState
+            } else {
+                ConnectionState.Disconnected
+            }
+        }
+    }
     val openSubAgentInNewTab = visualSettings.openSubAgentInNewTab
     val tabs by tabManager.tabs.collectAsState()
     val tab = tabs.firstOrNull { it.id == tabId }
@@ -161,8 +175,8 @@ fun TabNavHost(
             composable(Screen.Home.route) {
                 HomeScreen(
                     summary = HomeSummaryBuilder.build(
-                        savedServers = emptyList(),
-                        connectionStates = emptyMap(),
+                        savedServers = savedServers,
+                        connectionStates = homeConnectionStates,
                         tabs = tabs,
                     ),
                     onBrowseSessions = { navController.navigate(Screen.Sessions.route) },
