@@ -12,6 +12,18 @@
     <string name="server_remote_title">Remote Server</string>
     <string name="server_remote_description">Connect to an OpenCode server running on your network.</string>
     <string name="server_recent_servers">Recent Servers</string>
+    <string name="server_saved_servers">Saved servers</string>
+    <string name="server_saved_servers_desc">Connect to saved targets. Use actions for edit or forget.</string>
+    <string name="server_tls_checks_on">TLS checks on</string>
+    <string name="server_tls_checks_off">TLS checks off</string>
+    <string name="server_actions">Server actions</string>
+    <string name="server_actions_for">Server actions for %1$s</string>
+    <string name="server_forget">Forget server</string>
+    <string name="server_forget_title">Forget %1$s?</string>
+    <string name="server_forget_message">%1$d open tab(s) are using this server. Existing tabs will stay open until closed or reconnected, but this server will be removed from saved targets.</string>
+    <string name="server_forget_message_no_tabs">This server will be removed from saved targets.</string>
+    <string name="server_open_tabs_count">%1$d open tab(s)</string>
+    <string name="cd_saved_server">Saved server</string>
     
     <!-- mDNS Discovery -->
     <string name="discovery_section_title">Discovered Servers</string>

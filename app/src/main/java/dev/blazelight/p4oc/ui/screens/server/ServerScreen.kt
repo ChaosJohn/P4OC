@@ -12,6 +12,7 @@ import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.foundation.verticalScroll
+import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.*
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
@@ -34,6 +35,7 @@ import dev.blazelight.p4oc.core.datastore.RecentServer
 import dev.blazelight.p4oc.core.datastore.SavedServer
 import dev.blazelight.p4oc.core.network.DiscoveredServer
 import dev.blazelight.p4oc.core.network.DiscoveryState
+import dev.blazelight.p4oc.ui.components.TuiConfirmDialog
 import dev.blazelight.p4oc.ui.components.TuiLoadingIndicator
 import dev.blazelight.p4oc.ui.tabs.TabManager
 import dev.blazelight.p4oc.ui.theme.LocalOpenCodeTheme
@@ -505,7 +507,7 @@ private fun SavedServersSection(
     onRemoveServer: (SavedServer) -> Unit,
 ) {
     val theme = LocalOpenCodeTheme.current
-
+    var pendingForget by remember { mutableStateOf<Pair<SavedServer, Int>?>(null) }
     Surface(
         color = theme.backgroundElement,
         shape = RectangleShape,
@@ -515,52 +517,117 @@ private fun SavedServersSection(
             verticalArrangement = Arrangement.spacedBy(Spacing.xs),
         ) {
             Text(
-                text = "[ Saved servers ]",
+                text = "[ ${stringResource(R.string.server_saved_servers)} ]",
                 style = MaterialTheme.typography.titleMedium,
                 fontFamily = FontFamily.Monospace,
                 color = theme.text,
             )
             Text(
-                text = "Manage saved connection targets. Remove warns when open tabs reference this server.",
+                text = stringResource(R.string.server_saved_servers_desc),
                 style = MaterialTheme.typography.bodySmall,
                 fontFamily = FontFamily.Monospace,
                 color = theme.textMuted,
             )
             servers.forEach { server ->
-                Row(
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .clickable(enabled = !isConnecting, role = Role.Button) { onServerClick(server) }
-                        .padding(vertical = Spacing.md),
-                    verticalAlignment = Alignment.CenterVertically,
-                    horizontalArrangement = Arrangement.spacedBy(Spacing.lg),
-                ) {
-                    Text("●", color = theme.success, fontFamily = FontFamily.Monospace)
-                    Column(modifier = Modifier.weight(1f)) {
-                        Text(
-                            text = server.displayName,
-                            style = MaterialTheme.typography.bodyMedium,
-                            fontFamily = FontFamily.Monospace,
-                            color = theme.text,
-                            maxLines = 1,
-                            overflow = TextOverflow.Ellipsis,
-                        )
-                        Text(
-                            text = "${server.endpoint} · ${if (server.allowInsecure) "TLS checks off" else "TLS checks on"}",
-                            style = MaterialTheme.typography.bodySmall,
-                            fontFamily = FontFamily.Monospace,
-                            color = theme.textMuted,
-                            maxLines = 1,
-                            overflow = TextOverflow.Ellipsis,
-                        )
+                key(server.id) {
+                    var menuExpanded by remember { mutableStateOf(false) }
+                    val tlsLabel = if (server.allowInsecure) {
+                        stringResource(R.string.server_tls_checks_off)
+                    } else {
+                        stringResource(R.string.server_tls_checks_on)
                     }
-                    Text(
-                        text = if (server.endpointKey in openTabEndpointKeys) "warn remove" else "remove",
-                        color = theme.warning,
-                        fontFamily = FontFamily.Monospace,
-                        modifier = Modifier.clickable(role = Role.Button) { onRemoveServer(server) },
-                    )
+                    val openTabCount = openTabEndpointKeys.count { it == server.endpointKey }
+                    Row(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .clickable(enabled = !isConnecting, role = Role.Button) { onServerClick(server) }
+                            .padding(vertical = Spacing.md),
+                        verticalAlignment = Alignment.CenterVertically,
+                        horizontalArrangement = Arrangement.spacedBy(Spacing.lg),
+                    ) {
+                        Text("●", color = theme.success, fontFamily = FontFamily.Monospace)
+                        Column(modifier = Modifier.weight(1f)) {
+                            Text(
+                                text = server.displayName,
+                                style = MaterialTheme.typography.bodyMedium,
+                                fontFamily = FontFamily.Monospace,
+                                color = theme.text,
+                                maxLines = 1,
+                                overflow = TextOverflow.Ellipsis,
+                            )
+                            Text(
+                                text = "${server.endpoint} · $tlsLabel",
+                                style = MaterialTheme.typography.bodySmall,
+                                fontFamily = FontFamily.Monospace,
+                                color = theme.textMuted,
+                                maxLines = 1,
+                                overflow = TextOverflow.Ellipsis,
+                            )
+                            if (openTabCount > 0) {
+                                Text(
+                                    text = stringResource(R.string.server_open_tabs_count, openTabCount),
+                                    style = MaterialTheme.typography.bodySmall,
+                                    fontFamily = FontFamily.Monospace,
+                                    color = theme.warning,
+                                )
+                            }
+                        }
+                        Box {
+                            IconButton(
+                                onClick = { menuExpanded = true },
+                                enabled = !isConnecting,
+                                modifier = Modifier.testTag("saved_server_actions_${server.id}"),
+                            ) {
+                                Icon(
+                                    Icons.Default.MoreVert,
+                                    contentDescription = stringResource(
+                                        R.string.server_actions_for,
+                                        server.displayName,
+                                    ),
+                                    tint = theme.textMuted,
+                                )
+                            }
+                            DropdownMenu(
+                                expanded = menuExpanded,
+                                onDismissRequest = { menuExpanded = false },
+                            ) {
+                                DropdownMenuItem(
+                                    text = { Text(stringResource(R.string.server_forget)) },
+                                    onClick = {
+                                        menuExpanded = false
+                                        pendingForget = server to openTabCount
+                                    },
+                                    leadingIcon = {
+                                        Icon(
+                                            Icons.Default.Delete,
+                                            contentDescription = null,
+                                            tint = theme.error,
+                                        )
+                                    },
+                                )
+                            }
+                        }
+                    }
                 }
+            }
+            pendingForget?.let { (server, openTabCount) ->
+                TuiConfirmDialog(
+                    onDismissRequest = { pendingForget = null },
+                    onConfirm = {
+                        pendingForget = null
+                        onRemoveServer(server)
+                    },
+                    title = stringResource(R.string.server_forget_title, server.displayName),
+                    message = if (openTabCount > 0) {
+                        stringResource(R.string.server_forget_message, openTabCount)
+                    } else {
+                        stringResource(R.string.server_forget_message_no_tabs)
+                    },
+                    confirmText = stringResource(R.string.server_forget),
+                    dismissText = stringResource(R.string.button_cancel),
+                    isDestructive = true,
+                    modifier = Modifier.testTag("saved_server_forget_dialog"),
+                )
             }
         }
     }
