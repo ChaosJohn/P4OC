@@ -18,7 +18,7 @@ class SavedServerRegistryTest {
         assertEquals("https://my-host.example.com", server.endpoint)
         assertEquals("https://my-host.example.com:4096", server.endpointKey)
         assertEquals(server.endpointKey, server.id)
-        assertEquals("Remote", server.displayName)
+        assertEquals("my-host.example.com", server.displayName)
         assertEquals("opencode", server.username)
     }
 
@@ -94,6 +94,43 @@ class SavedServerRegistryTest {
         assertEquals("last-user", alpha.username)
         assertTrue(alpha.allowInsecure)
         assertTrue(migrated.any { it.displayName == "Beta recent" })
+    }
+
+    @Test
+    fun `normalize migrates legacy generic name without changing durable endpoint id`() {
+        val legacy = SavedServer(
+            id = "https://build-box.local:4096",
+            endpoint = "https://build-box.local",
+            endpointKey = "https://build-box.local:4096",
+            displayName = "Remote Server",
+            pinned = true,
+        )
+
+        val migrated = SavedServerRegistry.normalize(legacy)
+
+        assertEquals(legacy.id, migrated.id)
+        assertEquals(legacy.endpointKey, migrated.endpointKey)
+        assertEquals("build-box.local", migrated.displayName)
+        assertEquals(migrated.badgeLabel, SavedServerRegistry.normalize(migrated).badgeLabel)
+        assertTrue(migrated.pinned)
+    }
+
+    @Test
+    fun `rename preserves endpoint identity while updating reusable badge identity`() {
+        val original = SavedServerRegistry.fromConnection(
+            url = "https://build-box.local",
+            name = "Build Box",
+        )
+        val renamed = SavedServerRegistry.upsert(
+            current = listOf(original),
+            server = original.copy(displayName = "Jasmin Workstation"),
+        ).single()
+
+        assertEquals(original.id, renamed.id)
+        assertEquals(original.endpointKey, renamed.endpointKey)
+        assertEquals("Jasmin Workstation", renamed.displayName)
+        assertTrue(original.badgeLabel.startsWith("BB"))
+        assertTrue(renamed.badgeLabel.startsWith("JW"))
     }
 
     @Test

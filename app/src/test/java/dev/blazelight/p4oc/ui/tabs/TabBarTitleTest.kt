@@ -7,6 +7,7 @@ import org.junit.Test
 
 class TabBarTitleTest {
     private val labels = TabTitleLabels(
+        home = "Home",
         fallbackTab = "Tab",
         sessions = "Sessions",
         chat = "Chat",

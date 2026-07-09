@@ -1,6 +1,7 @@
 <?xml version="1.0" encoding="utf-8"?>
 <resources>
     <string name="app_name">OpenCode</string>
+    <string name="home_title">Home</string>
     
     <!-- Server Screen -->
     <string name="server_connect_title">Connect to Server</string>
@@ -9,7 +10,7 @@
     <string name="server_mode_remote">Remote</string>
     <string name="server_local_title">Local Server (Termux)</string>
     <string name="server_local_description">Run OpenCode directly on your device using Termux.</string>
-    <string name="server_remote_title">Remote Server</string>
+    <string name="server_remote_title">Network Server</string>
     <string name="server_remote_description">Connect to an OpenCode server running on your network.</string>
     <string name="server_recent_servers">Recent Servers</string>
     <string name="server_saved_servers">Saved servers</string>

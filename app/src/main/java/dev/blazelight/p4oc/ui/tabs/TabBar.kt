@@ -210,6 +210,7 @@ fun getIconForRoute(route: String?): ImageVector {
  */
 data class TabTitleLabels(
     val fallbackTab: String,
+    val home: String,
     val sessions: String,
     val chat: String,
     val files: String,
@@ -224,6 +225,7 @@ data class TabTitleLabels(
 @Composable
 fun rememberTabTitleLabels(): TabTitleLabels = TabTitleLabels(
     fallbackTab = stringResource(R.string.tab_title_fallback),
+    home = stringResource(R.string.home_title),
     sessions = stringResource(R.string.sessions_title),
     chat = stringResource(R.string.tab_title_chat),
     files = stringResource(R.string.tab_title_files),
@@ -243,6 +245,7 @@ fun getTitleForRoute(
 ): String {
     return when {
         route == null -> labels.fallbackTab
+        route == "home" -> labels.home
         route == "sessions" -> withWorkspaceSuffix(labels.sessions, workspaceKey, labels)
         route.startsWith("sessions?") -> withWorkspaceSuffix(labels.sessions, workspaceKey, labels)
         route.startsWith("chat/") -> withWorkspaceSuffix(sessionTitle ?: labels.chat, workspaceKey, labels)

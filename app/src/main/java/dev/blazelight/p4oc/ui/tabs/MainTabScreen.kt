@@ -38,8 +38,9 @@ import dev.blazelight.p4oc.domain.workspace.Workspace
 import dev.blazelight.p4oc.ui.components.TuiAlertDialog
 import dev.blazelight.p4oc.ui.components.TuiTextButton
 import dev.blazelight.p4oc.ui.navigation.Screen
-import dev.blazelight.p4oc.ui.screens.home.HomeScreen
+import dev.blazelight.p4oc.ui.screens.home.HomeActions
 import dev.blazelight.p4oc.ui.screens.home.HomeSummaryBuilder
+import dev.blazelight.p4oc.ui.screens.home.homeScreen
 import dev.blazelight.p4oc.ui.theme.LocalOpenCodeTheme
 import dev.blazelight.p4oc.ui.theme.Spacing
 import dev.blazelight.p4oc.ui.theme.TuiShapes
@@ -92,6 +93,9 @@ fun MainTabScreen(
     var restoreError by remember { mutableStateOf<String?>(null) }
     var showStartWorkSheet by remember { mutableStateOf(false) }
     var showFilesTabPrompt by remember { mutableStateOf(false) }
+    var homeDetailSelection by remember {
+        mutableStateOf<StartWorkSelection>(StartWorkSelection.NeedsSelection)
+    }
 
     // Foreground resume is delegated to ConnectionManager so reconnect policy
     // has one owner instead of competing UI timers and SSE retry callbacks.
@@ -293,15 +297,10 @@ fun MainTabScreen(
     // Snackbar for tab warning
     val snackbarHostState = remember { SnackbarHostState() }
 
-    fun requestFilesTab() {
-        showFilesTabPrompt = true
-    }
-
-    fun requestFilesTab(workspaceKey: WorkspaceKey) {
-        val targetServer = tabManager.activeTab?.serverRef ?: currentServerRef ?: return
+    fun requestFilesTab(target: StartWorkTarget) {
         tabManager.focusOrCreateFilesTab(
-            serverRef = targetServer,
-            workspaceKey = workspaceKey,
+            serverRef = target.serverRef,
+            workspaceKey = target.workspaceKey,
         )
     }
 
@@ -419,44 +418,56 @@ fun MainTabScreen(
                         val isActive = tab.id == activeTabId
                         val workspaceOwner = workspaceOwners[tab.id]
                         if (tab.isPinnedHome) {
-                            HomeScreen(
+                            homeScreen(
                                 summary = HomeSummaryBuilder.build(
                                     savedServers = savedServers,
                                     connectionStates = homeConnectionStates,
                                     tabs = tabs,
                                 ),
-                                onBrowseSessions = {
-                                    tabManager.createTab(
-                                        startRoute = Screen.Sessions.route,
-                                        workspaceKey = WorkspaceKey.Global,
-                                        serverRef = currentServerRef ?: return@HomeScreen,
-                                        focus = true,
-                                    )
-                                },
-                                onOpenFiles = { requestFilesTab(WorkspaceKey.Global) },
-                                onOpenTerminal = {
-                                    coroutineScope.launch {
-                                        val api = connectionManager.getApi() ?: run {
-                                            snackbarHostState.showSnackbar("Not connected to server")
-                                            return@launch
+                                actions = HomeActions(
+                                    onBrowseSessions = { target ->
+                                        tabManager.createTab(
+                                            startRoute = Screen.Sessions.route,
+                                            workspaceKey = target.workspaceKey,
+                                            serverRef = target.serverRef,
+                                            focus = true,
+                                        )
+                                    },
+                                    onOpenFiles = { target -> requestFilesTab(target) },
+                                    onOpenTerminal = { target ->
+                                        coroutineScope.launch {
+                                            if (target.serverRef.endpointKey != currentServerRef?.endpointKey) {
+                                                snackbarHostState.showSnackbar(
+                                                    "Select and connect to ${target.serverRef.displayName} first",
+                                                )
+                                                return@launch
+                                            }
+                                            val api = connectionManager.getApi() ?: run {
+                                                snackbarHostState.showSnackbar("Not connected to server")
+                                                return@launch
+                                            }
+                                            val result = safeApiCall {
+                                                api.createPtySession(
+                                                    createPtyRequestForWorkspace(target.workspaceKey),
+                                                )
+                                            }
+                                            if (result is ApiResult.Success) {
+                                                tabManager.createTab(
+                                                    startRoute = Screen.Terminal.createRoute(result.data.id),
+                                                    workspaceKey = target.workspaceKey,
+                                                    serverRef = target.serverRef,
+                                                    focus = true,
+                                                )
+                                            } else if (result is ApiResult.Error) {
+                                                snackbarHostState.showSnackbar(
+                                                    "Failed to create terminal: ${result.message}",
+                                                )
+                                            }
                                         }
-                                        val result = safeApiCall {
-                                            api.createPtySession(createPtyRequestForWorkspace(WorkspaceKey.Global))
-                                        }
-                                        if (result is ApiResult.Success) {
-                                            tabManager.createTab(
-                                                startRoute = Screen.Terminal.createRoute(result.data.id),
-                                                workspaceKey = WorkspaceKey.Global,
-                                                serverRef = currentServerRef ?: return@launch,
-                                                focus = true,
-                                            )
-                                        } else if (result is ApiResult.Error) {
-                                            snackbarHostState.showSnackbar(
-                                                "Failed to create terminal: ${result.message}",
-                                            )
-                                        }
-                                    }
-                                },
+                                    },
+                                    onChooseTarget = { showFilesTabPrompt = true },
+                                    onWorkspaceDetailChanged = { homeDetailSelection = it },
+                                ),
                                 modifier = Modifier.fillMaxSize(),
                             )
                         } else if (workspaceOwner != null) {
@@ -464,13 +475,19 @@ fun MainTabScreen(
                                 navController = navController,
                                 tabManager = tabManager,
                                 tabId = tab.id,
-                                serverRef = tab.serverRef ?: currentServerRef ?: return@SaveableStateProvider,
+                                serverRef = tab.serverRef ?: return@SaveableStateProvider,
                                 onDisconnect = onDisconnect,
                                 onCloseTab = { closeTab(tab.id) },
                                 startRoute = tab.startRoute,
                                 workspaceOwner = workspaceOwner,
                                 onNewFilesTab = {
-                                    requestFilesTab()
+                                    val serverRef = tab.serverRef
+                                    val workspaceKey = tab.workspaceKey
+                                    if (serverRef != null && workspaceKey != null) {
+                                        requestFilesTab(StartWorkTarget(serverRef, workspaceKey))
+                                    } else {
+                                        showFilesTabPrompt = true
+                                    }
                                 },
                                 onNewTerminalTab = {
                                     coroutineScope.launch {
@@ -495,7 +512,7 @@ fun MainTabScreen(
                                                 tabManager.createTab(
                                                     startRoute = Screen.Terminal.createRoute(ptyId),
                                                     workspaceKey = workspaceKey,
-                                                    serverRef = tab.serverRef ?: currentServerRef ?: return@launch,
+                                                    serverRef = tab.serverRef ?: return@launch,
                                                     focus = true,
                                                 )
                                             }
@@ -532,9 +549,21 @@ fun MainTabScreen(
     }
 
     if (showStartWorkSheet) {
-        val startContext = startWorkContextFor(tabManager.activeTab)
-        val targetWorkspace = startContext.defaultWorkspace ?: WorkspaceKey.Global
-        val targetServer = startContext.defaultServer ?: currentServerRef
+        val availableServers = savedServers.map {
+            ServerRef.fromEndpointKey(it.endpointKey, it.displayName)
+        }
+        val rawContext = if (tabManager.activeTab?.isPinnedHome == true) {
+            StartWorkContext(
+                source = StartWorkSource.HomeWorkspaceDetail,
+                selection = homeDetailSelection,
+            )
+        } else {
+            startWorkContextFor(tabManager.activeTab)
+        }
+        val startContext = rawContext.copy(
+            selection = rawContext.selection.validatedAgainst(availableServers),
+        )
+        val target = startContext.selectedTarget
         TuiAlertDialog(
             onDismissRequest = { showStartWorkSheet = false },
             title = "Start work",
@@ -545,16 +574,12 @@ fun MainTabScreen(
             },
         ) {
             Column(verticalArrangement = Arrangement.spacedBy(Spacing.sm)) {
-                val targetLabel = workspaceLabel(targetWorkspace, tabTitleLabels)
-                    ?: workspaceSubtitle(targetWorkspace)
                 Text(
-                    text = if (startContext.hasExplicitTarget) {
-                        "Target: $targetLabel"
-                    } else if (targetServer != null) {
-                        "Target: ${targetServer.displayName} · $targetLabel"
-                    } else {
-                        "Choose a target before creating work."
-                    },
+                    text = target?.let {
+                        val workspace = workspaceLabel(it.workspaceKey, tabTitleLabels)
+                            ?: workspaceSubtitle(it.workspaceKey)
+                        "Target: ${it.serverRef.displayName} · $workspace"
+                    } ?: "Choose a target before creating work.",
                     color = theme.textMuted,
                     style = MaterialTheme.typography.bodySmall,
                 )
@@ -564,26 +589,34 @@ fun MainTabScreen(
                     marker = "C",
                     onClick = {
                         showStartWorkSheet = false
-                        val serverRef = targetServer
-                        if (serverRef != null) {
+                        if (target == null) {
+                            showFilesTabPrompt = true
+                        } else {
                             tabManager.createTab(
                                 startRoute = Screen.Sessions.route,
-                                workspaceKey = targetWorkspace,
-                                serverRef = serverRef,
+                                workspaceKey = target.workspaceKey,
+                                serverRef = target.serverRef,
                                 focus = true,
                             )
-                        } else {
-                            showFilesTabPrompt = true
                         }
                     },
                 )
                 StartWorkActionRow(
                     label = "Browse sessions",
-                    description = "Open existing sessions in Home's current context.",
+                    description = "Browse sessions for the exact target workspace.",
                     marker = "S",
                     onClick = {
                         showStartWorkSheet = false
-                        tabManager.ensureHomeTab(focus = true)
+                        if (target == null) {
+                            showFilesTabPrompt = true
+                        } else {
+                            tabManager.createTab(
+                                startRoute = Screen.Sessions.route,
+                                workspaceKey = target.workspaceKey,
+                                serverRef = target.serverRef,
+                                focus = true,
+                            )
+                        }
                     },
                 )
                 StartWorkActionRow(
@@ -592,14 +625,7 @@ fun MainTabScreen(
                     marker = "F",
                     onClick = {
                         showStartWorkSheet = false
-                        if (targetServer != null) {
-                            tabManager.focusOrCreateFilesTab(
-                                serverRef = targetServer,
-                                workspaceKey = targetWorkspace,
-                            )
-                        } else {
-                            showFilesTabPrompt = true
-                        }
+                        if (target == null) showFilesTabPrompt = true else requestFilesTab(target)
                     },
                 )
                 StartWorkActionRow(
@@ -608,27 +634,33 @@ fun MainTabScreen(
                     marker = "T",
                     onClick = {
                         showStartWorkSheet = false
-                        coroutineScope.launch {
-                            val api = connectionManager.getApi() ?: run {
-                                snackbarHostState.showSnackbar("Not connected to server")
-                                return@launch
-                            }
-                            val serverRef = targetServer ?: run {
-                                snackbarHostState.showSnackbar("No server target selected")
-                                return@launch
-                            }
-                            val result = safeApiCall {
-                                api.createPtySession(createPtyRequestForWorkspace(targetWorkspace))
-                            }
-                            if (result is ApiResult.Success) {
-                                tabManager.createTab(
-                                    startRoute = Screen.Terminal.createRoute(result.data.id),
-                                    workspaceKey = targetWorkspace,
-                                    serverRef = serverRef,
-                                    focus = true,
-                                )
-                            } else if (result is ApiResult.Error) {
-                                snackbarHostState.showSnackbar("Failed to create terminal: ${result.message}")
+                        if (target == null) {
+                            showFilesTabPrompt = true
+                        } else {
+                            coroutineScope.launch {
+                                if (target.serverRef.endpointKey != currentServerRef?.endpointKey) {
+                                    snackbarHostState.showSnackbar(
+                                        "Select and connect to ${target.serverRef.displayName} first",
+                                    )
+                                    return@launch
+                                }
+                                val api = connectionManager.getApi() ?: run {
+                                    snackbarHostState.showSnackbar("Not connected to server")
+                                    return@launch
+                                }
+                                val result = safeApiCall {
+                                    api.createPtySession(createPtyRequestForWorkspace(target.workspaceKey))
+                                }
+                                if (result is ApiResult.Success) {
+                                    tabManager.createTab(
+                                        startRoute = Screen.Terminal.createRoute(result.data.id),
+                                        workspaceKey = target.workspaceKey,
+                                        serverRef = target.serverRef,
+                                        focus = true,
+                                    )
+                                } else if (result is ApiResult.Error) {
+                                    snackbarHostState.showSnackbar("Failed to create terminal: ${result.message}")
+                                }
                             }
                         }
                     },
@@ -647,39 +679,48 @@ fun MainTabScreen(
     }
 
     if (showFilesTabPrompt) {
-        val openWorkspaceKeys = tabs
-            .mapNotNull { it.workspaceKey }
+        val availableEndpointKeys = savedServers.mapTo(mutableSetOf()) { it.endpointKey }
+        val openTargets = tabs.mapNotNull { tab ->
+            val serverRef = tab.serverRef ?: return@mapNotNull null
+            val workspaceKey = tab.workspaceKey ?: return@mapNotNull null
+            StartWorkTarget(serverRef, workspaceKey)
+        }.filter { it.serverRef.endpointKey in availableEndpointKeys }
             .distinct()
-        fun openFilesTab(workspaceKey: WorkspaceKey) {
-            tabManager.focusOrCreateFilesTab(
-                serverRef = currentServerRef ?: return,
-                workspaceKey = workspaceKey,
+        val noProjectTargets = savedServers.map {
+            StartWorkTarget(
+                ServerRef.fromEndpointKey(it.endpointKey, it.displayName),
+                WorkspaceKey.Global,
             )
+        }
+        fun selectTarget(target: StartWorkTarget) {
+            requestFilesTab(target)
             showFilesTabPrompt = false
         }
 
         TuiAlertDialog(
             onDismissRequest = { showFilesTabPrompt = false },
-            title = "Select Files workspace",
+            title = "Select workspace",
             confirmButton = {
                 TuiTextButton(onClick = { showFilesTabPrompt = false }) {
                     Text("Cancel")
                 }
             }
         ) {
-            Text("Open a Files tab for:")
-            FilesWorkspaceOption(
-                title = "Global files",
-                subtitle = "No project context",
-                marker = "◆",
-                onClick = { openFilesTab(WorkspaceKey.Global) },
-            )
-            openWorkspaceKeys.forEach { workspaceKey ->
+            Text("Choose an exact server and workspace:")
+            noProjectTargets.forEach { target ->
                 FilesWorkspaceOption(
-                    title = workspaceLabel(workspaceKey, tabTitleLabels) ?: "Missing workspace",
-                    subtitle = workspaceSubtitle(workspaceKey),
+                    title = "${target.serverRef.displayName} · No project context",
+                    subtitle = "Explicit server scope",
+                    marker = "◆",
+                    onClick = { selectTarget(target) },
+                )
+            }
+            openTargets.filter { it.workspaceKey != WorkspaceKey.Global }.forEach { target ->
+                FilesWorkspaceOption(
+                    title = workspaceLabel(target.workspaceKey, tabTitleLabels) ?: "Missing workspace",
+                    subtitle = "${target.serverRef.displayName} · ${workspaceSubtitle(target.workspaceKey)}",
                     marker = "◇",
-                    onClick = { openFilesTab(workspaceKey) },
+                    onClick = { selectTarget(target) },
                 )
             }
         }

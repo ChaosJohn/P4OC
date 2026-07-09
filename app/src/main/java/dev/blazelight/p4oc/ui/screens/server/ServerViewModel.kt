@@ -14,6 +14,7 @@ import dev.blazelight.p4oc.core.network.MdnsDiscoveryManager
 import dev.blazelight.p4oc.core.network.ServerConfig
 import dev.blazelight.p4oc.core.network.ServerUrl
 import dev.blazelight.p4oc.core.security.CredentialStore
+import dev.blazelight.p4oc.domain.server.ServerIdentity
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
@@ -92,7 +93,7 @@ class ServerViewModel constructor(
     }
 
     fun setRemoteUrl(url: String) {
-        _uiState.update { it.copy(remoteUrl = url, error = null) }
+        _uiState.update { it.copy(remoteUrl = url, serverNameCandidate = null, error = null) }
     }
 
     fun setUsername(username: String) {
@@ -127,10 +128,11 @@ class ServerViewModel constructor(
                 return@launch
             }
             AppLog.d(TAG, "Connecting to normalized URL: $url")
+            val identity = ServerIdentity.derive(url, state.serverNameCandidate)
 
             val config = ServerConfig(
                 url = url,
-                name = "Remote Server",
+                name = identity.displayName,
                 isLocal = false,
                 username = state.username.takeIf { it.isNotBlank() },
                 allowInsecure = state.allowInsecure
@@ -147,14 +149,14 @@ class ServerViewModel constructor(
                     settingsDataStore.saveLastConnection(config, password)
                     settingsDataStore.addRecentServer(
                         url = url,
-                        name = "Remote Server",
+                        name = identity.displayName,
                         username = state.username.takeIf { it.isNotBlank() },
                         password = password,
                         allowInsecure = state.allowInsecure
                     )
                     settingsDataStore.addSavedServer(
                         url = url,
-                        name = "Remote Server",
+                        name = identity.displayName,
                         username = state.username.takeIf { it.isNotBlank() },
                         password = password,
                         allowInsecure = state.allowInsecure,
@@ -185,6 +187,7 @@ class ServerViewModel constructor(
         _uiState.update {
             it.copy(
                 remoteUrl = normalizedUrl,
+                serverNameCandidate = server.name,
                 username = server.username ?: ServerUrl.DEFAULT_USERNAME,
                 password = savedPassword ?: "",
                 allowInsecure = server.allowInsecure
@@ -239,6 +242,7 @@ class ServerViewModel constructor(
         _uiState.update {
             it.copy(
                 remoteUrl = server.url,
+                serverNameCandidate = server.serviceName,
                 username = ServerUrl.DEFAULT_USERNAME,
                 password = "",
                 allowInsecure = server.allowInsecure
@@ -263,6 +267,7 @@ class ServerViewModel constructor(
 
 data class ServerUiState(
     val remoteUrl: String = "",
+    val serverNameCandidate: String? = null,
     val username: String = "opencode",
     val password: String = "",
     val allowInsecure: Boolean = false,

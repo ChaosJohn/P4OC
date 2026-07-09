@@ -545,7 +545,12 @@ private fun SavedServersSection(
                         verticalAlignment = Alignment.CenterVertically,
                         horizontalArrangement = Arrangement.spacedBy(Spacing.lg),
                     ) {
-                        Text("●", color = theme.success, fontFamily = FontFamily.Monospace)
+                        Text(
+                            text = "[${server.badgeLabel}]",
+                            style = MaterialTheme.typography.labelSmall,
+                            fontFamily = FontFamily.Monospace,
+                            color = theme.textMuted,
+                        )
                         Column(modifier = Modifier.weight(1f)) {
                             Text(
                                 text = server.displayName,

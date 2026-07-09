@@ -1,7 +1,7 @@
 ---
 id: oa-runv
 status: open
-deps: []
+deps: [oa-cxp9, oa-agea]
 links: []
 created: 2026-07-09T15:15:06Z
 type: task

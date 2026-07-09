@@ -24,40 +24,81 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.RectangleShape
 import androidx.compose.ui.platform.testTag
-import dev.blazelight.p4oc.ui.theme.LocalOpenCodeTheme
 import dev.blazelight.p4oc.domain.server.WorkspaceKey
+import dev.blazelight.p4oc.ui.tabs.StartWorkSelection
+import dev.blazelight.p4oc.ui.tabs.StartWorkTarget
+import dev.blazelight.p4oc.ui.theme.LocalOpenCodeTheme
 import dev.blazelight.p4oc.ui.theme.Spacing
 import dev.blazelight.p4oc.ui.theme.TuiShapes
 
 private const val HOME_SERVER_CARD_LIMIT = 2
 private const val HOME_WORKSPACE_LIMIT = 4
 
-@Composable
-fun HomeScreen(
-    summary: HomeSummaryState,
-    onBrowseSessions: () -> Unit,
-    onOpenFiles: () -> Unit,
-    onOpenTerminal: () -> Unit,
-    modifier: Modifier = Modifier,
-    onWorkspaceSelected: (WorkspaceSummary) -> Unit = {},
-) {
-    val theme = LocalOpenCodeTheme.current
+data class HomeActions(
+    val onBrowseSessions: (StartWorkTarget) -> Unit,
+    val onOpenFiles: (StartWorkTarget) -> Unit,
+    val onOpenTerminal: (StartWorkTarget) -> Unit,
+    val onChooseTarget: () -> Unit,
+    val onWorkspaceSelected: (WorkspaceSummary) -> Unit = {},
+    val onWorkspaceDetailChanged: (StartWorkSelection) -> Unit = {},
+)
 
+private data class WorkspaceDetailActions(
+    val onBack: () -> Unit,
+    val onBrowseSessions: () -> Unit,
+    val onOpenFiles: () -> Unit,
+    val onOpenTerminal: () -> Unit,
+)
+
+@Composable
+fun homeScreen(
+    summary: HomeSummaryState,
+    actions: HomeActions,
+    modifier: Modifier = Modifier,
+) {
     var selectedWorkspace by remember { mutableStateOf<WorkspaceSummary?>(null) }
     val selected = selectedWorkspace
     if (selected != null) {
-        WorkspaceDetail(
+        workspaceDetail(
             workspace = selected,
             openWork = summary.openWork.filter {
                 it.serverRef == selected.serverRef && it.workspaceKey == selected.workspaceKey
             },
-            onBack = { selectedWorkspace = null },
-            onOpenFiles = onOpenFiles,
-            onOpenTerminal = onOpenTerminal,
+            actions = WorkspaceDetailActions(
+                onBack = {
+                    selectedWorkspace = null
+                    actions.onWorkspaceDetailChanged(StartWorkSelection.NeedsSelection)
+                },
+                onBrowseSessions = { actions.onBrowseSessions(selected.toStartWorkTarget()) },
+                onOpenFiles = { actions.onOpenFiles(selected.toStartWorkTarget()) },
+                onOpenTerminal = { actions.onOpenTerminal(selected.toStartWorkTarget()) },
+            ),
             modifier = modifier,
         )
         return
     }
+    homeOverview(
+        summary = summary,
+        onWorkspaceClick = { workspace ->
+            selectedWorkspace = workspace
+            actions.onWorkspaceSelected(workspace)
+            actions.onWorkspaceDetailChanged(
+                StartWorkSelection.Selected(workspace.toStartWorkTarget()),
+            )
+        },
+        onChooseTarget = actions.onChooseTarget,
+        modifier = modifier,
+    )
+}
+
+@Composable
+private fun homeOverview(
+    summary: HomeSummaryState,
+    onWorkspaceClick: (WorkspaceSummary) -> Unit,
+    onChooseTarget: () -> Unit,
+    modifier: Modifier,
+) {
+    val theme = LocalOpenCodeTheme.current
     Column(
         modifier = modifier
             .fillMaxSize()
@@ -65,68 +106,70 @@ fun HomeScreen(
             .testTag("home_screen"),
         verticalArrangement = Arrangement.spacedBy(Spacing.md),
     ) {
-        homeHeader(
-            serverCount = summary.servers.size,
-            openWorkCount = summary.openWork.size,
-        )
-
-        if (summary.servers.isNotEmpty()) {
-            sectionLabel("Servers")
-            Row(
-                horizontalArrangement = Arrangement.spacedBy(Spacing.sm),
-                modifier = Modifier.fillMaxWidth(),
-            ) {
-                summary.servers.take(HOME_SERVER_CARD_LIMIT).forEach { server ->
-                    serverCard(
-                        server = server,
-                        modifier = Modifier.weight(1f),
-                    )
-                }
-            }
-        }
-
-        sectionLabel("Resume")
-        if (summary.workspaces.isEmpty()) {
-            emptyHomeCard()
-        } else {
-            summary.workspaces.take(HOME_WORKSPACE_LIMIT).forEach { workspace ->
-                workspaceRow(
-                    workspace = workspace,
-                    onClick = {
-                        selectedWorkspace = workspace
-                        onWorkspaceSelected(workspace)
-                    },
-                )
-            }
-        }
-
+        homeHeader(summary.servers.size, summary.openWork.size)
+        serverOverview(summary.servers)
+        workspaceOverview(summary.workspaces, onWorkspaceClick)
         sectionLabel("Browse")
         HomeActionRow(
             label = "Sessions",
             description = "Find previous chats and workspace history.",
             icon = { Icon(Icons.Default.ViewList, contentDescription = null, tint = theme.textMuted) },
-            onClick = onBrowseSessions,
+            onClick = onChooseTarget,
             testTag = "home_browse_sessions",
         )
+        browseActions(onChooseTarget)
+    }
+}
 
-        Row(horizontalArrangement = Arrangement.spacedBy(Spacing.sm)) {
-            HomeActionRow(
-                label = "Files",
-                description = "Open file browser.",
-                icon = { Icon(Icons.Default.Folder, contentDescription = null, tint = theme.textMuted) },
-                onClick = onOpenFiles,
-                testTag = "home_open_files",
-                modifier = Modifier.weight(1f),
-            )
-            HomeActionRow(
-                label = "Terminal",
-                description = "Open shell.",
-                icon = { Icon(Icons.Default.Terminal, contentDescription = null, tint = theme.textMuted) },
-                onClick = onOpenTerminal,
-                testTag = "home_open_terminal",
-                modifier = Modifier.weight(1f),
-            )
+@Composable
+private fun serverOverview(servers: List<ServerSummary>) {
+    if (servers.isEmpty()) return
+    sectionLabel("Servers")
+    Row(
+        horizontalArrangement = Arrangement.spacedBy(Spacing.sm),
+        modifier = Modifier.fillMaxWidth(),
+    ) {
+        servers.take(HOME_SERVER_CARD_LIMIT).forEach { server ->
+            serverCard(server, Modifier.weight(1f))
         }
+    }
+}
+
+@Composable
+private fun workspaceOverview(
+    workspaces: List<WorkspaceSummary>,
+    onWorkspaceClick: (WorkspaceSummary) -> Unit,
+) {
+    sectionLabel("Resume")
+    if (workspaces.isEmpty()) {
+        emptyHomeCard()
+    } else {
+        workspaces.take(HOME_WORKSPACE_LIMIT).forEach { workspace ->
+            workspaceRow(workspace) { onWorkspaceClick(workspace) }
+        }
+    }
+}
+
+@Composable
+private fun browseActions(onChooseTarget: () -> Unit) {
+    val theme = LocalOpenCodeTheme.current
+    Row(horizontalArrangement = Arrangement.spacedBy(Spacing.sm)) {
+        HomeActionRow(
+            label = "Files",
+            description = "Open file browser.",
+            icon = { Icon(Icons.Default.Folder, contentDescription = null, tint = theme.textMuted) },
+            onClick = onChooseTarget,
+            testTag = "home_open_files",
+            modifier = Modifier.weight(1f),
+        )
+        HomeActionRow(
+            label = "Terminal",
+            description = "Open shell.",
+            icon = { Icon(Icons.Default.Terminal, contentDescription = null, tint = theme.textMuted) },
+            onClick = onChooseTarget,
+            testTag = "home_open_terminal",
+            modifier = Modifier.weight(1f),
+        )
     }
 }
 
@@ -178,7 +221,11 @@ private fun serverCard(server: ServerSummary, modifier: Modifier = Modifier) {
             modifier = Modifier.padding(Spacing.sm),
             verticalArrangement = Arrangement.spacedBy(Spacing.xxs),
         ) {
-            Text(server.displayName, style = MaterialTheme.typography.labelMedium, color = theme.text)
+            Text(
+                "${server.serverRef.badgeLabel}  ${server.displayName}",
+                style = MaterialTheme.typography.labelMedium,
+                color = theme.text,
+            )
             Text(
                 "${server.openTabCount} open",
                 style = MaterialTheme.typography.bodySmall,
@@ -192,8 +239,15 @@ private fun serverCard(server: ServerSummary, modifier: Modifier = Modifier) {
 private fun workspaceRow(workspace: WorkspaceSummary, onClick: () -> Unit) {
     HomeActionRow(
         label = workspace.workspaceKey.displayLabel(),
-        description = "${workspace.serverRef.displayName} · ${workspace.openTabCount} open",
-        icon = { Icon(Icons.Default.Folder, contentDescription = null, tint = LocalOpenCodeTheme.current.textMuted) },
+        description = "${workspace.serverRef.badgeLabel}  ${workspace.serverRef.displayName} · " +
+            "${workspace.openTabCount} open",
+        icon = {
+            Icon(
+                Icons.Default.Folder,
+                contentDescription = null,
+                tint = LocalOpenCodeTheme.current.textMuted,
+            )
+        },
         onClick = onClick,
         testTag = "home_workspace_${workspace.serverRef.endpointKey}_${workspace.workspaceKey.displayLabel()}",
     )
@@ -256,12 +310,10 @@ private fun HomeActionRow(
 }
 
 @Composable
-private fun WorkspaceDetail(
+private fun workspaceDetail(
     workspace: WorkspaceSummary,
     openWork: List<OpenWorkSummary>,
-    onBack: () -> Unit,
-    onOpenFiles: () -> Unit,
-    onOpenTerminal: () -> Unit,
+    actions: WorkspaceDetailActions,
     modifier: Modifier = Modifier,
 ) {
     val theme = LocalOpenCodeTheme.current
@@ -276,12 +328,13 @@ private fun WorkspaceDetail(
             label = "← Home",
             description = "Back to all workspaces",
             icon = { Icon(Icons.Default.Home, contentDescription = null, tint = theme.textMuted) },
-            onClick = onBack,
+            onClick = actions.onBack,
             testTag = "home_workspace_detail_back",
         )
         HomeSection(
             title = workspace.workspaceKey.displayLabel(),
-            body = "${workspace.serverRef.displayName} · ${workspace.workspaceKey.detailLabel()}",
+            body = "${workspace.serverRef.badgeLabel}  ${workspace.serverRef.displayName} · " +
+                workspace.workspaceKey.detailLabel(),
         )
         HomeSection(
             title = "Open in this workspace",
@@ -291,7 +344,7 @@ private fun WorkspaceDetail(
             label = "Browse filtered sessions",
             description = "Use Sessions search/actions scoped to this workspace.",
             icon = { Icon(Icons.Default.ViewList, contentDescription = null, tint = theme.textMuted) },
-            onClick = onBack,
+            onClick = actions.onBrowseSessions,
             testTag = "home_workspace_detail_sessions",
         )
         Row(horizontalArrangement = Arrangement.spacedBy(Spacing.sm)) {
@@ -299,7 +352,7 @@ private fun WorkspaceDetail(
                 label = "+ Files",
                 description = "Focus or create Files for this workspace.",
                 icon = { Icon(Icons.Default.Folder, contentDescription = null, tint = theme.textMuted) },
-                onClick = onOpenFiles,
+                onClick = actions.onOpenFiles,
                 testTag = "home_workspace_detail_files",
                 modifier = Modifier.weight(1f),
             )
@@ -307,13 +360,18 @@ private fun WorkspaceDetail(
                 label = "+ Terminal",
                 description = "Create Terminal here.",
                 icon = { Icon(Icons.Default.Terminal, contentDescription = null, tint = theme.textMuted) },
-                onClick = onOpenTerminal,
+                onClick = actions.onOpenTerminal,
                 testTag = "home_workspace_detail_terminal",
                 modifier = Modifier.weight(1f),
             )
         }
     }
 }
+
+private fun WorkspaceSummary.toStartWorkTarget(): StartWorkTarget = StartWorkTarget(
+    serverRef = serverRef,
+    workspaceKey = workspaceKey,
+)
 
 private fun WorkspaceKey.displayLabel(): String = when (this) {
     WorkspaceKey.Global -> "Global workspace"

@@ -6,9 +6,10 @@ import androidx.datastore.core.DataStore
 import androidx.datastore.preferences.core.*
 import androidx.datastore.preferences.preferencesDataStore
 import dev.blazelight.p4oc.core.log.AppLog
-import dev.blazelight.p4oc.core.security.CredentialStore
 import dev.blazelight.p4oc.core.network.ServerUrl
+import dev.blazelight.p4oc.core.security.CredentialStore
 import dev.blazelight.p4oc.data.remote.dto.ModelInput
+import dev.blazelight.p4oc.domain.server.ServerIdentity
 import dev.blazelight.p4oc.domain.server.WorkspaceKey
 import dev.blazelight.p4oc.domain.session.SessionId
 import kotlinx.coroutines.CoroutineScope
@@ -762,7 +763,10 @@ data class SavedServer(
     val pinned: Boolean = false,
     val defaultWorkspace: String? = null,
     val lastConnectedAt: Long? = null,
-)
+) {
+    val badgeLabel: String
+        get() = ServerIdentity.derive(endpointKey, displayName).badgeLabel
+}
 
 internal object SavedServerRegistry {
     fun fromConnection(
@@ -778,11 +782,12 @@ internal object SavedServerRegistry {
             ?: throw IllegalArgumentException("Invalid server endpoint: $url")
         val endpointKey = ServerUrl.endpointKey(endpoint)
             ?: throw IllegalArgumentException("Invalid server endpoint: $url")
+        val identity = ServerIdentity.derive(endpointKey, name)
         return SavedServer(
             id = endpointKey,
             endpoint = endpoint,
             endpointKey = endpointKey,
-            displayName = name.takeIf { it.isNotBlank() } ?: endpoint,
+            displayName = identity.displayName,
             username = username,
             allowInsecure = allowInsecure,
             pinned = pinned,
@@ -796,11 +801,12 @@ internal object SavedServerRegistry {
             ?: throw IllegalArgumentException("Invalid server endpoint: ${server.endpoint}")
         val endpointKey = ServerUrl.endpointKey(endpoint)
             ?: throw IllegalArgumentException("Invalid server endpoint: ${server.endpoint}")
+        val identity = ServerIdentity.derive(endpointKey, server.displayName)
         return server.copy(
             id = server.id.ifBlank { endpointKey },
             endpoint = endpoint,
             endpointKey = endpointKey,
-            displayName = server.displayName.takeIf { it.isNotBlank() } ?: endpoint,
+            displayName = identity.displayName,
             defaultWorkspace = server.defaultWorkspace?.takeIf { it.isNotBlank() },
         )
     }
