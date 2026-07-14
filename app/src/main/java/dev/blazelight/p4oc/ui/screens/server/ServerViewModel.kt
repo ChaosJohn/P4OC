@@ -21,6 +21,43 @@ import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.launch
 
+enum class ServerConnectionStatus { CONNECTED, CONNECTING, AVAILABLE, DISCONNECTED, ERROR }
+
+data class ServerInventoryEntry(
+    val server: SavedServer,
+    val discovered: DiscoveredServer?,
+    val status: ServerConnectionStatus,
+)
+
+data class ServerInventory(
+    val saved: List<ServerInventoryEntry>,
+    val nearby: List<DiscoveredServer>,
+)
+
+internal fun buildServerInventory(state: ServerUiState): ServerInventory {
+    val discoveredByEndpoint = state.discoveredServers.associateBy {
+        ServerUrl.endpointKey(it.url) ?: it.url.trim()
+    }
+    val saved = state.savedServers.distinctBy(SavedServer::endpointKey).map { server ->
+        val discovered = discoveredByEndpoint[server.endpointKey]
+        val status = when {
+            state.connectedEndpointKey == server.endpointKey && state.isConnected -> ServerConnectionStatus.CONNECTED
+            state.connectingEndpointKey == server.endpointKey && state.isConnecting -> ServerConnectionStatus.CONNECTING
+            state.failedEndpointKey == server.endpointKey -> ServerConnectionStatus.ERROR
+            discovered != null -> ServerConnectionStatus.AVAILABLE
+            else -> ServerConnectionStatus.DISCONNECTED
+        }
+        ServerInventoryEntry(server, discovered, status)
+    }
+    val savedKeys = saved.mapTo(mutableSetOf()) { it.server.endpointKey }
+    return ServerInventory(
+        saved = saved,
+        nearby = state.discoveredServers.filter {
+            (ServerUrl.endpointKey(it.url) ?: it.url.trim()) !in savedKeys
+        },
+    )
+}
+
 private const val TAG = "ServerViewModel"
 
 class ServerViewModel constructor(
@@ -33,11 +70,15 @@ class ServerViewModel constructor(
     private val _uiState = MutableStateFlow(ServerUiState())
     val uiState: StateFlow<ServerUiState> = _uiState.asStateFlow()
 
-    init {
+    private var started = false
+
+    fun start(autoReconnect: Boolean) {
+        if (started) return
+        started = true
         loadRecentServers()
         loadSavedServers()
         collectDiscoveryFlows()
-        tryAutoReconnect()
+        if (autoReconnect) tryAutoReconnect()
     }
 
     private fun loadRecentServers() {
@@ -61,9 +102,11 @@ class ServerViewModel constructor(
             val (lastConfig, password) = settingsDataStore.getLastConnection() ?: return@launch
 
             AppLog.d(TAG, "Found last connection: ${lastConfig.url}")
+            val endpointKey = ServerUrl.endpointKey(lastConfig.url)
             _uiState.update {
                 it.copy(
                     isConnecting = true,
+                    connectingEndpointKey = endpointKey,
                     remoteUrl = lastConfig.url,
                     username = lastConfig.username ?: ServerUrl.DEFAULT_USERNAME,
                     password = password ?: "",
@@ -77,13 +120,23 @@ class ServerViewModel constructor(
                 onSuccess = { projects ->
                     AppLog.d(TAG, "Auto-reconnect successful")
                     initializeProjectContext()
-                    _uiState.update { it.copy(isConnecting = false, isConnected = true) }
+                    _uiState.update {
+                        it.copy(
+                            isConnecting = false,
+                            isConnected = true,
+                            connectingEndpointKey = null,
+                            connectedEndpointKey = endpointKey,
+                            failedEndpointKey = null,
+                        )
+                    }
                 },
                 onFailure = { error ->
                     AppLog.w(TAG, "Auto-reconnect failed: ${error.message}")
                     _uiState.update {
                         it.copy(
                             isConnecting = false,
+                            connectingEndpointKey = null,
+                            failedEndpointKey = endpointKey,
                             error = "Could not reconnect: ${error.message}"
                         )
                     }
@@ -119,13 +172,20 @@ class ServerViewModel constructor(
         }
 
         viewModelScope.launch {
-            _uiState.update { it.copy(isConnecting = true, error = null) }
-
             val url = ServerUrl.normalizeConnectUrl(state.remoteUrl)
             if (url == null) {
                 AppLog.w(TAG, "Invalid server URL: '${state.remoteUrl}'")
                 _uiState.update { it.copy(isConnecting = false, error = "Invalid server URL") }
                 return@launch
+            }
+            val endpointKey = ServerUrl.endpointKey(url)
+            _uiState.update {
+                it.copy(
+                    isConnecting = true,
+                    connectingEndpointKey = endpointKey,
+                    failedEndpointKey = null,
+                    error = null,
+                )
             }
             AppLog.d(TAG, "Connecting to normalized URL: $url")
             val identity = ServerIdentity.derive(url, state.serverNameCandidate)
@@ -163,7 +223,15 @@ class ServerViewModel constructor(
                         lastConnectedAt = System.currentTimeMillis(),
                     )
                     initializeProjectContext()
-                    _uiState.update { it.copy(isConnecting = false, isConnected = true) }
+                    _uiState.update {
+                        it.copy(
+                            isConnecting = false,
+                            isConnected = true,
+                            connectingEndpointKey = null,
+                            connectedEndpointKey = endpointKey,
+                            failedEndpointKey = null,
+                        )
+                    }
                 },
                 onFailure = { error ->
                     AppLog.e(TAG, "Connection failed: ${error.message}", error)
@@ -171,6 +239,8 @@ class ServerViewModel constructor(
                     _uiState.update {
                         it.copy(
                             isConnecting = false,
+                            connectingEndpointKey = null,
+                            failedEndpointKey = endpointKey,
                             password = "",
                             error = "Failed to connect: ${error.message}"
                         )
@@ -199,6 +269,51 @@ class ServerViewModel constructor(
     fun removeRecentServer(server: RecentServer) {
         viewModelScope.launch {
             settingsDataStore.removeRecentServer(server.url)
+        }
+    }
+
+    fun prepareSavedServer(server: SavedServer) {
+        val password = credentialStore.getServerPassword(server.id)
+            ?: credentialStore.getServerPassword(server.endpoint)
+            ?: ""
+        _uiState.update {
+            it.copy(
+                remoteUrl = server.endpoint,
+                serverNameCandidate = server.displayName,
+                username = server.username ?: ServerUrl.DEFAULT_USERNAME,
+                password = password,
+                allowInsecure = server.allowInsecure,
+                error = null,
+            )
+        }
+    }
+
+    fun connectToSavedServer(server: SavedServer) {
+        prepareSavedServer(server)
+        connectToRemote()
+    }
+
+    fun saveSavedServer(server: SavedServer) {
+        val state = _uiState.value
+        val url = ServerUrl.normalizeConnectUrl(state.remoteUrl)
+        if (url == null) {
+            _uiState.update { it.copy(error = "Invalid server URL") }
+            return
+        }
+        val identity = ServerIdentity.derive(url, state.serverNameCandidate ?: server.displayName)
+        viewModelScope.launch {
+            val updated = settingsDataStore.addSavedServer(
+                url = url,
+                name = identity.displayName,
+                username = state.username.takeIf(String::isNotBlank),
+                password = state.password.takeIf(String::isNotBlank),
+                allowInsecure = state.allowInsecure,
+                pinned = server.pinned,
+                defaultWorkspace = server.defaultWorkspace,
+                lastConnectedAt = server.lastConnectedAt,
+            )
+            if (updated.id != server.id) settingsDataStore.removeSavedServer(server.id)
+            _uiState.update { it.copy(remoteUrl = updated.endpoint, password = "", error = null) }
         }
     }
 
@@ -274,6 +389,9 @@ data class ServerUiState(
     val isConnecting: Boolean = false,
     val isConnected: Boolean = false,
     val error: String? = null,
+    val connectingEndpointKey: String? = null,
+    val connectedEndpointKey: String? = null,
+    val failedEndpointKey: String? = null,
     val recentServers: List<RecentServer> = emptyList(),
     val savedServers: List<SavedServer> = emptyList(),
     val discoveredServers: List<DiscoveredServer> = emptyList(),

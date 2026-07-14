@@ -5,6 +5,7 @@ import android.net.Uri
 sealed class Screen(val route: String) {
     data object Setup : Screen("setup")
     data object Server : Screen("server")
+    data object ServerManagement : Screen("server/manage")
     data object Home : Screen("home")
     data object Sessions : Screen("sessions")
 

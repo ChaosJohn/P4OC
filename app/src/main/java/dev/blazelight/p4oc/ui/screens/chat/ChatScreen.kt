@@ -163,7 +163,7 @@ fun ChatScreen(
                     lastVisible != null &&
                         lastVisible.index >= lastItemIndex &&
                         lastItemBottom <= layoutInfo.viewportEndOffset
-                )
+                    )
         }
     }
 
@@ -352,134 +352,136 @@ fun ChatScreen(
                     .fillMaxSize()
                     .weight(1f)
             ) {
-            // Revert active banner
-            uiState.session?.revert?.let {
-                val theme = LocalOpenCodeTheme.current
-                Surface(
-                    color = theme.warning.copy(alpha = 0.15f),
-                    shape = RectangleShape
-                ) {
-                    Row(
-                        modifier = Modifier
-                            .fillMaxWidth()
-                            .padding(horizontal = Spacing.md, vertical = Spacing.sm),
-                        horizontalArrangement = Arrangement.SpaceBetween,
-                        verticalAlignment = Alignment.CenterVertically
+                // Revert active banner
+                uiState.session?.revert?.let {
+                    val theme = LocalOpenCodeTheme.current
+                    Surface(
+                        color = theme.warning.copy(alpha = 0.15f),
+                        shape = RectangleShape
                     ) {
-                        Text(
-                            text = "\u21BA ${stringResource(R.string.revert_active_banner)}",
-                            style = MaterialTheme.typography.labelMedium,
-                            color = theme.warning
-                        )
-                        Text(
-                            text = "[${stringResource(R.string.unrevert_all)}]",
-                            style = MaterialTheme.typography.labelMedium.copy(fontFamily = FontFamily.Monospace),
-                            color = theme.accent,
-                            modifier = Modifier.clickable(role = Role.Button) { viewModel.unrevertSession() }
-                        )
+                        Row(
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .padding(horizontal = Spacing.md, vertical = Spacing.sm),
+                            horizontalArrangement = Arrangement.SpaceBetween,
+                            verticalAlignment = Alignment.CenterVertically
+                        ) {
+                            Text(
+                                text = "\u21BA ${stringResource(R.string.revert_active_banner)}",
+                                style = MaterialTheme.typography.labelMedium,
+                                color = theme.warning
+                            )
+                            Text(
+                                text = "[${stringResource(R.string.unrevert_all)}]",
+                                style = MaterialTheme.typography.labelMedium.copy(fontFamily = FontFamily.Monospace),
+                                color = theme.accent,
+                                modifier = Modifier.clickable(role = Role.Button) { viewModel.unrevertSession() }
+                            )
+                        }
                     }
                 }
-            }
 
-            val hasContent = messages.isNotEmpty() || uiState.isBusy
+                val hasContent = messages.isNotEmpty() || uiState.isBusy
 
-            if (!hasContent && !uiState.isLoading) {
-                EmptyChatView(modifier = Modifier.align(Alignment.Center))
-            } else {
-                LazyColumn(
-                    state = listState,
-                    modifier = Modifier.fillMaxSize().testTag("message_list"),
-                    contentPadding = PaddingValues(vertical = Spacing.xxs, horizontal = Spacing.xs),
-                    verticalArrangement = Arrangement.spacedBy(Spacing.hairline),
-                ) {
-                    // All messages - stable keys ensure only changed items recompose
-                    itemsIndexed(
-                        items = messageBlocks,
-                        key = { _, block ->
-                            when (block) {
-                                is MessageBlock.UserBlock -> block.message.message.id
-                                is MessageBlock.AssistantBlock -> block.messages.first().message.id
+                if (!hasContent && !uiState.isLoading) {
+                    EmptyChatView(modifier = Modifier.align(Alignment.Center))
+                } else {
+                    LazyColumn(
+                        state = listState,
+                        modifier = Modifier.fillMaxSize().testTag("message_list"),
+                        contentPadding = PaddingValues(vertical = Spacing.xxs, horizontal = Spacing.xs),
+                        verticalArrangement = Arrangement.spacedBy(Spacing.hairline),
+                    ) {
+                        // All messages - stable keys ensure only changed items recompose
+                        itemsIndexed(
+                            items = messageBlocks,
+                            key = { _, block ->
+                                when (block) {
+                                    is MessageBlock.UserBlock -> block.message.message.id
+                                    is MessageBlock.AssistantBlock -> block.messages.first().message.id
+                                }
+                            }
+                        ) { index, block ->
+                            val isCurrentMatch = scrollRestorationState.showSearch &&
+                                scrollRestorationState.searchQuery.isNotBlank() &&
+                                searchMatches.getOrNull(scrollRestorationState.currentMatchIndex)?.blockIndex == index
+                            val highlight = if (isCurrentMatch) {
+                                Modifier.background(LocalOpenCodeTheme.current.accent.copy(alpha = 0.08f))
+                            } else {
+                                Modifier
+                            }
+                            Box(modifier = highlight) {
+                                MessageBlockView(
+                                    block = block,
+                                    onToolApprove = { viewModel.respondToPermission(it, "once") },
+                                    onToolDeny = { viewModel.respondToPermission(it, "reject") },
+                                    onToolAlways = { viewModel.respondToPermission(it, "always") },
+                                    onOpenSubSession = onOpenSubSession,
+                                    defaultToolWidgetState = defaultToolWidgetState,
+                                    pendingPermissionsByCallId = pendingPermissionsByCallId,
+                                    onRevert = { messageId -> showRevertDialog = messageId }
+                                )
                             }
                         }
-                    ) { index, block ->
-                        val isCurrentMatch = scrollRestorationState.showSearch &&
-                            scrollRestorationState.searchQuery.isNotBlank() &&
-                            searchMatches.getOrNull(scrollRestorationState.currentMatchIndex)?.blockIndex == index
-                        val highlight = if (isCurrentMatch) {
-                            Modifier.background(LocalOpenCodeTheme.current.accent.copy(alpha = 0.08f))
-                        } else {
-                            Modifier
-                        }
-                        Box(modifier = highlight) {
-                            MessageBlockView(
-                                block = block,
-                                onToolApprove = { viewModel.respondToPermission(it, "once") },
-                                onToolDeny = { viewModel.respondToPermission(it, "reject") },
-                                onToolAlways = { viewModel.respondToPermission(it, "always") },
-                                onOpenSubSession = onOpenSubSession,
-                                defaultToolWidgetState = defaultToolWidgetState,
-                                pendingPermissionsByCallId = pendingPermissionsByCallId,
-                                onRevert = { messageId -> showRevertDialog = messageId }
-                            )
-                        }
-                    }
 
-                    pendingQuestion?.let { questionRequest ->
-                        item(key = "pending_question_${questionRequest.id}") {
-                            InlineQuestionCard(
-                                questionRequestId = questionRequest.id,
-                                questionData = dev.blazelight.p4oc.domain.model.QuestionData(questionRequest.questions),
-                                onDismiss = { viewModel.dismissQuestion(questionRequest.id) },
-                                onSubmit = { answers ->
-                                    viewModel.respondToQuestion(questionRequest.id, answers)
-                                },
-                                modifier = Modifier.padding(vertical = Spacing.xs)
-                            )
+                        pendingQuestion?.let { questionRequest ->
+                            item(key = "pending_question_${questionRequest.id}") {
+                                InlineQuestionCard(
+                                    questionRequestId = questionRequest.id,
+                                    questionData = dev.blazelight.p4oc.domain.model.QuestionData(
+                                        questionRequest.questions
+                                    ),
+                                    onDismiss = { viewModel.dismissQuestion(questionRequest.id) },
+                                    onSubmit = { answers ->
+                                        viewModel.respondToQuestion(questionRequest.id, answers)
+                                    },
+                                    modifier = Modifier.padding(vertical = Spacing.xs)
+                                )
+                            }
                         }
                     }
                 }
-            }
 
-            val activeLoadSteps = buildList {
-                addAll(uiState.loadingSteps)
-                if (isPickerLoading) add("Loading files")
-            }
-            if (uiState.isLoading || activeLoadSteps.isNotEmpty()) {
-                TuiLoadingScreen(
-                    modifier = Modifier.align(Alignment.Center),
-                    text = activeLoadSteps.ifEmpty { listOf("Loading session") }.joinToString("\n")
-                )
-            }
+                val activeLoadSteps = buildList {
+                    addAll(uiState.loadingSteps)
+                    if (isPickerLoading) add("Loading files")
+                }
+                if (uiState.isLoading || activeLoadSteps.isNotEmpty()) {
+                    TuiLoadingScreen(
+                        modifier = Modifier.align(Alignment.Center),
+                        text = activeLoadSteps.ifEmpty { listOf("Loading session") }.joinToString("\n")
+                    )
+                }
 
-            uiState.error?.let { error ->
-                TuiSnackbar(
+                uiState.error?.let { error ->
+                    TuiSnackbar(
+                        modifier = Modifier
+                            .align(Alignment.BottomCenter)
+                            .padding(Spacing.md),
+                        action = {
+                            TextButton(onClick = viewModel::clearError, shape = RectangleShape) {
+                                Text(stringResource(R.string.dismiss))
+                            }
+                        }
+                    ) {
+                        Text(error)
+                    }
+                }
+
+                // Jump to bottom button - shows when scrolled away from the tail.
+                JumpToBottomButton(
+                    visible = !isAtBottom,
+                    hasNewContent = scrollRestorationState.hasNewContentWhileAway,
+                    onClick = {
+                        coroutineScope.launch {
+                            scrollRestorationState.onJumpToBottom()
+                            listState.scrollChatToBottom()
+                        }
+                    },
                     modifier = Modifier
-                        .align(Alignment.BottomCenter)
-                        .padding(Spacing.md),
-                    action = {
-                        TextButton(onClick = viewModel::clearError, shape = RectangleShape) {
-                            Text(stringResource(R.string.dismiss))
-                        }
-                    }
-                ) {
-                    Text(error)
-                }
-            }
-
-            // Jump to bottom button - shows when scrolled away from the tail.
-            JumpToBottomButton(
-                visible = !isAtBottom,
-                hasNewContent = scrollRestorationState.hasNewContentWhileAway,
-                onClick = {
-                    coroutineScope.launch {
-                        scrollRestorationState.onJumpToBottom()
-                        listState.scrollChatToBottom()
-                    }
-                },
-                modifier = Modifier
-                    .align(Alignment.BottomEnd)
-                    .padding(end = Spacing.xl, bottom = Spacing.md)
-            )
+                        .align(Alignment.BottomEnd)
+                        .padding(end = Spacing.xl, bottom = Spacing.md)
+                )
             }
         }
     }

@@ -1,6 +1,6 @@
 ---
 id: oa-zemb
-status: open
+status: in_progress
 deps: []
 links: []
 created: 2026-07-09T00:00:00Z
@@ -66,3 +66,9 @@ Open-tab confirmation copy should explain the consequence, for example:
 - 2026-07-09: Implementation changed saved server rows from inline `remove` / `warn remove` text to an overflow menu with localized `Forget server` and a destructive `TuiConfirmDialog` that includes open-tab count when applicable.
 - 2026-07-09: `JAVA_HOME=/usr/lib/jvm/java-17-openjdk ./gradlew :app:compileDebugKotlin && JAVA_HOME=/usr/lib/jvm/java-17-openjdk ./gradlew :app:detekt` passed.
 - 2026-07-09: Device verification is still required before closing. `JAVA_HOME=/usr/lib/jvm/java-17-openjdk ./gradlew :app:installDebug` failed with `No connected devices`, and `adb devices` returned no connected device. Do not close until the overflow -> Forget server -> confirmation dialog flow is screenshotted with an open tab referencing the saved server.
+
+## Notes
+
+**2026-07-10T07:39:56Z**
+
+Implementation and integrated compile/detekt/tests pass. Current-device server inventory screenshots verify the inline destructive label is gone, but the required open-tab overflow -> Forget server -> confirmation-dialog screenshot was not captured. Ticket remains in progress per its explicit verification gate.

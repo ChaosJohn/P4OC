@@ -1,6 +1,6 @@
 ---
 id: oa-runv
-status: open
+status: closed
 deps: [oa-cxp9, oa-agea]
 links: []
 created: 2026-07-09T15:15:06Z
@@ -81,3 +81,9 @@ Start Work should make target explicit:
 - 2026-07-09: `JAVA_HOME=/usr/lib/jvm/java-17-openjdk ./gradlew :app:compileDebugKotlin && JAVA_HOME=/usr/lib/jvm/java-17-openjdk ./gradlew :app:detekt` passed.
 - 2026-07-09: Home was structurally changed toward the approved mockup: compact header, Servers cards, Resume workspace rows, Browse actions, and no persistent Attention explainer block.
 - 2026-07-09: Device screenshot verification is still required before closing because `adb devices` currently has no connected device. Capture Home empty, Home with open work, Start Work from Home, and Start Work from active workspace before closing.
+
+## Notes
+
+**2026-07-10T07:06:56Z**
+
+Device verification completed for the remaining feasible copy states: ux-final-home.png shows task-oriented empty Home without implementation phrases or attention explainer; ux-final-start-work.png clearly requests server/workspace selection; ux-final-start-work-scoped.png names endpoint plus explicit No project context and separates new from existing work. Integrated compile, detekt, and unit suite pass.

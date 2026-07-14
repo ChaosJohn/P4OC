@@ -892,6 +892,7 @@ data class PersistedTab(
     fun resolvedWorkspaceKey(): WorkspaceKey? = workspaceKey?.toWorkspaceKey()
     fun resolvedServerEndpointKey(fallback: String? = null): String? = serverEndpointKey ?: fallback
 }
+
 @Serializable
 data class PersistedWorkspaceKey(
     val type: Type,

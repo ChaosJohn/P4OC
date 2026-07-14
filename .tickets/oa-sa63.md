@@ -39,3 +39,7 @@ Introduce or reuse one immutable scoped identity value rather than parallel null
 **2026-07-09T20:11:48Z**
 
 Implemented typed StartWorkTarget/StartWorkSelection and NavigationWorkspaceSelection contracts. Home detail and Start Work actions carry exact ServerRef + WorkspaceKey; ambiguous or removed owners require selection; No project context is explicit; blank directories reject instead of falling back. Added mixed-server/missing-owner/removed-server coverage. Verified :app:compileDebugKotlin, :app:detekt, and :app:testDebugUnitTest pass. Pre-existing nullable/global semantics outside this ticket remain in persistence/network boundary models and should be assessed separately rather than treated as this flow's fallback.
+
+**2026-07-10T07:06:46Z**
+
+Final verification: :app:compileDebugKotlin and :app:detekt passed in the integrated run; :app:testDebugUnitTest passed after Home summary migration. Device screenshots ux-final-start-work.png and ux-final-start-work-scoped.png verify ambiguous selection and explicit No project context with exact endpoint ownership; Home verifies endpoint-scoped server identity. Registry execution, persistence, and per-tab ownership tests are included in the passing suite.

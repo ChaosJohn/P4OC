@@ -1,5 +1,6 @@
 package dev.blazelight.p4oc.ui.tabs
 
+import dev.blazelight.p4oc.domain.server.ServerRef
 import dev.blazelight.p4oc.domain.server.WorkspaceKey
 import dev.blazelight.p4oc.domain.session.SessionId
 import org.junit.Assert.assertEquals
@@ -19,6 +20,69 @@ class TabBarTitleTest {
         globalWorkspace = "Global",
         sessionWorkspace = "Session",
     )
+
+    private val server = ServerRef.fromEndpointKey(
+        endpointKey = "https://work.example.test",
+        displayName = "Production",
+    )
+
+    @Test
+    fun `pinned Home keeps explicit identity despite work-like state`() {
+        val home = TabInstance(
+            state = TabState(
+                id = TabInstance.HOME_TAB_ID,
+                sessionId = "session-1",
+                sessionTitle = "Investigate bug",
+                workspaceKey = WorkspaceKey.Directory("/repo/project"),
+                serverRef = server,
+                pinnedHome = true,
+            ),
+            startRoute = "diff/1",
+        )
+
+        assertEquals("Home", getTitleForTab(home, labels))
+    }
+
+    @Test
+    fun `work title is derived from its start route and workspace rather than server presentation`() {
+        val work = TabInstance(
+            state = TabState(
+                workspaceKey = WorkspaceKey.Directory("/repo/project"),
+                serverRef = server,
+            ),
+            startRoute = "sessions",
+        )
+
+        assertEquals("Sessions · project", getTitleForTab(work, labels))
+    }
+
+    @Test
+    fun `session work title is derived from its session title and workspace`() {
+        val work = TabInstance(
+            state = TabState(
+                sessionId = "session-1",
+                sessionTitle = "Investigate bug",
+                workspaceKey = WorkspaceKey.Directory("/repo/project"),
+                serverRef = server,
+            ),
+            startRoute = "sessions",
+        )
+
+        assertEquals("Investigate bug · project", getTitleForTab(work, labels))
+    }
+
+    @Test
+    fun `global work uses localized No project context label`() {
+        val work = TabInstance(
+            state = TabState(workspaceKey = WorkspaceKey.Global, serverRef = server),
+            startRoute = "sessions",
+        )
+
+        assertEquals(
+            "Sessions · No project context",
+            getTitleForTab(work, labels.copy(globalWorkspace = "No project context")),
+        )
+    }
 
     @Test
     fun `sessions route includes global workspace suffix`() {

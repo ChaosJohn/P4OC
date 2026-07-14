@@ -266,7 +266,6 @@ private fun ChatInputBarPreview() {
     }
 }
 
-
 /**
  * Preview for git status badges
  */

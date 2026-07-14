@@ -13,21 +13,42 @@
     <string name="server_remote_title">Network Server</string>
     <string name="server_remote_description">Connect to an OpenCode server running on your network.</string>
     <string name="server_recent_servers">Recent Servers</string>
-    <string name="server_saved_servers">Saved servers</string>
-    <string name="server_saved_servers_desc">Connect to saved targets. Use actions for edit or forget.</string>
+    <string name="server_saved_servers">Your servers</string>
+    <string name="server_saved_servers_desc">Tap a server to connect. More actions are available from its menu.</string>
+    <string name="server_nearby">Nearby</string>
+    <string name="server_add">Add server</string>
+    <string name="server_edit">Edit server</string>
+    <string name="server_manual">Enter server address</string>
+    <string name="server_credentials">Credentials and security</string>
     <string name="server_tls_checks_on">TLS checks on</string>
     <string name="server_tls_checks_off">TLS checks off</string>
+    <string name="server_auth_configured">Authentication configured</string>
+    <string name="server_auth_default">Default authentication</string>
     <string name="server_actions">Server actions</string>
     <string name="server_actions_for">Server actions for %1$s</string>
     <string name="server_forget">Forget server</string>
+    <string name="server_review_tabs">Review tabs</string>
+    <string name="server_close_tabs_forget">Close tabs and forget</string>
     <string name="server_forget_title">Forget %1$s?</string>
-    <string name="server_forget_message">%1$d open tab(s) are using this server. Existing tabs will stay open until closed or reconnected, but this server will be removed from saved targets.</string>
-    <string name="server_forget_message_no_tabs">This server will be removed from saved targets.</string>
+    <string name="server_forget_message">%1$d open tab(s) are using this server. Existing tabs must be reviewed or closed before this server and its saved credentials can be removed.</string>
+    <string name="server_forget_message_no_tabs">This server and its saved credentials will be removed.</string>
     <string name="server_open_tabs_count">%1$d open tab(s)</string>
+    <string name="server_settings_cd">Open settings</string>
+    <string name="server_password_visibility_cd">Show or hide password</string>
+    <string name="server_status_connected">connected</string>
+    <string name="server_status_connecting">connecting</string>
+    <string name="server_status_nearby">nearby</string>
+    <string name="server_status_offline">offline</string>
+    <string name="server_status_error">connection error</string>
+    <string name="server_status_cd_connected">Server is connected and idle</string>
+    <string name="server_status_cd_connecting">Server is connecting or retrying</string>
+    <string name="server_status_cd_nearby">Server is available nearby</string>
+    <string name="server_status_cd_offline">Server is disconnected</string>
+    <string name="server_status_cd_error">Server connection failed</string>
     <string name="cd_saved_server">Saved server</string>
     
     <!-- mDNS Discovery -->
-    <string name="discovery_section_title">Discovered Servers</string>
+    <string name="discovery_section_title">Nearby</string>
     <string name="discovery_scanning">scanning</string>
     <string name="discovery_scanning_hint">Scanning local network for OpenCode servers…</string>
     <string name="cd_discovered_server">Discovered server</string>
@@ -154,7 +175,8 @@
     <!-- Sessions Screen -->
     <string name="sessions_title">Sessions</string>
     <string name="sessions_empty_title">No sessions yet</string>
-    <string name="sessions_empty_hint">Tap above to start a new session</string>
+    <string name="sessions_empty_hint">Use + to start work in this scope</string>
+    <string name="sessions_resume_identity">Resume %1$s, workspace %2$s, updated %3$s</string>
     <string name="sessions_search_placeholder">Search session titles…</string>
     <string name="sessions_search_no_match">No matching sessions</string>
     <string name="sessions_search_waiting">Searching…</string>
@@ -229,8 +251,12 @@
     <string name="tab_title_files">Files</string>
     <string name="tab_title_file">File</string>
     <string name="tab_title_projects">Projects</string>
-    <string name="tab_workspace_global">Global</string>
-    <string name="tab_workspace_session">Session</string>
+    <string name="tab_workspace_global">No project context</string>
+    <string name="tab_workspace_session">Session context</string>
+    <string name="tab_accessibility_identity">%1$s, %2$s, %3$s</string>
+    <string name="tab_accessibility_session_context">Session %1$s</string>
+    <string name="cd_close_tab">Close tab</string>
+    <string name="cd_new_work">Start new work</string>
     
     <!-- Common -->
     <string name="back">Back</string>
@@ -821,4 +847,16 @@
     <string name="upload_phase_done">done</string>
     <string name="upload_phase_failed">failed</string>
     <string name="attachment_unavailable">unavailable</string>
+    <string name="start_work_title">Start work</string>
+    <string name="start_work_in">In</string>
+    <string name="start_work_change">Change</string>
+    <string name="start_work_choose_context">Choose a server and workspace</string>
+    <string name="start_work_no_servers">No servers configured. Add a server to start work.</string>
+    <string name="start_work_new_chat">New chat</string>
+    <string name="start_work_files">Files</string>
+    <string name="start_work_terminal">Terminal</string>
+    <string name="start_work_scoped_action">Open in this exact server and workspace</string>
+    <string name="start_work_existing_work">Existing work</string>
+    <string name="start_work_sessions">Sessions</string>
+    <string name="start_work_sessions_description">Browse sessions in this exact workspace</string>
 </resources>

@@ -6,12 +6,14 @@ import androidx.compose.runtime.Composable
 import androidx.navigation.NavHostController
 import androidx.navigation.compose.NavHost
 import androidx.navigation.compose.composable
-import dev.blazelight.p4oc.ui.screens.server.ServerScreen
+import dev.blazelight.p4oc.core.network.ServerConnectionRegistry
+import dev.blazelight.p4oc.ui.screens.server.serverScreen
 import dev.blazelight.p4oc.ui.screens.settings.ProviderConfigScreen
 import dev.blazelight.p4oc.ui.screens.settings.SettingsScreen
 import dev.blazelight.p4oc.ui.screens.settings.VisualSettingsScreen
 import dev.blazelight.p4oc.ui.screens.setup.SetupScreen
 import dev.blazelight.p4oc.ui.tabs.MainTabScreen
+import org.koin.compose.koinInject
 
 private const val ANIMATION_DURATION = 300
 
@@ -64,7 +66,7 @@ fun NavGraph(
         }
 
         composable(Screen.Server.route) {
-            ServerScreen(
+            serverScreen(
                 onNavigateToSessions = {
                     navController.navigate(Screen.Sessions.route) {
                         popUpTo(Screen.Server.route) { inclusive = true }
@@ -81,13 +83,25 @@ fun NavGraph(
             )
         }
 
+        composable(Screen.ServerManagement.route) {
+            val serverConnectionRegistry: ServerConnectionRegistry = koinInject()
+            serverScreen(
+                onNavigateToSessions = { navController.popBackStack() },
+                onNavigateToProjects = { navController.popBackStack() },
+                onSettings = { navController.navigate(Screen.Settings.route) },
+                autoReconnect = false,
+                onConnectSavedServer = { saved ->
+                    serverConnectionRegistry.connect(saved)
+                    navController.popBackStack()
+                },
+            )
+        }
+
         // Main tab container - this is where the tab-based UI lives
         composable(Screen.Sessions.route) {
             MainTabScreen(
                 onDisconnect = {
-                    navController.navigate(Screen.Server.route) {
-                        popUpTo(0) { inclusive = true }
-                    }
+                    navController.navigate(Screen.ServerManagement.route)
                 }
             )
         }

@@ -5,10 +5,12 @@ import dev.blazelight.p4oc.core.datastore.SettingsDataStore
 import dev.blazelight.p4oc.domain.server.ServerRef
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.Job
 import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
+import kotlinx.coroutines.flow.collect
 import kotlinx.coroutines.launch
 import java.util.concurrent.ConcurrentHashMap
 
@@ -26,14 +28,20 @@ class ServerConnectionRegistry constructor(
     private val states = ConcurrentHashMap<String, MutableStateFlow<ConnectionState>>()
     private val managers = ConcurrentHashMap<String, ConnectionManager>()
     private val connections = ConcurrentHashMap<String, StateFlow<Connection?>>()
+    private val stateCollectors = ConcurrentHashMap<String, Job>()
 
-    fun connectionState(serverRef: ServerRef): StateFlow<ConnectionState> = stateFlow(serverRef.endpointKey).asStateFlow()
+    fun connectionState(serverRef: ServerRef): StateFlow<ConnectionState> = stateFlow(
+        serverRef.endpointKey
+    ).asStateFlow()
 
     fun connection(serverRef: ServerRef): StateFlow<Connection?> = connections.getOrPut(serverRef.endpointKey) {
         MutableStateFlow(null).asStateFlow()
     }
 
     fun api(serverRef: ServerRef): OpenCodeApi? = managers[serverRef.endpointKey]?.getApi()
+
+    fun generation(serverRef: ServerRef): dev.blazelight.p4oc.domain.server.ServerGeneration? =
+        managers[serverRef.endpointKey]?.currentGeneration
 
     fun connect(server: SavedServer, password: String? = null) {
         val serverRef = server.toServerRef()
@@ -42,9 +50,17 @@ class ServerConnectionRegistry constructor(
         val manager = managers.getOrPut(server.endpointKey) {
             connectionManagerFactory(server.toServerConfig())
         }
+        stateCollectors.computeIfAbsent(server.endpointKey) {
+            scope.launch {
+                manager.connectionState.collect { managerState ->
+                    state.value = managerState
+                }
+            }
+        }
         connections[server.endpointKey] = manager.connection
         scope.launch {
-            val result = manager.connect(server.toServerConfig(), password)
+            val resolvedPassword = password ?: settingsDataStore.getSavedServerPassword(server)
+            val result = manager.connect(server.toServerConfig(), resolvedPassword)
             state.value = result.fold(
                 onSuccess = { manager.connectionState.value },
                 onFailure = { ConnectionState.Error(it.message ?: "Connection failed") },
@@ -61,6 +77,7 @@ class ServerConnectionRegistry constructor(
     }
 
     fun disconnect(serverRef: ServerRef) {
+        stateCollectors.remove(serverRef.endpointKey)?.cancel()
         managers.remove(serverRef.endpointKey)?.disconnect()
         connections.remove(serverRef.endpointKey)
         stateFlow(serverRef.endpointKey).value = ConnectionState.Disconnected

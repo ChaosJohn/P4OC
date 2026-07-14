@@ -86,7 +86,9 @@ fun ToolGroupWidget(
         tools.groupBy { it.toolName }
             .map { (name, toolList) ->
                 val state = when {
-                    toolList.any { it.state is ToolState.Pending || it.callID in pendingPermissionIdsByCallId.keys } -> AggregateToolState.PENDING
+                    toolList.any {
+                        it.state is ToolState.Pending || it.callID in pendingPermissionIdsByCallId.keys
+                    } -> AggregateToolState.PENDING
                     toolList.any { it.state is ToolState.Running } -> AggregateToolState.RUNNING
                     toolList.any { it.state is ToolState.Error } -> AggregateToolState.ERROR
                     else -> AggregateToolState.COMPLETED
@@ -102,7 +104,7 @@ fun ToolGroupWidget(
                             AggregateToolState.PENDING -> 1
                             AggregateToolState.ERROR -> 2
                             AggregateToolState.COMPLETED -> 3
-                        } 
+                        }
                     },
                     { it.name }
                 )
@@ -191,7 +193,11 @@ fun ToolGroupWidget(
                             // Show approval buttons for live or recovered pending permissions.
                             if (tool.callID in pendingPermissionIdsByCallId.keys) {
                                 PendingApprovalButtonsInline(
-                                    onApprove = { onToolApprove(pendingPermissionIdsByCallId[tool.callID] ?: tool.callID) },
+                                    onApprove = {
+                                        onToolApprove(
+                                            pendingPermissionIdsByCallId[tool.callID] ?: tool.callID
+                                        )
+                                    },
                                     onDeny = { onToolDeny(pendingPermissionIdsByCallId[tool.callID] ?: tool.callID) }
                                 )
                             }

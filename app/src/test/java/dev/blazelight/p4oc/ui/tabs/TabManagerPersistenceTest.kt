@@ -8,6 +8,7 @@ import dev.blazelight.p4oc.domain.server.WorkspaceKey
 import dev.blazelight.p4oc.ui.navigation.Screen
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
+import org.junit.Assert.assertNull
 import org.junit.Assert.assertTrue
 import org.junit.Test
 
@@ -26,7 +27,7 @@ class TabManagerPersistenceTest {
         manager.updateTabWorkspace(tab.id, WorkspaceKey.Directory("/repo/a"))
         manager.updateTabSession(tab.id, "s1", "Title")
 
-        val saved = manager.saveState(server)!!
+        val saved = manager.saveState()!!
 
         assertEquals(PersistedTabState.CURRENT_VERSION, saved.version)
         assertEquals(server.endpointKey, saved.serverEndpointKey)
@@ -261,10 +262,76 @@ class TabManagerPersistenceTest {
             focus = true,
         )
 
-        val saved = manager.saveState(server)!!
+        val saved = manager.saveState()!!
 
         assertEquals(1, saved.tabs.size)
         assertEquals(Screen.Files.route, saved.tabs.single().startRoute)
+    }
+
+    @Test
+    fun `saveState returns null when pinned Home is the only tab`() {
+        val manager = TabManager()
+        manager.ensureHomeTab(focus = true)
+
+        assertNull(manager.saveState())
+    }
+
+    @Test
+    fun `saveState preserves each work tab server instead of using one server fallback`() {
+        val alpha = ServerRef.fromEndpointKey("http://alpha.example:4096")
+        val beta = ServerRef.fromEndpointKey("http://beta.example:4096")
+        val manager = TabManager()
+        manager.createTab(
+            startRoute = Screen.Files.route,
+            workspaceKey = WorkspaceKey.Directory("/alpha"),
+            serverRef = alpha,
+            focus = false,
+        )
+        manager.createTab(
+            startRoute = Screen.Sessions.route,
+            workspaceKey = WorkspaceKey.Directory("/beta"),
+            serverRef = beta,
+            focus = true,
+        )
+
+        val saved = manager.saveState()!!
+
+        assertEquals(
+            listOf(alpha.endpointKey, beta.endpointKey),
+            saved.tabs.map { it.serverEndpointKey },
+        )
+        assertEquals(listOf("/alpha", "/beta"), saved.tabs.map { it.workspaceKey?.value })
+    }
+
+    @Test
+    fun `saveState drops ownerless work tabs without borrowing another tab owner`() {
+        val manager = TabManager()
+        val owned = manager.createTab(
+            startRoute = Screen.Files.route,
+            workspaceKey = WorkspaceKey.Directory("/owned"),
+            serverRef = server,
+            focus = false,
+        )
+        manager.registerTab(
+            TabInstance(
+                state = TabState(workspaceKey = WorkspaceKey.Directory("/missing-server")),
+                startRoute = Screen.Files.route,
+            ),
+            focus = false,
+        )
+        manager.registerTab(
+            TabInstance(
+                state = TabState(serverRef = server),
+                startRoute = Screen.Sessions.route,
+            ),
+            focus = true,
+        )
+
+        val saved = manager.saveState()!!
+
+        assertEquals(listOf(owned.id), saved.tabs.map { it.id })
+        assertEquals(server.endpointKey, saved.tabs.single().serverEndpointKey)
+        assertEquals("/owned", saved.tabs.single().workspaceKey?.value)
     }
 
     @Test
@@ -293,7 +360,7 @@ class TabManagerPersistenceTest {
             serverRef = local,
             focus = true,
         )
-        val persisted = beforeRestart.saveState(alpha)!!
+        val persisted = beforeRestart.saveState()!!
 
         val afterRestart = TabManager()
         val result = afterRestart.restoreState(
@@ -372,7 +439,7 @@ class TabManagerPersistenceTest {
             focus = true,
         )
 
-        val saved = manager.saveState(server)!!
+        val saved = manager.saveState()!!
 
         assertEquals(Screen.Sessions.route, saved.tabs.single().startRoute)
     }

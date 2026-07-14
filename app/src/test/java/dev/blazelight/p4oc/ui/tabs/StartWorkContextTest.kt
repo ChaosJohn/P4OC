@@ -69,21 +69,101 @@ class StartWorkContextTest {
     }
 
     @Test
-    fun `removed server invalidates selection instead of retargeting same directory`() {
-        val selection = StartWorkSelection.Selected(StartWorkTarget(alpha, workspace))
+    fun `removed server preserves exact target and pending action without retargeting`() {
+        val target = StartWorkTarget(alpha, workspace)
+        val context = StartWorkContext(
+            source = StartWorkSource.FilesTab,
+            selection = StartWorkSelection.Selected(target),
+            defaultAction = StartWorkAction.Files,
+        )
 
-        val validated = selection.validatedAgainst(listOf(beta))
+        val resolved = context.resolve(
+            availableServers = listOf(beta),
+            availableWorkspaces = listOf(StartWorkTarget(beta, workspace)),
+            connectionStates = mapOf(beta.endpointKey to StartWorkConnectionState.Online),
+        )
 
-        assertSame(StartWorkSelection.NeedsSelection, validated)
+        assertEquals(StartWorkAvailability.ServerRemoved, resolved.availability)
+        assertEquals(context, resolved.context)
+        assertEquals(target, resolved.target)
+        assertEquals(StartWorkAction.Files, resolved.pendingAction)
     }
 
     @Test
-    fun `explicit no-project selection survives validation when its server remains saved`() {
-        val selection = StartWorkSelection.Selected(StartWorkTarget(alpha, WorkspaceKey.Global))
+    fun `missing workspace preserves exact target and pending action`() {
+        val target = StartWorkTarget(alpha, workspace)
+        val context = StartWorkContext(
+            source = StartWorkSource.ChatTab,
+            selection = StartWorkSelection.Selected(target),
+            defaultAction = StartWorkAction.NewChat,
+        )
 
-        val validated = selection.validatedAgainst(listOf(alpha, beta))
+        val resolved = context.resolve(
+            availableServers = listOf(alpha),
+            availableWorkspaces = emptyList(),
+            connectionStates = mapOf(alpha.endpointKey to StartWorkConnectionState.Online),
+        )
 
-        assertEquals(selection, validated)
+        assertEquals(StartWorkAvailability.WorkspaceMissing, resolved.availability)
+        assertEquals(context, resolved.context)
+        assertEquals(target, resolved.target)
+        assertEquals(StartWorkAction.NewChat, resolved.pendingAction)
+    }
+
+    @Test
+    fun `availability distinguishes no servers offline and authentication recovery`() {
+        val target = StartWorkTarget(alpha, workspace)
+        val context = StartWorkContext(
+            source = StartWorkSource.TerminalTab,
+            selection = StartWorkSelection.Selected(target),
+            defaultAction = StartWorkAction.Terminal,
+        )
+        val cases = listOf(
+            Triple(emptyList<ServerRef>(), emptyMap(), StartWorkAvailability.NoServers),
+            Triple(
+                listOf(alpha),
+                mapOf(alpha.endpointKey to StartWorkConnectionState.Offline),
+                StartWorkAvailability.Offline,
+            ),
+            Triple(
+                listOf(alpha),
+                mapOf(alpha.endpointKey to StartWorkConnectionState.AuthRequired),
+                StartWorkAvailability.AuthRequired,
+            ),
+        )
+
+        cases.forEach { (servers, states, expectedAvailability) ->
+            val resolved = context.resolve(
+                availableServers = servers,
+                availableWorkspaces = listOf(target),
+                connectionStates = states,
+            )
+
+            assertEquals(expectedAvailability, resolved.availability)
+            assertEquals(context, resolved.context)
+            assertEquals(target, resolved.target)
+            assertEquals(StartWorkAction.Terminal, resolved.pendingAction)
+        }
+    }
+
+    @Test
+    fun `explicit global target is ready without a directory workspace entry`() {
+        val target = StartWorkTarget(alpha, WorkspaceKey.Global)
+        val context = StartWorkContext(
+            source = StartWorkSource.HomeWorkspaceDetail,
+            selection = StartWorkSelection.Selected(target),
+            defaultAction = StartWorkAction.BrowseSessions,
+        )
+
+        val resolved = context.resolve(
+            availableServers = listOf(alpha),
+            availableWorkspaces = emptyList(),
+            connectionStates = mapOf(alpha.endpointKey to StartWorkConnectionState.Online),
+        )
+
+        assertEquals(StartWorkAvailability.Ready, resolved.availability)
+        assertEquals(target, resolved.target)
+        assertEquals(StartWorkAction.BrowseSessions, resolved.pendingAction)
     }
 
     @Test
@@ -111,5 +191,45 @@ class StartWorkContextTest {
         assertEquals(target, files.selectedTarget)
         assertEquals(StartWorkSource.TerminalTab, terminal.source)
         assertEquals(target, terminal.selectedTarget)
+    }
+
+    @Test
+    fun `picker groups put exact global target first and include unopened Home workspaces`() {
+        val unopened = StartWorkTarget(alpha, WorkspaceKey.Directory("/unopened"))
+        val groups = buildStartWorkPickerGroups(
+            servers = listOf(Triple(alpha.endpointKey, "Alpha", "A")),
+            openTargets = emptyList(),
+            knownHomeTargets = listOf(unopened),
+        )
+
+        assertEquals(alpha.endpointKey, groups.single().server.endpointKey)
+        assertEquals(WorkspaceKey.Global, groups.single().targets.first().workspaceKey)
+        assertEquals(unopened.workspaceKey, groups.single().targets[1].workspaceKey)
+    }
+
+    @Test
+    fun `picker deduplicates within a server without merging same path across servers`() {
+        val alphaTarget = StartWorkTarget(alpha, workspace)
+        val betaTarget = StartWorkTarget(beta, workspace)
+        val groups = buildStartWorkPickerGroups(
+            servers = listOf(
+                Triple(alpha.endpointKey, "Alpha", "A"),
+                Triple(beta.endpointKey, "Beta", "B"),
+            ),
+            openTargets = listOf(alphaTarget, betaTarget),
+            knownHomeTargets = listOf(alphaTarget),
+        )
+
+        assertEquals(listOf(WorkspaceKey.Global, workspace), groups[0].targets.map { it.workspaceKey })
+        assertEquals(listOf(WorkspaceKey.Global, workspace), groups[1].targets.map { it.workspaceKey })
+        assertTrue(groups[0].targets[1].serverRef != groups[1].targets[1].serverRef)
+    }
+
+    @Test
+    fun `scoped actions retain new chat files terminal order`() {
+        assertEquals(
+            listOf(StartWorkAction.NewChat, StartWorkAction.Files, StartWorkAction.Terminal),
+            startWorkScopedActionOrder,
+        )
     }
 }

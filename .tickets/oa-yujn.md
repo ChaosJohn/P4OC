@@ -1,6 +1,6 @@
 ---
 id: oa-yujn
-status: open
+status: closed
 deps: []
 links: []
 created: 2026-07-09T15:15:06Z

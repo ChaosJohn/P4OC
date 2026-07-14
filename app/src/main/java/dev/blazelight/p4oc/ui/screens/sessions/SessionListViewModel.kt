@@ -85,15 +85,19 @@ class SessionListViewModel constructor(
                             null
                         },
                         sessions = snapshot.sessions.values
-                            .map { workspaceSession -> workspaceSession.session.toSessionWithProject(
-                                snapshot.projects
-                            ) }
+                            .map { workspaceSession ->
+                                workspaceSession.session.toSessionWithProject(
+                                    snapshot.projects
+                                )
+                            }
                             .sortedByDescending { it.session.updatedAt },
                         projects = snapshot.projects.map(::toProjectInfo).sortedByDescending { it.worktree },
                         sessionStatuses = snapshot.statuses,
-                        sessionPresences = snapshot.statuses.mapValues { (_, status) -> resolveSessionPresence(
-                            status
-                        ) },
+                        sessionPresences = snapshot.statuses.mapValues { (_, status) ->
+                            resolveSessionPresence(
+                                status
+                            )
+                        },
                         searchResults = if (state.searchQuery.isBlank()) emptyList() else state.searchResults,
                         error = (repoState as? RepoState.Stale)?.reason ?: state.error,
                     )
@@ -121,17 +125,21 @@ class SessionListViewModel constructor(
                             loadingProgress = null,
                             loadingCounts = null,
                             sessions = snapshot.sessions.values
-                                .map { workspaceSession -> workspaceSession.session.toSessionWithProject(
-                                    snapshot.projects
-                                ) }
+                                .map { workspaceSession ->
+                                    workspaceSession.session.toSessionWithProject(
+                                        snapshot.projects
+                                    )
+                                }
                                 .sortedByDescending { session -> session.session.updatedAt },
                             projects = snapshot.projects.map(
                                 ::toProjectInfo
                             ).sortedByDescending { project -> project.worktree },
                             sessionStatuses = snapshot.statuses,
-                            sessionPresences = snapshot.statuses.mapValues { (_, status) -> resolveSessionPresence(
-                                status
-                            ) },
+                            sessionPresences = snapshot.statuses.mapValues { (_, status) ->
+                                resolveSessionPresence(
+                                    status
+                                )
+                            },
                             error = null,
                         )
                     }
@@ -268,13 +276,15 @@ class SessionListViewModel constructor(
             _uiState.update { it.copy(isLoading = true, loadingText = "Creating session", error = null) }
             try {
                 if (directory != null && directory != sessionRepository.workspace.directory) {
-                    _uiState.update { it.copy(
-                        isLoading = false,
-                        loadingText = null,
-                        loadingProgress = null,
-                        loadingCounts = null,
-                        error = "Switch to $directory before creating a session"
-                    ) }
+                    _uiState.update {
+                        it.copy(
+                            isLoading = false,
+                            loadingText = null,
+                            loadingProgress = null,
+                            loadingCounts = null,
+                            error = "Switch to $directory before creating a session"
+                        )
+                    }
                     return@launch
                 }
                 val created = sessionRepository.createSession(title)

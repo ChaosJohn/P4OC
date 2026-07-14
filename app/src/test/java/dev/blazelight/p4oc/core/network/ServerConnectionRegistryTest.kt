@@ -10,7 +10,7 @@ import io.mockk.mockk
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.ExperimentalCoroutinesApi
 import kotlinx.coroutines.flow.MutableStateFlow
-import kotlinx.coroutines.test.advanceUntilIdle
+import kotlinx.coroutines.test.runCurrent
 import kotlinx.coroutines.test.runTest
 import org.junit.Assert.assertEquals
 import org.junit.Test
@@ -24,7 +24,7 @@ class ServerConnectionRegistryTest {
         val beta = SavedServerRegistry.fromConnection("http://beta.example.com", "Beta")
         val alphaManager = successfulManager(alpha)
         val betaManager = successfulManager(beta)
-        val registry = registryFor(this) { config ->
+        val registry = registryFor(backgroundScope) { config ->
             when (config.url) {
                 alpha.endpoint -> alphaManager
                 beta.endpoint -> betaManager
@@ -34,7 +34,7 @@ class ServerConnectionRegistryTest {
 
         registry.connect(alpha)
         registry.connect(beta)
-        advanceUntilIdle()
+        runCurrent()
 
         assertEquals(ConnectionState.Connected, registry.connectionState(alpha.toServerRef()).value)
         assertEquals(ConnectionState.Connected, registry.connectionState(beta.toServerRef()).value)
@@ -48,7 +48,7 @@ class ServerConnectionRegistryTest {
         val beta = SavedServerRegistry.fromConnection("http://beta.example.com", "Beta")
         val alphaManager = successfulManager(alpha)
         val betaManager = failingManager(beta, "auth failed")
-        val registry = registryFor(this) { config ->
+        val registry = registryFor(backgroundScope) { config ->
             when (config.url) {
                 alpha.endpoint -> alphaManager
                 beta.endpoint -> betaManager
@@ -58,10 +58,33 @@ class ServerConnectionRegistryTest {
 
         registry.connect(alpha)
         registry.connect(beta)
-        advanceUntilIdle()
+        runCurrent()
 
         assertEquals(ConnectionState.Connected, registry.connectionState(alpha.toServerRef()).value)
         assertEquals(ConnectionState.Error("auth failed"), registry.connectionState(beta.toServerRef()).value)
+    }
+
+    @Test
+    fun `registry follows manager recovery after connect returns`() = runTest {
+        val server = SavedServerRegistry.fromConnection("http://recovering.example.com", "Recovering")
+        val managerState = MutableStateFlow<ConnectionState>(ConnectionState.Error("network unavailable"))
+        val manager = mockk<ConnectionManager>(relaxed = true)
+        every { manager.connection } returns MutableStateFlow(null)
+        every { manager.connectionState } returns managerState
+        coEvery { manager.connect(server.toServerConfig(), any()) } returns Result.success(emptyList())
+        val registry = registryFor(backgroundScope) { manager }
+
+        registry.connect(server)
+        runCurrent()
+        assertEquals(
+            ConnectionState.Error("network unavailable"),
+            registry.connectionState(server.toServerRef()).value,
+        )
+
+        managerState.value = ConnectionState.Connected
+        runCurrent()
+
+        assertEquals(ConnectionState.Connected, registry.connectionState(server.toServerRef()).value)
     }
 
     @Test
@@ -70,7 +93,7 @@ class ServerConnectionRegistryTest {
         val beta = SavedServerRegistry.fromConnection("http://beta.example.com", "Beta")
         val alphaManager = successfulManager(alpha)
         val betaManager = successfulManager(beta)
-        val registry = registryFor(this) { config ->
+        val registry = registryFor(backgroundScope) { config ->
             when (config.url) {
                 alpha.endpoint -> alphaManager
                 beta.endpoint -> betaManager
@@ -79,7 +102,7 @@ class ServerConnectionRegistryTest {
         }
         registry.connect(alpha)
         registry.connect(beta)
-        advanceUntilIdle()
+        runCurrent()
 
         registry.disconnect(alpha.toServerRef())
 
@@ -87,6 +110,34 @@ class ServerConnectionRegistryTest {
         assertEquals(ConnectionState.Connected, registry.connectionState(beta.toServerRef()).value)
         coVerify(exactly = 1) { alphaManager.disconnect() }
         coVerify(exactly = 0) { betaManager.disconnect() }
+    }
+
+    @Test
+    fun `connect saved server uses persisted password when caller omits one`() = runTest {
+        val server = SavedServerRegistry.fromConnection("http://authenticated.example.com", "Authenticated")
+        val settings = mockk<SettingsDataStore>()
+        coEvery { settings.getSavedServerPassword(server) } returns "persisted-password"
+        val manager = successfulManager(server)
+        val registry = ServerConnectionRegistry(settings, { manager }, backgroundScope)
+
+        registry.connect(server)
+        runCurrent()
+
+        coVerify(exactly = 1) { manager.connect(server.toServerConfig(), "persisted-password") }
+    }
+
+    @Test
+    fun `connect saved server keeps explicit password authoritative`() = runTest {
+        val server = SavedServerRegistry.fromConnection("http://authenticated.example.com", "Authenticated")
+        val settings = mockk<SettingsDataStore>()
+        val manager = successfulManager(server)
+        val registry = ServerConnectionRegistry(settings, { manager }, backgroundScope)
+
+        registry.connect(server, "explicit-password")
+        runCurrent()
+
+        coVerify(exactly = 1) { manager.connect(server.toServerConfig(), "explicit-password") }
+        coVerify(exactly = 0) { settings.getSavedServerPassword(any()) }
     }
 
     @Test
@@ -106,10 +157,10 @@ class ServerConnectionRegistryTest {
                 beta.endpoint -> betaManager
                 else -> error("unexpected config $config")
             }
-        }, this)
+        }, backgroundScope)
 
         registry.reconnectAll(setOf(alpha.toServerRef(), missing))
-        advanceUntilIdle()
+        runCurrent()
 
         assertEquals(ConnectionState.Connected, registry.connectionState(alpha.toServerRef()).value)
         assertEquals(ConnectionState.Disconnected, registry.connectionState(beta.toServerRef()).value)
@@ -120,7 +171,11 @@ class ServerConnectionRegistryTest {
     private fun registryFor(
         scope: CoroutineScope,
         factory: (ServerConfig) -> ConnectionManager,
-    ): ServerConnectionRegistry = ServerConnectionRegistry(mockk(relaxed = true), factory, scope)
+    ): ServerConnectionRegistry {
+        val settings = mockk<SettingsDataStore>()
+        coEvery { settings.getSavedServerPassword(any()) } returns null
+        return ServerConnectionRegistry(settings, factory, scope)
+    }
 
     private fun successfulManager(server: dev.blazelight.p4oc.core.datastore.SavedServer): ConnectionManager {
         val manager = mockk<ConnectionManager>(relaxed = true)

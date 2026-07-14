@@ -251,9 +251,13 @@ fun FilePickerDialog(
                                     fontFamily = FontFamily.Monospace
                                 )
                                 Text(
-                                    text = if (searchQuery.isNotBlank()) stringResource(
-                                        R.string.no_matching_files
-                                    ) else stringResource(R.string.empty_folder),
+                                    text = if (searchQuery.isNotBlank()) {
+                                        stringResource(
+                                            R.string.no_matching_files
+                                        )
+                                    } else {
+                                        stringResource(R.string.empty_folder)
+                                    },
                                     color = theme.textMuted,
                                     fontFamily = FontFamily.Monospace
                                 )

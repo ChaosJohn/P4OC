@@ -25,6 +25,7 @@ import dev.blazelight.p4oc.domain.model.ToolState
 import dev.blazelight.p4oc.domain.model.isQuestionTool
 import dev.blazelight.p4oc.domain.session.SessionId
 import dev.blazelight.p4oc.domain.session.WorkspaceSession
+import dev.blazelight.p4oc.domain.workspace.Workspace
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.CompletableDeferred
 import kotlinx.coroutines.CoroutineDispatcher
@@ -559,7 +560,7 @@ class SessionRepositoryImpl(
                     val globalDeferred = async {
                         trackedStep("Loading global sessions") {
                             semaphore.withPermit {
-                                client.listSessions(directory = null, roots = true, limit = 100)
+                                client.listSessions(directory = null, roots = true, limit = SESSION_HISTORY_LIMIT)
                             }
                         }
                     }
@@ -570,7 +571,7 @@ class SessionRepositoryImpl(
                                     client.listSessions(
                                         directory = project.worktree,
                                         roots = true,
-                                        limit = 100,
+                                        limit = SESSION_HISTORY_LIMIT,
                                         scope = "project",
                                     )
                                 }
@@ -660,7 +661,10 @@ class SessionRepositoryImpl(
 
     private fun workspaceSession(session: Session): WorkspaceSession = WorkspaceSession(
         id = SessionId(session.id),
-        workspace = client.workspace,
+        workspace = Workspace(
+            server = client.workspace.server,
+            directory = session.directory.takeIf { it.isNotBlank() },
+        ),
         session = session,
     )
 
@@ -896,6 +900,7 @@ class SessionRepositoryImpl(
         const val FRESHNESS_MS = 30_000L
         const val MAX_CONCURRENT = 10
         const val SEARCH_LIMIT = 100
+        const val SESSION_HISTORY_LIMIT = Int.MAX_VALUE
         const val TAG = "SessionRepository"
         const val RESOLVED_QUESTION_TTL_MS = 30_000L
     }

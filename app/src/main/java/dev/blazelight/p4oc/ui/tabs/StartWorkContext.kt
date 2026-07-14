@@ -13,6 +13,28 @@ sealed interface StartWorkSelection {
     data object NeedsSelection : StartWorkSelection
 }
 
+enum class StartWorkConnectionState {
+    Online,
+    Offline,
+    AuthRequired,
+}
+
+enum class StartWorkAvailability {
+    Ready,
+    NoServers,
+    ServerRemoved,
+    WorkspaceMissing,
+    Offline,
+    AuthRequired,
+}
+
+data class StartWorkResolvedContext(
+    val context: StartWorkContext,
+    val target: StartWorkTarget?,
+    val pendingAction: StartWorkAction?,
+    val availability: StartWorkAvailability,
+)
+
 data class StartWorkContext(
     val source: StartWorkSource,
     val selection: StartWorkSelection,
@@ -21,15 +43,32 @@ data class StartWorkContext(
     val selectedTarget: StartWorkTarget?
         get() = (selection as? StartWorkSelection.Selected)?.target
 }
-fun StartWorkSelection.validatedAgainst(availableServers: Collection<ServerRef>): StartWorkSelection = when (this) {
-    StartWorkSelection.NeedsSelection -> this
-    is StartWorkSelection.Selected -> if (
-        availableServers.any { it.endpointKey == target.serverRef.endpointKey }
-    ) {
-        this
-    } else {
-        StartWorkSelection.NeedsSelection
+
+fun StartWorkContext.resolve(
+    availableServers: Collection<ServerRef>,
+    availableWorkspaces: Collection<StartWorkTarget>,
+    connectionStates: Map<String, StartWorkConnectionState>,
+): StartWorkResolvedContext {
+    val target = selectedTarget
+    val availability = when {
+        availableServers.isEmpty() -> StartWorkAvailability.NoServers
+        target == null -> StartWorkAvailability.Ready
+        availableServers.none { it.endpointKey == target.serverRef.endpointKey } ->
+            StartWorkAvailability.ServerRemoved
+        target.workspaceKey != WorkspaceKey.Global && target !in availableWorkspaces ->
+            StartWorkAvailability.WorkspaceMissing
+        connectionStates[target.serverRef.endpointKey] == StartWorkConnectionState.AuthRequired ->
+            StartWorkAvailability.AuthRequired
+        connectionStates[target.serverRef.endpointKey] != StartWorkConnectionState.Online ->
+            StartWorkAvailability.Offline
+        else -> StartWorkAvailability.Ready
     }
+    return StartWorkResolvedContext(
+        context = this,
+        target = target,
+        pendingAction = defaultAction,
+        availability = availability,
+    )
 }
 
 enum class StartWorkSource {

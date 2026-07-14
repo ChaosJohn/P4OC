@@ -3,30 +3,73 @@
 package dev.blazelight.p4oc.ui.tabs
 
 import androidx.compose.foundation.clickable
-import androidx.compose.foundation.layout.*
+import androidx.compose.foundation.layout.Arrangement
+import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.ColumnScope
+import androidx.compose.foundation.layout.Row
+import androidx.compose.foundation.layout.Spacer
+import androidx.compose.foundation.layout.WindowInsets
+import androidx.compose.foundation.layout.consumeWindowInsets
+import androidx.compose.foundation.layout.fillMaxSize
+import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.navigationBarsPadding
+import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.statusBars
+import androidx.compose.foundation.layout.statusBarsPadding
+import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.pager.HorizontalPager
+import androidx.compose.foundation.pager.PagerState
 import androidx.compose.foundation.pager.rememberPagerState
-import androidx.compose.material.icons.filled.*
-import androidx.compose.material3.*
-import androidx.compose.runtime.*
+import androidx.compose.material3.ExperimentalMaterial3Api
+import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.ModalBottomSheet
+import androidx.compose.material3.Scaffold
+import androidx.compose.material3.SnackbarDuration
+import androidx.compose.material3.SnackbarHost
+import androidx.compose.material3.SnackbarHostState
+import androidx.compose.material3.Surface
+import androidx.compose.material3.Text
+import androidx.compose.material3.TextButton
+import androidx.compose.runtime.Composable
+import androidx.compose.runtime.DisposableEffect
+import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.collectAsState
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateMapOf
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.remember
+import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.saveable.rememberSaveableStateHolder
+import androidx.compose.runtime.setValue
+import androidx.compose.runtime.snapshots.SnapshotStateMap
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
-import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.platform.LocalLifecycleOwner
+import androidx.compose.ui.platform.testTag
+import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.semantics.Role
+import androidx.compose.ui.semantics.contentDescription
+import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.lifecycle.Lifecycle
+import androidx.lifecycle.LifecycleOwner
 import androidx.lifecycle.repeatOnLifecycle
+import androidx.navigation.NavHostController
 import androidx.navigation.compose.currentBackStackEntryAsState
 import androidx.navigation.compose.rememberNavController
+import dev.blazelight.p4oc.R
+import dev.blazelight.p4oc.core.datastore.SavedServer
 import dev.blazelight.p4oc.core.datastore.SettingsDataStore
 import dev.blazelight.p4oc.core.log.AppLog
 import dev.blazelight.p4oc.core.network.ApiResult
 import dev.blazelight.p4oc.core.network.ConnectionManager
 import dev.blazelight.p4oc.core.network.ConnectionState
+import dev.blazelight.p4oc.core.network.ServerConnectionRegistry
 import dev.blazelight.p4oc.core.network.safeApiCall
+import dev.blazelight.p4oc.core.network.toServerRef
 import dev.blazelight.p4oc.data.remote.dto.CreatePtyRequest
+import dev.blazelight.p4oc.data.remote.dto.CreateSessionRequest
 import dev.blazelight.p4oc.data.session.SessionRepositoryProvider
 import dev.blazelight.p4oc.data.session.presence
 import dev.blazelight.p4oc.domain.model.SessionConnectionState
@@ -35,731 +78,1055 @@ import dev.blazelight.p4oc.domain.server.ServerRef
 import dev.blazelight.p4oc.domain.server.WorkspaceKey
 import dev.blazelight.p4oc.domain.session.SessionId
 import dev.blazelight.p4oc.domain.workspace.Workspace
-import dev.blazelight.p4oc.ui.components.TuiAlertDialog
-import dev.blazelight.p4oc.ui.components.TuiTextButton
 import dev.blazelight.p4oc.ui.navigation.Screen
 import dev.blazelight.p4oc.ui.screens.home.HomeActions
 import dev.blazelight.p4oc.ui.screens.home.HomeSummaryBuilder
+import dev.blazelight.p4oc.ui.screens.home.HomeSummaryInput
+import dev.blazelight.p4oc.ui.screens.home.ScopedHomeRepositoryState
 import dev.blazelight.p4oc.ui.screens.home.homeScreen
 import dev.blazelight.p4oc.ui.theme.LocalOpenCodeTheme
 import dev.blazelight.p4oc.ui.theme.Spacing
 import dev.blazelight.p4oc.ui.theme.TuiShapes
 import dev.blazelight.p4oc.ui.workspace.WorkspaceRepositoryOwner
+import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.launch
 import org.koin.compose.koinInject
 
 private const val TAG = "MainTabScreen"
 
-/**
- * Main container for the tab-based UI.
- * Shows TabBar at top and active tab's content below.
- */
+private data class SavedServerView(
+    val endpointKey: String,
+    val displayName: String,
+    val badgeLabel: String,
+)
+
+private data class MainTabDeps(
+    val tabManager: TabManager,
+    val connectionManager: ConnectionManager,
+    val settingsDataStore: SettingsDataStore,
+    val serverConnectionRegistry: ServerConnectionRegistry,
+    val sessionRepositoryProvider: SessionRepositoryProvider,
+    val coroutineScope: CoroutineScope,
+)
+
+private class StartWorkUiState {
+    var restoreError: String? by mutableStateOf(null)
+    var startWorkContext: StartWorkContext? by mutableStateOf(null)
+    var showStartWorkSheet: Boolean by mutableStateOf(false)
+    var showFilesTabPrompt: Boolean by mutableStateOf(false)
+    var showStartWorkPicker: Boolean by mutableStateOf(false)
+    var homeDetailSelection: StartWorkSelection by mutableStateOf(StartWorkSelection.NeedsSelection)
+    var pendingStartWork: Pair<StartWorkTarget, StartWorkAction>? by mutableStateOf(null)
+    var collapsedPickerServers: Set<String> by mutableStateOf(emptySet())
+}
+
+internal data class StartWorkPickerGroup(
+    val server: ServerRef,
+    val badgeLabel: String,
+    val targets: List<StartWorkTarget>,
+)
+
+internal fun buildStartWorkPickerGroups(
+    servers: List<Triple<String, String, String>>,
+    openTargets: List<StartWorkTarget>,
+    knownHomeTargets: List<StartWorkTarget>,
+): List<StartWorkPickerGroup> = servers.map { (endpointKey, displayName, badgeLabel) ->
+    val server = ServerRef.fromEndpointKey(endpointKey, displayName)
+    val directoryTargets = (knownHomeTargets + openTargets)
+        .filter { it.serverRef.endpointKey == endpointKey && it.workspaceKey != WorkspaceKey.Global }
+        .distinctBy { it.workspaceKey }
+    StartWorkPickerGroup(
+        server = server,
+        badgeLabel = badgeLabel,
+        targets = listOf(StartWorkTarget(server, WorkspaceKey.Global)) + directoryTargets,
+    )
+}
+
+internal val startWorkScopedActionOrder = listOf(
+    StartWorkAction.NewChat,
+    StartWorkAction.Files,
+    StartWorkAction.Terminal,
+)
+
+private class TabStateMaps(
+    val connectionStates: SnapshotStateMap<String, SessionConnectionState>,
+    val readTokens: SnapshotStateMap<String, Long>,
+    val routes: SnapshotStateMap<String, String>,
+    val ptyIds: SnapshotStateMap<String, String>,
+    val workspaceOwners: SnapshotStateMap<String, WorkspaceRepositoryOwner>,
+)
+
+private data class MainTabContentParams(
+    val deps: MainTabDeps,
+    val uiState: StartWorkUiState,
+    val tabMaps: TabStateMaps,
+    val tabs: List<TabInstance>,
+    val activeTabId: String?,
+    val savedServers: List<SavedServer>,
+    val savedServerViews: List<SavedServerView>,
+    val scopedConnectionStates: Map<String, ConnectionState>,
+    val closeTab: (String) -> Unit,
+    val savedServerExists: (String) -> Boolean,
+    val connectSavedServer: (String) -> Unit,
+    val onDisconnect: () -> Unit,
+)
+
 @Composable
-fun MainTabScreen(
-    onDisconnect: () -> Unit,
-    modifier: Modifier = Modifier
-) {
+private fun rememberMainTabDeps(): MainTabDeps {
     val tabManager: TabManager = koinInject()
     val connectionManager: ConnectionManager = koinInject()
     val settingsDataStore: SettingsDataStore = koinInject()
+    val serverConnectionRegistry: ServerConnectionRegistry = koinInject()
     val sessionRepositoryProvider: SessionRepositoryProvider = koinInject()
     val coroutineScope = rememberCoroutineScope()
-    val theme = LocalOpenCodeTheme.current
-    val lifecycleOwner = LocalLifecycleOwner.current
-
-    val tabs by tabManager.tabs.collectAsState()
-    val activeTabId by tabManager.activeTabId.collectAsState()
-    val showTabWarning by tabManager.showTabWarning.collectAsState()
-    val connectionState by connectionManager.connectionState.collectAsState()
-    val currentServerRef = remember(connectionManager.currentBaseUrl) {
-        connectionManager.currentBaseUrl?.let { ServerRef.fromEndpoint(it) }
+    return remember(coroutineScope) {
+        MainTabDeps(
+            tabManager = tabManager,
+            connectionManager = connectionManager,
+            settingsDataStore = settingsDataStore,
+            serverConnectionRegistry = serverConnectionRegistry,
+            sessionRepositoryProvider = sessionRepositoryProvider,
+            coroutineScope = coroutineScope,
+        )
     }
-    val savedServers by settingsDataStore.savedServers.collectAsState(initial = emptyList())
-    val homeConnectionStates = remember(savedServers, connectionState, currentServerRef?.endpointKey) {
-        savedServers.associate { savedServer ->
-            savedServer.endpointKey to if (savedServer.endpointKey == currentServerRef?.endpointKey) {
-                connectionState
-            } else {
-                ConnectionState.Disconnected
+}
+
+private val rememberStartWorkUiState: @Composable () -> StartWorkUiState = {
+    remember { StartWorkUiState() }
+}
+
+private val rememberTabStateMaps: @Composable () -> TabStateMaps = {
+    remember {
+        TabStateMaps(
+            connectionStates = mutableStateMapOf(),
+            readTokens = mutableStateMapOf(),
+            routes = mutableStateMapOf(),
+            ptyIds = mutableStateMapOf(),
+            workspaceOwners = mutableStateMapOf(),
+        )
+    }
+}
+
+private val rememberScopedConnectionStates: @Composable (
+    List<SavedServer>,
+    ServerConnectionRegistry,
+) -> Map<String, ConnectionState> = { savedServers, registry ->
+    savedServers.associate { saved ->
+        val serverRef = ServerRef.fromEndpointKey(saved.endpointKey, saved.displayName)
+        val state by registry.connectionState(serverRef).collectAsState()
+        saved.endpointKey to state
+    }
+}
+
+private val rememberSavedServerExists: @Composable (List<SavedServer>) -> (String) -> Boolean =
+    { savedServers ->
+        remember(savedServers) {
+            fun(endpointKey: String): Boolean {
+                return savedServers.any { it.endpointKey == endpointKey }
             }
         }
     }
 
-    var wasEverConnected by remember { mutableStateOf(false) }
-
-    LaunchedEffect(Unit) {
-        tabManager.ensureHomeTab(focus = false)
+private val rememberConnectSavedServer: @Composable (
+    ServerConnectionRegistry,
+    List<SavedServer>,
+) -> (String) -> Unit = { registry, savedServers ->
+    remember(registry, savedServers) {
+        fun(endpointKey: String) {
+            savedServers.firstOrNull { it.endpointKey == endpointKey }?.let(registry::connect)
+        }
     }
-    var restoreError by remember { mutableStateOf<String?>(null) }
-    var showStartWorkSheet by remember { mutableStateOf(false) }
-    var showFilesTabPrompt by remember { mutableStateOf(false) }
-    var homeDetailSelection by remember {
-        mutableStateOf<StartWorkSelection>(StartWorkSelection.NeedsSelection)
-    }
+}
 
-    // Foreground resume is delegated to ConnectionManager so reconnect policy
-    // has one owner instead of competing UI timers and SSE retry callbacks.
-    LaunchedEffect(lifecycleOwner) {
-        lifecycleOwner.lifecycle.repeatOnLifecycle(Lifecycle.State.STARTED) {
-            connectionManager.onAppForegrounded()
+private val mainTabForegroundEffect: @Composable (ConnectionManager, LifecycleOwner) -> Unit =
+    { connectionManager, lifecycleOwner ->
+        LaunchedEffect(lifecycleOwner) {
+            lifecycleOwner.lifecycle.repeatOnLifecycle(Lifecycle.State.STARTED) {
+                connectionManager.onAppForegrounded()
+            }
         }
     }
 
-    // ConnectionManager owns SSE retry timeout and escalation. The UI only
-    // reacts to terminal disconnected states after a successful connection.
-    LaunchedEffect(connectionState) {
-        if (connectionState is ConnectionState.Connected) {
-            wasEverConnected = true
-            return@LaunchedEffect
+@Composable
+private fun mainTabRestoreEffect(
+    deps: MainTabDeps,
+    savedServers: List<SavedServer>,
+    uiState: StartWorkUiState,
+) {
+    LaunchedEffect(savedServers) {
+        if (!deps.tabManager.shouldAttemptRestore()) return@LaunchedEffect
+        val persisted = deps.settingsDataStore.getPersistedTabState()
+        if (persisted != null) {
+            val availableServers = savedServers.associate { saved ->
+                saved.endpointKey to ServerRef.fromEndpointKey(saved.endpointKey, saved.displayName)
+            }
+            when (val result = deps.tabManager.restoreState(persisted, availableServers)) {
+                is RestoreResult.Restored -> AppLog.d(TAG, "Restored ${result.count} tabs")
+                RestoreResult.Empty -> AppLog.w(TAG, "Persisted tab state was empty")
+                is RestoreResult.VersionMismatch ->
+                    uiState.restoreError = "Saved tabs use unsupported version ${result.version}. Starting fresh."
+                is RestoreResult.ServerMismatch ->
+                    uiState.restoreError = "Saved tabs reference a different server. Starting fresh."
+                is RestoreResult.MissingServer ->
+                    uiState.restoreError = "Saved tabs reference unavailable server ${result.endpointKey}."
+            }
         }
-        if (!wasEverConnected) return@LaunchedEffect
-        if (connectionState is ConnectionState.Disconnected && tabs.isNotEmpty()) {
-            connectionManager.disconnect()
-            onDisconnect()
-        }
+        if (!deps.tabManager.hasTabs()) deps.tabManager.ensureHomeTab(focus = true)
     }
+}
 
-    LaunchedEffect(connectionManager.currentBaseUrl) {
-        val baseUrl = connectionManager.currentBaseUrl ?: return@LaunchedEffect
-        if (tabManager.shouldAttemptRestore()) {
-            val persisted = settingsDataStore.getPersistedTabState()
-            if (persisted != null) {
-                when (val result = tabManager.restoreState(persisted, ServerRef.fromEndpoint(baseUrl))) {
-                    is RestoreResult.Restored -> AppLog.d(TAG, "Restored ${result.count} tabs")
-                    RestoreResult.Empty -> AppLog.w(TAG, "Persisted tab state was empty")
-                    is RestoreResult.VersionMismatch -> {
-                        restoreError = "Saved tabs use unsupported version ${result.version}. Starting fresh."
-                    }
-                    is RestoreResult.ServerMismatch -> {
-                        restoreError = "Saved tabs belong to ${result.persistedEndpointKey}, not ${result.activeEndpointKey}. Starting fresh."
-                    }
-                    is RestoreResult.MissingServer -> {
-                        restoreError = "Saved tabs reference unavailable server ${result.endpointKey}. Starting fresh."
-                    }
+@Composable
+private fun mainTabPersistEffect(
+    deps: MainTabDeps,
+    tabs: List<TabInstance>,
+    activeTabId: String?,
+) {
+    LaunchedEffect(tabs, activeTabId) {
+        deps.settingsDataStore.setPersistedTabState(deps.tabManager.saveState())
+    }
+}
+
+private val savedServerConnectionEffect: @Composable (ServerConnectionRegistry, List<SavedServer>) -> Unit =
+    { registry, savedServers ->
+        val endpointKeys = savedServers.map(SavedServer::endpointKey)
+        LaunchedEffect(endpointKeys) {
+            savedServers.forEach { server ->
+                if (registry.connectionState(server.toServerRef()).value is ConnectionState.Disconnected) {
+                    registry.connect(server)
                 }
             }
-            if (!tabManager.hasTabs()) {
-                tabManager.ensureHomeTab(focus = true)
-            }
         }
     }
 
-    LaunchedEffect(tabs, activeTabId, connectionManager.currentBaseUrl) {
-        val baseUrl = connectionManager.currentBaseUrl ?: return@LaunchedEffect
-        val state = tabManager.saveState(ServerRef.fromEndpoint(baseUrl)) ?: return@LaunchedEffect
-        settingsDataStore.setPersistedTabState(state)
-    }
-
-    val tabTitleLabels = rememberTabTitleLabels()
-    // Build tab titles and icons from current routes (updated inside pager pages).
-    // Seed from startRoute so titles are correct even when pages are off-screen.
-    val tabTitles = remember { mutableStateMapOf<String, String>() }
-    val tabIcons = remember { mutableStateMapOf<String, ImageVector>() }
-    tabs.forEach { tab ->
-        if (tab.id !in tabTitles) {
-            tabTitles[tab.id] = getTitleForRoute(
-                route = tab.startRoute,
-                labels = tabTitleLabels,
-                sessionTitle = tab.sessionTitle,
-                workspaceKey = tab.workspaceKey,
-            )
-            tabIcons[tab.id] = getIconForRoute(tab.startRoute)
-        }
-    }
-    val tabConnectionStates = remember { mutableStateMapOf<String, SessionConnectionState>() }
-    val tabReadTokens = remember { mutableStateMapOf<String, Long>() }
-    // Track current routes per tab (for PTY cleanup on tab close)
-    val tabRoutes = remember { mutableStateMapOf<String, String>() }
-    val tabPtyIds = remember { mutableStateMapOf<String, String>() }
-    val connection = connectionManager.connection.collectAsState().value
-    val baseUrl = connection?.config?.url
-    val generation = connection?.generation
-    val workspaceOwners = remember { mutableStateMapOf<String, WorkspaceRepositoryOwner>() }
-
+@Composable
+private fun mainTabWorkspaceOwnersEffect(
+    deps: MainTabDeps,
+    tabs: List<TabInstance>,
+    savedServers: List<SavedServer>,
+    scopedConnectionStates: Map<String, ConnectionState>,
+    workspaceOwners: SnapshotStateMap<String, WorkspaceRepositoryOwner>,
+) {
     DisposableEffect(Unit) {
         onDispose {
             workspaceOwners.values.forEach { it.close() }
             workspaceOwners.clear()
         }
     }
-
-    LaunchedEffect(tabs, baseUrl, generation) {
-        if (baseUrl == null || generation == null) {
-            workspaceOwners.values.forEach { it.close() }
-            workspaceOwners.clear()
-            return@LaunchedEffect
-        }
-
-        val liveTabIds = tabs.map { it.id }.toSet()
-        workspaceOwners.keys
-            .filter { it !in liveTabIds }
-            .forEach { removedTabId ->
-                workspaceOwners.remove(removedTabId)?.close()
-            }
-
-        tabs.forEach { tab ->
-            val workspaceKey = tab.workspaceKey ?: return@forEach
-            val workspace = Workspace(
-                server = ServerRef.fromEndpoint(baseUrl),
-                directory = (workspaceKey as? WorkspaceKey.Directory)?.value,
-            )
-            val currentOwner = workspaceOwners[tab.id]
-            if (currentOwner == null ||
-                currentOwner.workspace != workspace ||
-                currentOwner.generation != generation
-            ) {
-                // Acquire the new owner BEFORE releasing the old one. Repositories are
-                // shared and ref-counted per workspace key by SessionRepositoryProvider;
-                // constructing the new owner first bumps the shared repository's ref-count
-                // (transiently to 2 when the key is unchanged), so closing the old owner
-                // afterwards drops it back to 1 instead of to 0. Closing first would evict
-                // and close() a repository that other consumers (e.g. the session list, or
-                // another tab on the same directory) are still using, surfacing as
-                // "SessionRepository closed" and breaking submission until force-stop.
-                val newOwner = WorkspaceRepositoryOwner(
-                    tabId = tab.id,
-                    workspace = workspace,
-                    generation = generation,
-                    sessionRepositoryProvider = sessionRepositoryProvider,
-                )
-                currentOwner?.close()
-                workspaceOwners[tab.id] = newOwner
-            }
-        }
+    val tabOwnerInputs = tabs.mapNotNull { tab ->
+        val serverRef = tab.serverRef ?: return@mapNotNull null
+        val workspaceKey = tab.workspaceKey ?: return@mapNotNull null
+        val connection by deps.serverConnectionRegistry.connection(serverRef).collectAsState()
+        val generation = deps.serverConnectionRegistry.generation(serverRef)
+        TabOwnerInput(tab.id, serverRef, workspaceKey, connection != null, generation)
     }
+    val homeOwnerInputs = savedServers.mapNotNull { saved ->
+        if (scopedConnectionStates[saved.endpointKey] !is ConnectionState.Connected) {
+            return@mapNotNull null
+        }
+        val serverRef = ServerRef.fromEndpointKey(saved.endpointKey, saved.displayName)
+        TabOwnerInput(
+            tabId = "home:${saved.endpointKey}",
+            serverRef = serverRef,
+            workspaceKey = WorkspaceKey.Global,
+            connected = true,
+            generation = deps.serverConnectionRegistry.generation(serverRef),
+        )
+    }
+    val ownerInputs = tabOwnerInputs + homeOwnerInputs
+    LaunchedEffect(ownerInputs) {
+        reconcileWorkspaceOwners(deps, ownerInputs, workspaceOwners)
+    }
+}
 
-    // Collect per-tab session presence outside page composition. HorizontalPager
-    // composes only the active page, but background chat/sub-agent tabs still need
-    // unread/busy updates when their repository state changes.
+private data class TabOwnerInput(
+    val tabId: String,
+    val serverRef: ServerRef,
+    val workspaceKey: WorkspaceKey,
+    val connected: Boolean,
+    val generation: dev.blazelight.p4oc.domain.server.ServerGeneration?,
+)
+
+private val reconcileWorkspaceOwners: (
+    MainTabDeps,
+    List<TabOwnerInput>,
+    SnapshotStateMap<String, WorkspaceRepositoryOwner>,
+) -> Unit = { deps, inputs, owners ->
+    val liveTabIds = inputs.map { it.tabId }.toSet()
+    owners.keys.filter { it !in liveTabIds }.forEach { id -> owners.remove(id)?.close() }
+    inputs.forEach { input -> reconcileWorkspaceOwner(deps, input, owners) }
+}
+
+private fun reconcileWorkspaceOwner(
+    deps: MainTabDeps,
+    input: TabOwnerInput,
+    owners: SnapshotStateMap<String, WorkspaceRepositoryOwner>,
+) {
+    val generation = input.generation
+    if (!input.connected || generation == null) {
+        owners.remove(input.tabId)?.close()
+        return
+    }
+    val workspace = Workspace(
+        server = input.serverRef,
+        directory = (input.workspaceKey as? WorkspaceKey.Directory)?.value,
+    )
+    val current = owners[input.tabId]
+    if (current?.workspace == workspace && current.generation == generation) return
+    val newOwner = WorkspaceRepositoryOwner(
+        tabId = input.tabId,
+        workspace = workspace,
+        generation = generation,
+        sessionRepositoryProvider = deps.sessionRepositoryProvider,
+    )
+    current?.close()
+    owners[input.tabId] = newOwner
+}
+
+@Composable
+private fun mainTabPresenceCollection(
+    tabs: List<TabInstance>,
+    activeTabId: String?,
+    tabMaps: TabStateMaps,
+) {
     tabs.forEach { tab ->
         val sessionId = tab.sessionId
-        val workspaceOwner = workspaceOwners[tab.id]
+        val workspaceOwner = tabMaps.workspaceOwners[tab.id]
         if (sessionId != null && workspaceOwner != null) {
             val sessionState by workspaceOwner.sessionRepository
                 .sessionUiState(SessionId(sessionId))
                 .collectAsState()
             LaunchedEffect(tab.id, activeTabId, sessionState.responseCompletedToken) {
                 if (tab.id == activeTabId) {
-                    tabReadTokens[tab.id] = sessionState.responseCompletedToken
+                    tabMaps.readTokens[tab.id] = sessionState.responseCompletedToken
                 }
             }
             LaunchedEffect(tab.id, sessionState) {
-                val readToken = tabReadTokens[tab.id] ?: sessionState.responseCompletedToken
-                val hasUnread = sessionState.responseCompletedToken > readToken && sessionState.status !is SessionStatus.Busy
-                tabConnectionStates[tab.id] = sessionState.presence(hasUnread = hasUnread)
+                val readToken = tabMaps.readTokens[tab.id] ?: sessionState.responseCompletedToken
+                val hasUnread = sessionState.responseCompletedToken > readToken &&
+                    sessionState.status !is SessionStatus.Busy
+                tabMaps.connectionStates[tab.id] = sessionState.presence(hasUnread = hasUnread)
             }
         } else {
             val tabSessionState by tab.connectionState.collectAsState()
             LaunchedEffect(tab.id, tabSessionState) {
-                if (tabSessionState != null) {
-                    tabConnectionStates[tab.id] = tabSessionState!!
+                val currentState = tabSessionState
+                if (currentState != null) {
+                    tabMaps.connectionStates[tab.id] = currentState
                 } else {
-                    tabConnectionStates.remove(tab.id)
-                    tabReadTokens.remove(tab.id)
+                    tabMaps.connectionStates.remove(tab.id)
+                    tabMaps.readTokens.remove(tab.id)
                 }
             }
         }
     }
+}
 
-    // Shared tab-close logic: PTY cleanup + state map cleanup + tabManager.closeTab.
-    // Used by both TabBar close button and TabNavHost BackHandler.
-    val closeTab: (String) -> Unit = remember(coroutineScope) {
-        {
-                tabId: String ->
-            coroutineScope.launch {
-                // Check if it's a terminal tab and delete the PTY
-                val route = tabRoutes[tabId]
-                if (route != null && route.startsWith("terminal/")) {
-                    val ptyId = tabPtyIds[tabId]
-                    if (ptyId != null) {
-                        val api = connectionManager.getApi()
-                        if (api != null) {
-                            val result = safeApiCall { api.deletePtySession(ptyId) }
-                            if (result is ApiResult.Error) {
-                                AppLog.e(TAG, "Failed to delete PTY $ptyId: ${result.message}")
-                            }
+@Composable
+private fun rememberCloseTab(
+    deps: MainTabDeps,
+    tabMaps: TabStateMaps,
+): (String) -> Unit = remember(deps) {
+    fun(tabId: String) {
+        deps.coroutineScope.launch {
+            val route = tabMaps.routes[tabId]
+            if (route != null && route.startsWith("terminal/")) {
+                val ptyId = tabMaps.ptyIds[tabId]
+                if (ptyId != null) {
+                    val serverRef = deps.tabManager.tabs.value
+                        .firstOrNull { it.id == tabId }
+                        ?.serverRef
+                    val api = serverRef?.let(deps.serverConnectionRegistry::api)
+                    if (api != null) {
+                        val result = safeApiCall { api.deletePtySession(ptyId) }
+                        if (result is ApiResult.Error) {
+                            AppLog.e(TAG, "Failed to delete PTY $ptyId: ${result.message}")
                         }
                     }
                 }
-
-                // Clean up tracked state for this tab
-                tabRoutes.remove(tabId)
-                tabPtyIds.remove(tabId)
-                tabTitles.remove(tabId)
-                tabIcons.remove(tabId)
-                tabConnectionStates.remove(tabId)
-
-                tabManager.closeTab(tabId)
             }
+            tabMaps.routes.remove(tabId)
+            tabMaps.ptyIds.remove(tabId)
+            tabMaps.connectionStates.remove(tabId)
+            deps.tabManager.closeTab(tabId)
         }
     }
+}
 
-    // Snackbar for tab warning
-    val snackbarHostState = remember { SnackbarHostState() }
-
-    fun requestFilesTab(target: StartWorkTarget) {
-        tabManager.focusOrCreateFilesTab(
-            serverRef = target.serverRef,
-            workspaceKey = target.workspaceKey,
-        )
+@Composable
+private fun mainTabPendingStartWorkEffect(
+    deps: MainTabDeps,
+    uiState: StartWorkUiState,
+    scopedConnectionStates: Map<String, ConnectionState>,
+    snackbarHostState: SnackbarHostState,
+) {
+    LaunchedEffect(uiState.pendingStartWork, scopedConnectionStates) {
+        val pending = uiState.pendingStartWork ?: return@LaunchedEffect
+        val target = pending.first
+        val action = pending.second
+        if (scopedConnectionStates[target.serverRef.endpointKey] !is ConnectionState.Connected) {
+            return@LaunchedEffect
+        }
+        val api = deps.serverConnectionRegistry.api(target.serverRef) ?: return@LaunchedEffect
+        when (action) {
+            StartWorkAction.NewChat -> {
+                val result = safeApiCall {
+                    api.createSession(
+                        directory = (target.workspaceKey as? WorkspaceKey.Directory)?.value,
+                        request = CreateSessionRequest(),
+                    )
+                }
+                when (result) {
+                    is ApiResult.Success -> {
+                        uiState.pendingStartWork = null
+                        deps.tabManager.createTab(
+                            startRoute = Screen.Chat.createRoute(result.data.id),
+                            workspaceKey = target.workspaceKey,
+                            serverRef = target.serverRef,
+                            focus = true,
+                        )
+                    }
+                    is ApiResult.Error -> snackbarHostState.showSnackbar(result.message)
+                }
+            }
+            StartWorkAction.Terminal -> {
+                val result = safeApiCall {
+                    api.createPtySession(createPtyRequestForWorkspace(target.workspaceKey))
+                }
+                when (result) {
+                    is ApiResult.Success -> {
+                        uiState.pendingStartWork = null
+                        deps.tabManager.createTab(
+                            startRoute = Screen.Terminal.createRoute(result.data.id),
+                            workspaceKey = target.workspaceKey,
+                            serverRef = target.serverRef,
+                            focus = true,
+                        )
+                    }
+                    is ApiResult.Error -> snackbarHostState.showSnackbar(result.message)
+                }
+            }
+            else -> uiState.pendingStartWork = null
+        }
     }
+}
 
+@Composable
+private fun mainTabSnackbarEffects(
+    deps: MainTabDeps,
+    showTabWarning: Boolean,
+    uiState: StartWorkUiState,
+    snackbarHostState: SnackbarHostState,
+) {
     LaunchedEffect(showTabWarning) {
         if (showTabWarning) {
             snackbarHostState.showSnackbar(
                 message = "Multiple tabs may affect performance",
-                duration = SnackbarDuration.Short
+                duration = SnackbarDuration.Short,
             )
-            tabManager.dismissTabWarning()
+            deps.tabManager.dismissTabWarning()
         }
     }
-
-    LaunchedEffect(restoreError) {
-        restoreError?.let { message ->
+    LaunchedEffect(uiState.restoreError) {
+        uiState.restoreError?.let { message ->
             snackbarHostState.showSnackbar(message, duration = SnackbarDuration.Long)
-            restoreError = null
+            uiState.restoreError = null
         }
     }
+}
 
+object MainTabScreen {
+    @OptIn(ExperimentalMaterial3Api::class)
+    @Composable
+    operator fun invoke(
+        onDisconnect: () -> Unit,
+        modifier: Modifier = Modifier,
+    ) {
+        val deps = rememberMainTabDeps()
+        val uiState = rememberStartWorkUiState()
+        val tabMaps = rememberTabStateMaps()
+        val lifecycleOwner = LocalLifecycleOwner.current
+
+        LaunchedEffect(Unit) { deps.tabManager.ensureHomeTab(focus = false) }
+        mainTabForegroundEffect(deps.connectionManager, lifecycleOwner)
+
+        val tabs by deps.tabManager.tabs.collectAsState()
+        val activeTabId by deps.tabManager.activeTabId.collectAsState()
+        val showTabWarning by deps.tabManager.showTabWarning.collectAsState()
+        val savedServers by deps.settingsDataStore.savedServers.collectAsState(initial = emptyList())
+        val scopedConnectionStates = rememberScopedConnectionStates(
+            savedServers,
+            deps.serverConnectionRegistry,
+        )
+        val savedServerViews = remember(savedServers) {
+            savedServers.map { SavedServerView(it.endpointKey, it.displayName, it.badgeLabel) }
+        }
+        val savedServerExists = rememberSavedServerExists(savedServers)
+        val connectSavedServer = rememberConnectSavedServer(deps.serverConnectionRegistry, savedServers)
+
+        mainTabRestoreEffect(deps, savedServers, uiState)
+        savedServerConnectionEffect(deps.serverConnectionRegistry, savedServers)
+        mainTabPersistEffect(deps, tabs, activeTabId)
+        mainTabWorkspaceOwnersEffect(
+            deps,
+            tabs,
+            savedServers,
+            scopedConnectionStates,
+            tabMaps.workspaceOwners,
+        )
+        mainTabPresenceCollection(tabs, activeTabId, tabMaps)
+
+        val closeTab = rememberCloseTab(deps, tabMaps)
+        val snackbarHostState = remember { SnackbarHostState() }
+        mainTabPendingStartWorkEffect(deps, uiState, scopedConnectionStates, snackbarHostState)
+        mainTabSnackbarEffects(deps, showTabWarning, uiState, snackbarHostState)
+
+        val params = MainTabContentParams(
+            deps = deps,
+            uiState = uiState,
+            tabMaps = tabMaps,
+            tabs = tabs,
+            activeTabId = activeTabId,
+            savedServers = savedServers,
+            savedServerViews = savedServerViews,
+            scopedConnectionStates = scopedConnectionStates,
+            closeTab = closeTab,
+            savedServerExists = savedServerExists,
+            connectSavedServer = connectSavedServer,
+            onDisconnect = onDisconnect,
+        )
+        mainTabScaffold(params, snackbarHostState, modifier)
+        startWorkSheets(params)
+    }
+}
+
+@OptIn(ExperimentalMaterial3Api::class)
+@Composable
+private fun mainTabScaffold(
+    params: MainTabContentParams,
+    snackbarHostState: SnackbarHostState,
+    modifier: Modifier,
+) {
+    val theme = LocalOpenCodeTheme.current
+    val tabTitleLabels = rememberTabTitleLabels()
+    val tabTitles = params.tabs.associate { it.id to getTitleForTab(it, tabTitleLabels) }
+    val tabIcons = params.tabs.associate { it.id to getIconForTab(it) }
+    val pagerState = rememberPagerState(
+        initialPage = params.tabs.indexOfFirst { it.id == params.activeTabId }.coerceAtLeast(0),
+        pageCount = { params.tabs.size },
+    )
+    LaunchedEffect(params.activeTabId, params.tabs.size) {
+        val index = params.tabs.indexOfFirst { it.id == params.activeTabId }
+        if (index >= 0 && pagerState.currentPage != index) {
+            pagerState.animateScrollToPage(index)
+        }
+    }
+    LaunchedEffect(pagerState.settledPage) {
+        params.tabs.getOrNull(pagerState.settledPage)?.let { tab ->
+            if (tab.id != params.activeTabId) params.deps.tabManager.focusTab(tab.id)
+        }
+    }
     Scaffold(
         snackbarHost = { SnackbarHost(snackbarHostState) },
         containerColor = theme.background,
         contentWindowInsets = WindowInsets(0),
-        modifier = modifier
+        modifier = modifier,
     ) { innerPadding ->
-        // We consume the status bar insets here so child Scaffolds don't double-pad.
-        // The tab bar gets the status bar padding, then consumeWindowInsets tells
-        // downstream composables that the status bar is already accounted for.
         Column(
-            modifier = Modifier
-                .fillMaxSize()
-                .padding(innerPadding)
-                .statusBarsPadding()
-                .consumeWindowInsets(WindowInsets.statusBars)
+            Modifier.fillMaxSize().padding(innerPadding)
+                .statusBarsPadding().consumeWindowInsets(WindowInsets.statusBars),
         ) {
-            // Tab bar (no longer needs its own statusBarsPadding).
-            // Top-level plus actions inherit the active tab target when possible.
-            Box(modifier = Modifier.fillMaxWidth()) {
-                TabBar(
-                    tabs = tabs,
-                    activeTabId = activeTabId,
-                    tabTitles = tabTitles,
-                    tabIcons = tabIcons,
-                    tabConnectionStates = tabConnectionStates,
-                    onTabClick = { tabId ->
-                        tabManager.focusTab(tabId)
-                    },
-                    onTabClose = closeTab,
-                    onAddClick = {
-                        showStartWorkSheet = true
-                    },
-                )
-            }
-
-            // Pager state for swipe between tabs
-            val pagerState = rememberPagerState(
-                initialPage = tabs.indexOfFirst { it.id == activeTabId }.coerceAtLeast(0),
-                pageCount = { tabs.size }
-            )
-
-            // Sync activeTabId -> pager (when tab clicked or closed)
-            LaunchedEffect(activeTabId, tabs.size) {
-                val index = tabs.indexOfFirst { it.id == activeTabId }
-                if (index >= 0 && pagerState.currentPage != index) {
-                    pagerState.animateScrollToPage(index)
-                }
-            }
-
-            // Sync pager -> activeTabId (when user swipes)
-            LaunchedEffect(pagerState.settledPage) {
-                tabs.getOrNull(pagerState.settledPage)?.let { tab ->
-                    if (tab.id != activeTabId) {
-                        tabManager.focusTab(tab.id)
+            TabBar(
+                tabs = params.tabs,
+                activeTabId = params.activeTabId,
+                tabTitles = tabTitles,
+                tabIcons = tabIcons,
+                tabConnectionStates = params.tabMaps.connectionStates,
+                onTabClick = { id -> params.deps.tabManager.focusTab(id) },
+                onTabClose = params.closeTab,
+                onAddClick = {
+                    if (params.deps.tabManager.activeTab?.isPinnedHome == true) {
+                        params.uiState.showStartWorkPicker = true
+                    } else {
+                        params.uiState.startWorkContext = startWorkContextFor(params.deps.tabManager.activeTab)
+                        params.uiState.showStartWorkSheet = true
                     }
-                }
-            }
-
-            // Tab content area with HorizontalPager for swipe between tabs
-            val saveableStateHolder = rememberSaveableStateHolder()
-
-            HorizontalPager(
-                state = pagerState,
-                modifier = Modifier.weight(1f),
-                key = { tabs.getOrNull(it)?.id ?: it.toString() },
-                beyondViewportPageCount = 0
-            ) { pageIndex ->
-                tabs.getOrNull(pageIndex)?.let { tab ->
-                    saveableStateHolder.SaveableStateProvider(tab.id) {
-                        val navController = rememberNavController()
-
-                        // Track route for title/icon
-                        val backStackEntry by navController.currentBackStackEntryAsState()
-                        LaunchedEffect(backStackEntry?.destination?.route, tab.sessionTitle) {
-                            val route = backStackEntry?.destination?.route
-                            // Only update when route is resolved — avoids overwriting
-                            // seeded values with "Tab" during initial null-route composition
-                            if (route != null) {
-                                tabTitles[tab.id] = getTitleForRoute(
-                                    route = route,
-                                    labels = tabTitleLabels,
-                                    sessionTitle = tab.sessionTitle,
-                                    workspaceKey = tab.workspaceKey,
-                                )
-                                tabIcons[tab.id] = getIconForRoute(route)
-                            }
-                            // Track PTY ID if on a terminal route
-                            val ptyId = backStackEntry?.arguments?.getString(Screen.Terminal.ARG_PTY_ID)
-                            if (ptyId != null) {
-                                tabPtyIds[tab.id] = ptyId
-                                tabRoutes[tab.id] = Screen.Terminal.createRoute(ptyId)
-                            }
-                        }
-
-                        val isActive = tab.id == activeTabId
-                        val workspaceOwner = workspaceOwners[tab.id]
-                        if (tab.isPinnedHome) {
-                            homeScreen(
-                                summary = HomeSummaryBuilder.build(
-                                    savedServers = savedServers,
-                                    connectionStates = homeConnectionStates,
-                                    tabs = tabs,
-                                ),
-                                actions = HomeActions(
-                                    onBrowseSessions = { target ->
-                                        tabManager.createTab(
-                                            startRoute = Screen.Sessions.route,
-                                            workspaceKey = target.workspaceKey,
-                                            serverRef = target.serverRef,
-                                            focus = true,
-                                        )
-                                    },
-                                    onOpenFiles = { target -> requestFilesTab(target) },
-                                    onOpenTerminal = { target ->
-                                        coroutineScope.launch {
-                                            if (target.serverRef.endpointKey != currentServerRef?.endpointKey) {
-                                                snackbarHostState.showSnackbar(
-                                                    "Select and connect to ${target.serverRef.displayName} first",
-                                                )
-                                                return@launch
-                                            }
-                                            val api = connectionManager.getApi() ?: run {
-                                                snackbarHostState.showSnackbar("Not connected to server")
-                                                return@launch
-                                            }
-                                            val result = safeApiCall {
-                                                api.createPtySession(
-                                                    createPtyRequestForWorkspace(target.workspaceKey),
-                                                )
-                                            }
-                                            if (result is ApiResult.Success) {
-                                                tabManager.createTab(
-                                                    startRoute = Screen.Terminal.createRoute(result.data.id),
-                                                    workspaceKey = target.workspaceKey,
-                                                    serverRef = target.serverRef,
-                                                    focus = true,
-                                                )
-                                            } else if (result is ApiResult.Error) {
-                                                snackbarHostState.showSnackbar(
-                                                    "Failed to create terminal: ${result.message}",
-                                                )
-                                            }
-                                        }
-                                    },
-                                    onChooseTarget = { showFilesTabPrompt = true },
-                                    onWorkspaceDetailChanged = { homeDetailSelection = it },
-                                ),
-                                modifier = Modifier.fillMaxSize(),
-                            )
-                        } else if (workspaceOwner != null) {
-                            TabNavHost(
-                                navController = navController,
-                                tabManager = tabManager,
-                                tabId = tab.id,
-                                serverRef = tab.serverRef ?: return@SaveableStateProvider,
-                                onDisconnect = onDisconnect,
-                                onCloseTab = { closeTab(tab.id) },
-                                startRoute = tab.startRoute,
-                                workspaceOwner = workspaceOwner,
-                                onNewFilesTab = {
-                                    val serverRef = tab.serverRef
-                                    val workspaceKey = tab.workspaceKey
-                                    if (serverRef != null && workspaceKey != null) {
-                                        requestFilesTab(StartWorkTarget(serverRef, workspaceKey))
-                                    } else {
-                                        showFilesTabPrompt = true
-                                    }
-                                },
-                                onNewTerminalTab = {
-                                    coroutineScope.launch {
-                                        val api = connectionManager.getApi() ?: run {
-                                            AppLog.e(TAG, "Cannot create terminal: not connected")
-                                            snackbarHostState.showSnackbar("Not connected to server")
-                                            return@launch
-                                        }
-                                        val workspaceKey = tab.workspaceKey ?: run {
-                                            AppLog.e(TAG, "Cannot create terminal: tab has no workspace identity")
-                                            snackbarHostState.showSnackbar(
-                                                "Cannot create terminal: workspace is unavailable"
-                                            )
-                                            return@launch
-                                        }
-                                        val result = safeApiCall {
-                                            api.createPtySession(createPtyRequestForWorkspace(workspaceKey))
-                                        }
-                                        when (result) {
-                                            is ApiResult.Success -> {
-                                                val ptyId = result.data.id
-                                                tabManager.createTab(
-                                                    startRoute = Screen.Terminal.createRoute(ptyId),
-                                                    workspaceKey = workspaceKey,
-                                                    serverRef = tab.serverRef ?: return@launch,
-                                                    focus = true,
-                                                )
-                                            }
-                                            is ApiResult.Error -> {
-                                                AppLog.e(TAG, "Failed to create PTY: ${result.message}")
-                                                snackbarHostState.showSnackbar(
-                                                    "Failed to create terminal: ${result.message}"
-                                                )
-                                            }
-                                        }
-                                    }
-                                },
-                                isActiveTab = isActive,
-                                onConnectionStateChanged = { state ->
-                                    tab.updateConnectionState(state)
-                                },
-                                modifier = Modifier.fillMaxSize()
-                            )
-                        } else {
-                            Box(modifier = Modifier.fillMaxSize()) {
-                                if (baseUrl == null || generation == null) {
-                                    Text(
-                                        text = "Not connected to server",
-                                        color = theme.textMuted,
-                                        modifier = Modifier.align(Alignment.Center),
-                                    )
-                                }
-                            }
-                        }
-                    }
-                }
-            }
-        }
-    }
-
-    if (showStartWorkSheet) {
-        val availableServers = savedServers.map {
-            ServerRef.fromEndpointKey(it.endpointKey, it.displayName)
-        }
-        val rawContext = if (tabManager.activeTab?.isPinnedHome == true) {
-            StartWorkContext(
-                source = StartWorkSource.HomeWorkspaceDetail,
-                selection = homeDetailSelection,
+                },
             )
-        } else {
-            startWorkContextFor(tabManager.activeTab)
-        }
-        val startContext = rawContext.copy(
-            selection = rawContext.selection.validatedAgainst(availableServers),
-        )
-        val target = startContext.selectedTarget
-        TuiAlertDialog(
-            onDismissRequest = { showStartWorkSheet = false },
-            title = "Start work",
-            confirmButton = {
-                TuiTextButton(onClick = { showStartWorkSheet = false }) {
-                    Text("Cancel")
-                }
-            },
-        ) {
-            Column(verticalArrangement = Arrangement.spacedBy(Spacing.sm)) {
-                Text(
-                    text = target?.let {
-                        val workspace = workspaceLabel(it.workspaceKey, tabTitleLabels)
-                            ?: workspaceSubtitle(it.workspaceKey)
-                        "Target: ${it.serverRef.displayName} · $workspace"
-                    } ?: "Choose a target before creating work.",
-                    color = theme.textMuted,
-                    style = MaterialTheme.typography.bodySmall,
-                )
-                StartWorkActionRow(
-                    label = "New chat",
-                    description = "Start a chat in the target workspace.",
-                    marker = "C",
-                    onClick = {
-                        showStartWorkSheet = false
-                        if (target == null) {
-                            showFilesTabPrompt = true
-                        } else {
-                            tabManager.createTab(
-                                startRoute = Screen.Sessions.route,
-                                workspaceKey = target.workspaceKey,
-                                serverRef = target.serverRef,
-                                focus = true,
-                            )
-                        }
-                    },
-                )
-                StartWorkActionRow(
-                    label = "Browse sessions",
-                    description = "Browse sessions for the exact target workspace.",
-                    marker = "S",
-                    onClick = {
-                        showStartWorkSheet = false
-                        if (target == null) {
-                            showFilesTabPrompt = true
-                        } else {
-                            tabManager.createTab(
-                                startRoute = Screen.Sessions.route,
-                                workspaceKey = target.workspaceKey,
-                                serverRef = target.serverRef,
-                                focus = true,
-                            )
-                        }
-                    },
-                )
-                StartWorkActionRow(
-                    label = "Files tab",
-                    description = "Open files for the target workspace.",
-                    marker = "F",
-                    onClick = {
-                        showStartWorkSheet = false
-                        if (target == null) showFilesTabPrompt = true else requestFilesTab(target)
-                    },
-                )
-                StartWorkActionRow(
-                    label = "Terminal",
-                    description = "Create a terminal for the target workspace.",
-                    marker = "T",
-                    onClick = {
-                        showStartWorkSheet = false
-                        if (target == null) {
-                            showFilesTabPrompt = true
-                        } else {
-                            coroutineScope.launch {
-                                if (target.serverRef.endpointKey != currentServerRef?.endpointKey) {
-                                    snackbarHostState.showSnackbar(
-                                        "Select and connect to ${target.serverRef.displayName} first",
-                                    )
-                                    return@launch
-                                }
-                                val api = connectionManager.getApi() ?: run {
-                                    snackbarHostState.showSnackbar("Not connected to server")
-                                    return@launch
-                                }
-                                val result = safeApiCall {
-                                    api.createPtySession(createPtyRequestForWorkspace(target.workspaceKey))
-                                }
-                                if (result is ApiResult.Success) {
-                                    tabManager.createTab(
-                                        startRoute = Screen.Terminal.createRoute(result.data.id),
-                                        workspaceKey = target.workspaceKey,
-                                        serverRef = target.serverRef,
-                                        focus = true,
-                                    )
-                                } else if (result is ApiResult.Error) {
-                                    snackbarHostState.showSnackbar("Failed to create terminal: ${result.message}")
-                                }
-                            }
-                        }
-                    },
-                )
-                StartWorkActionRow(
-                    label = "Choose another target",
-                    description = "Pick a different workspace target before creating work.",
-                    marker = "…",
-                    onClick = {
-                        showStartWorkSheet = false
-                        showFilesTabPrompt = true
-                    },
-                )
-            }
+            mainTabPager(params, pagerState)
         }
     }
-
-    if (showFilesTabPrompt) {
-        val availableEndpointKeys = savedServers.mapTo(mutableSetOf()) { it.endpointKey }
-        val openTargets = tabs.mapNotNull { tab ->
-            val serverRef = tab.serverRef ?: return@mapNotNull null
-            val workspaceKey = tab.workspaceKey ?: return@mapNotNull null
-            StartWorkTarget(serverRef, workspaceKey)
-        }.filter { it.serverRef.endpointKey in availableEndpointKeys }
-            .distinct()
-        val noProjectTargets = savedServers.map {
-            StartWorkTarget(
-                ServerRef.fromEndpointKey(it.endpointKey, it.displayName),
-                WorkspaceKey.Global,
-            )
-        }
-        fun selectTarget(target: StartWorkTarget) {
-            requestFilesTab(target)
-            showFilesTabPrompt = false
-        }
-
-        TuiAlertDialog(
-            onDismissRequest = { showFilesTabPrompt = false },
-            title = "Select workspace",
-            confirmButton = {
-                TuiTextButton(onClick = { showFilesTabPrompt = false }) {
-                    Text("Cancel")
-                }
-            }
-        ) {
-            Text("Choose an exact server and workspace:")
-            noProjectTargets.forEach { target ->
-                FilesWorkspaceOption(
-                    title = "${target.serverRef.displayName} · No project context",
-                    subtitle = "Explicit server scope",
-                    marker = "◆",
-                    onClick = { selectTarget(target) },
-                )
-            }
-            openTargets.filter { it.workspaceKey != WorkspaceKey.Global }.forEach { target ->
-                FilesWorkspaceOption(
-                    title = workspaceLabel(target.workspaceKey, tabTitleLabels) ?: "Missing workspace",
-                    subtitle = "${target.serverRef.displayName} · ${workspaceSubtitle(target.workspaceKey)}",
-                    marker = "◇",
-                    onClick = { selectTarget(target) },
-                )
-            }
-        }
-    }
-}
-internal fun createPtyRequestForWorkspace(workspaceKey: WorkspaceKey): CreatePtyRequest = CreatePtyRequest(
-    cwd = (workspaceKey as? WorkspaceKey.Directory)?.value,
-    title = terminalTitle(workspaceKey),
-)
-
-private fun terminalTitle(workspaceKey: WorkspaceKey): String? = when (workspaceKey) {
-    is WorkspaceKey.Directory -> workspaceKey.value.trimEnd('/').substringAfterLast('/').ifBlank { "Terminal" }
-    WorkspaceKey.Global -> null
-    is WorkspaceKey.SessionScoped -> workspaceKey.sessionId.value
-}
-
-private fun workspaceSubtitle(workspaceKey: WorkspaceKey): String = when (workspaceKey) {
-    is WorkspaceKey.Directory -> workspaceKey.value
-    WorkspaceKey.Global -> "No project context"
-    is WorkspaceKey.SessionScoped -> "Session-scoped workspace"
 }
 
 @Composable
-private fun StartWorkActionRow(
+private fun ColumnScope.mainTabPager(
+    params: MainTabContentParams,
+    pagerState: PagerState,
+) {
+    val saveableStateHolder = rememberSaveableStateHolder()
+    val homeRepositoryStates = params.tabMaps.workspaceOwners.values
+        .distinctBy { it.workspace.server.endpointKey to it.workspace.key }
+        .map { owner ->
+            val state by owner.sessionRepository.state.collectAsState()
+            ScopedHomeRepositoryState(owner.workspace.server, state)
+        }
+    HorizontalPager(
+        state = pagerState,
+        modifier = Modifier.weight(1f),
+        key = { params.tabs.getOrNull(it)?.id ?: it.toString() },
+        beyondViewportPageCount = 0,
+    ) { pageIndex ->
+        params.tabs.getOrNull(pageIndex)?.let { tab ->
+            saveableStateHolder.SaveableStateProvider(tab.id) {
+                mainTabPageContent(params, tab, homeRepositoryStates)
+            }
+        }
+    }
+}
+
+@Composable
+private fun mainTabPageContent(
+    params: MainTabContentParams,
+    tab: TabInstance,
+    homeRepositoryStates: List<ScopedHomeRepositoryState>,
+) {
+    val navController = rememberNavController()
+    val backStackEntry by navController.currentBackStackEntryAsState()
+    LaunchedEffect(backStackEntry) {
+        val ptyId = backStackEntry?.arguments?.getString(Screen.Terminal.ARG_PTY_ID)
+        if (ptyId != null) {
+            params.tabMaps.ptyIds[tab.id] = ptyId
+            params.tabMaps.routes[tab.id] = Screen.Terminal.createRoute(ptyId)
+        }
+    }
+    val isActive = tab.id == params.activeTabId
+    val workspaceOwner = params.tabMaps.workspaceOwners[tab.id]
+    if (tab.isPinnedHome) {
+        mainTabHomeContent(params, homeRepositoryStates)
+    } else if (workspaceOwner != null) {
+        mainTabTabNavHostContent(params, tab, navController, isActive, workspaceOwner)
+    } else {
+        mainTabEmptyContent(params, tab)
+    }
+}
+
+@Composable
+private fun mainTabHomeContent(
+    params: MainTabContentParams,
+    homeRepositoryStates: List<ScopedHomeRepositoryState>,
+) {
+    homeScreen(
+        summary = HomeSummaryBuilder.build(
+            HomeSummaryInput(
+                savedServers = params.savedServers,
+                connectionStates = params.scopedConnectionStates,
+                tabs = params.tabs,
+                repositories = homeRepositoryStates,
+            ),
+        ),
+        actions = HomeActions(
+            onBrowseSessions = { target ->
+                requestScopedAction(params, target, StartWorkAction.BrowseSessions)
+            },
+            onBrowseAllSessions = { params.uiState.showFilesTabPrompt = true },
+            onManageServers = params.onDisconnect,
+            onFocusTab = params.deps.tabManager::focusTab,
+            onResumeSession = { session ->
+                val existing = params.deps.tabManager.findTabBySessionId(session.sessionId.value)
+                if (existing != null) {
+                    params.deps.tabManager.focusTab(existing.id)
+                } else {
+                    params.deps.tabManager.createTab(
+                        startRoute = Screen.Chat.createRoute(session.sessionId.value),
+                        workspaceKey = session.workspaceKey,
+                        serverRef = session.serverRef,
+                        focus = true,
+                    )
+                }
+            },
+            onStartScopedWork = { target ->
+                params.uiState.homeDetailSelection = StartWorkSelection.Selected(target)
+                params.uiState.startWorkContext = startWorkContextForHomeDetail(target)
+                params.uiState.showStartWorkSheet = true
+            },
+            onOpenFiles = { target -> requestScopedAction(params, target, StartWorkAction.Files) },
+            onOpenTerminal = { target ->
+                requestScopedAction(params, target, StartWorkAction.Terminal)
+            },
+            onChooseTarget = { params.uiState.showFilesTabPrompt = true },
+            onWorkspaceDetailChanged = { params.uiState.homeDetailSelection = it },
+        ),
+        modifier = Modifier.fillMaxSize(),
+    )
+}
+
+@Composable
+private fun mainTabTabNavHostContent(
+    params: MainTabContentParams,
+    tab: TabInstance,
+    navController: NavHostController,
+    isActive: Boolean,
+    workspaceOwner: WorkspaceRepositoryOwner,
+) {
+    val serverRef = tab.serverRef ?: return
+    TabNavHost(
+        navController = navController,
+        tabManager = params.deps.tabManager,
+        tabId = tab.id,
+        serverRef = serverRef,
+        onDisconnect = params.onDisconnect,
+        onCloseTab = { params.closeTab(tab.id) },
+        startRoute = tab.startRoute,
+        workspaceOwner = workspaceOwner,
+        onNewFilesTab = {
+            val sr = tab.serverRef
+            val wk = tab.workspaceKey
+            if (sr != null && wk != null) {
+                requestScopedAction(params, StartWorkTarget(sr, wk), StartWorkAction.Files)
+            } else {
+                params.uiState.showStartWorkPicker = true
+            }
+        },
+        onNewTerminalTab = {
+            val sr = tab.serverRef
+            val wk = tab.workspaceKey
+            if (sr != null && wk != null) {
+                requestScopedAction(params, StartWorkTarget(sr, wk), StartWorkAction.Terminal)
+            } else {
+                params.uiState.showStartWorkPicker = true
+            }
+        },
+        isActiveTab = isActive,
+        onConnectionStateChanged = { state -> tab.updateConnectionState(state) },
+        modifier = Modifier.fillMaxSize(),
+    )
+}
+
+private val mainTabEmptyContent: @Composable (MainTabContentParams, TabInstance) -> Unit = { params, tab ->
+    val theme = LocalOpenCodeTheme.current
+    Box(modifier = Modifier.fillMaxSize()) {
+        if (tab.serverRef == null ||
+            params.scopedConnectionStates[tab.serverRef?.endpointKey] !is ConnectionState.Connected
+        ) {
+            Text(
+                text = "Not connected to server",
+                color = theme.textMuted,
+                modifier = Modifier.align(Alignment.Center),
+            )
+        }
+    }
+}
+
+private fun requestScopedAction(
+    params: MainTabContentParams,
+    target: StartWorkTarget,
+    action: StartWorkAction,
+) {
+    val deps = params.deps
+    val uiState = params.uiState
+    if (!params.savedServerExists(target.serverRef.endpointKey)) {
+        uiState.pendingStartWork = target to action
+        uiState.startWorkContext = StartWorkContext(
+            source = StartWorkSource.OtherTab,
+            selection = StartWorkSelection.Selected(target),
+            defaultAction = action,
+        )
+        return
+    }
+    when (action) {
+        StartWorkAction.Files -> deps.tabManager.focusOrCreateFilesTab(
+            serverRef = target.serverRef,
+            workspaceKey = target.workspaceKey,
+        )
+        StartWorkAction.BrowseSessions -> deps.tabManager.createTab(
+            startRoute = Screen.Sessions.route,
+            workspaceKey = target.workspaceKey,
+            serverRef = target.serverRef,
+            focus = true,
+        )
+        StartWorkAction.NewChat, StartWorkAction.Terminal -> {
+            uiState.pendingStartWork = target to action
+            if (params.scopedConnectionStates[target.serverRef.endpointKey] !is ConnectionState.Connected) {
+                params.connectSavedServer(target.serverRef.endpointKey)
+            }
+        }
+        StartWorkAction.ChooseAnotherTarget -> uiState.showStartWorkPicker = true
+    }
+}
+
+private val startWorkSheets: @Composable (MainTabContentParams) -> Unit = { params ->
+    val uiState = params.uiState
+    if (uiState.showStartWorkSheet) {
+        startWorkSheet(params)
+    }
+    if (uiState.showStartWorkPicker || uiState.showFilesTabPrompt) {
+        startWorkPickerSheet(params)
+    }
+}
+
+@OptIn(ExperimentalMaterial3Api::class)
+@Composable
+private fun startWorkSheet(params: MainTabContentParams) {
+    val uiState = params.uiState
+    val theme = LocalOpenCodeTheme.current
+    val context = uiState.startWorkContext
+        ?: if (params.deps.tabManager.activeTab?.isPinnedHome == true) {
+            StartWorkContext(StartWorkSource.HomeWorkspaceDetail, uiState.homeDetailSelection)
+        } else {
+            startWorkContextFor(params.deps.tabManager.activeTab)
+        }
+    val target = context.selectedTarget
+    ModalBottomSheet(
+        onDismissRequest = { uiState.showStartWorkSheet = false },
+        containerColor = theme.background,
+        modifier = Modifier.testTag("start_work_sheet"),
+    ) {
+        startWorkSheetContent(params, target)
+    }
+}
+
+@Composable
+private fun startWorkSheetContent(
+    params: MainTabContentParams,
+    target: StartWorkTarget?,
+) {
+    val theme = LocalOpenCodeTheme.current
+    Column(
+        Modifier.fillMaxWidth().padding(Spacing.md),
+        verticalArrangement = Arrangement.spacedBy(Spacing.sm),
+    ) {
+        Text(stringResource(R.string.start_work_title), style = MaterialTheme.typography.titleLarge)
+        if (target == null) {
+            Text(stringResource(R.string.start_work_choose_context), color = theme.textMuted)
+            LaunchedEffect(Unit) { params.uiState.showStartWorkPicker = true }
+        } else {
+            startWorkSheetTargetCard(params, target)
+            startWorkSheetScopedActions(params, target)
+            Text(stringResource(R.string.start_work_existing_work), color = theme.textMuted)
+            startWorkActionRow(
+                label = stringResource(R.string.start_work_sessions),
+                description = stringResource(R.string.start_work_sessions_description),
+                marker = "S",
+            ) {
+                params.uiState.showStartWorkSheet = false
+                requestScopedAction(params, target, StartWorkAction.BrowseSessions)
+            }
+        }
+        Spacer(Modifier.navigationBarsPadding())
+    }
+}
+
+@Composable
+private fun startWorkSheetTargetCard(
+    params: MainTabContentParams,
+    target: StartWorkTarget,
+) {
+    val theme = LocalOpenCodeTheme.current
+    val tabTitleLabels = rememberTabTitleLabels()
+    Surface(
+        color = theme.backgroundElement,
+        shape = TuiShapes.small,
+        modifier = Modifier.fillMaxWidth().testTag("start_work_context"),
+    ) {
+        Column(Modifier.padding(Spacing.md)) {
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                Text(stringResource(R.string.start_work_in), color = theme.textMuted)
+                Spacer(Modifier.width(Spacing.sm))
+                Text(target.serverRef.displayName, modifier = Modifier.weight(1f))
+                TextButton(onClick = { params.uiState.showStartWorkPicker = true }) {
+                    Text(stringResource(R.string.start_work_change))
+                }
+            }
+            Text(
+                workspaceLabel(target.workspaceKey, tabTitleLabels)
+                    ?: workspaceSubtitle(target.workspaceKey),
+            )
+            Text(
+                connectionStatusText(params.scopedConnectionStates[target.serverRef.endpointKey]),
+                color = theme.textMuted,
+            )
+        }
+    }
+}
+
+private val connectionStatusText: @Composable (ConnectionState?) -> String = { state ->
+    when (state) {
+        is ConnectionState.Connected -> stringResource(R.string.server_status_connected)
+        is ConnectionState.Connecting -> stringResource(R.string.server_status_connecting)
+        is ConnectionState.Error -> stringResource(R.string.server_status_error)
+        else -> stringResource(R.string.server_status_offline)
+    }
+}
+
+@Composable
+private fun startWorkSheetScopedActions(
+    params: MainTabContentParams,
+    target: StartWorkTarget,
+) {
+    val labels = mapOf(
+        StartWorkAction.NewChat to (R.string.start_work_new_chat to "C"),
+        StartWorkAction.Files to (R.string.start_work_files to "F"),
+        StartWorkAction.Terminal to (R.string.start_work_terminal to "T"),
+    )
+    startWorkScopedActionOrder.forEach { action ->
+        val (label, marker) = checkNotNull(labels[action])
+        startWorkActionRow(
+            label = stringResource(label),
+            description = stringResource(R.string.start_work_scoped_action),
+            marker = marker,
+        ) {
+            params.uiState.showStartWorkSheet = false
+            requestScopedAction(params, target, action)
+        }
+    }
+}
+
+@OptIn(ExperimentalMaterial3Api::class)
+@Composable
+private fun startWorkPickerSheet(params: MainTabContentParams) {
+    val uiState = params.uiState
+    val theme = LocalOpenCodeTheme.current
+    val openTargets = params.tabs.mapNotNull { tab ->
+        val serverRef = tab.serverRef ?: return@mapNotNull null
+        val workspaceKey = tab.workspaceKey ?: return@mapNotNull null
+        StartWorkTarget(serverRef, workspaceKey)
+    }.distinct()
+    val knownHomeTargets = params.tabMaps.workspaceOwners.values.flatMap { owner ->
+        val state by owner.sessionRepository.state.collectAsState()
+        state.snapshot.sessions.values.map { session ->
+            StartWorkTarget(owner.workspace.server, session.workspace.key)
+        }
+    }.distinct()
+    ModalBottomSheet(
+        onDismissRequest = {
+            uiState.showStartWorkPicker = false
+            uiState.showFilesTabPrompt = false
+        },
+        containerColor = theme.background,
+        modifier = Modifier.testTag("start_work_context_picker"),
+    ) {
+        startWorkPickerContent(params, openTargets, knownHomeTargets)
+    }
+}
+
+@Composable
+private fun startWorkPickerContent(
+    params: MainTabContentParams,
+    openTargets: List<StartWorkTarget>,
+    knownHomeTargets: List<StartWorkTarget>,
+) {
+    val theme = LocalOpenCodeTheme.current
+    val tabTitleLabels = rememberTabTitleLabels()
+    Column(
+        Modifier.fillMaxWidth().padding(Spacing.md),
+        verticalArrangement = Arrangement.spacedBy(Spacing.sm),
+    ) {
+        Text(
+            stringResource(R.string.start_work_choose_context),
+            style = MaterialTheme.typography.titleLarge,
+        )
+        if (params.savedServerViews.isEmpty()) {
+            Text(stringResource(R.string.start_work_no_servers), color = theme.textMuted)
+        }
+        val groups = buildStartWorkPickerGroups(
+            params.savedServerViews.map { Triple(it.endpointKey, it.displayName, it.badgeLabel) },
+            openTargets,
+            knownHomeTargets,
+        )
+        groups.forEach { group -> startWorkPickerGroup(params, group, tabTitleLabels) }
+        Spacer(Modifier.navigationBarsPadding())
+    }
+}
+
+private val startWorkPickerGroup: @Composable (
+    MainTabContentParams,
+    StartWorkPickerGroup,
+    TabTitleLabels,
+) -> Unit = { params, group, tabTitleLabels ->
+    val collapsed = group.server.endpointKey in params.uiState.collapsedPickerServers
+    Text(
+        "${if (collapsed) "▸" else "▾"}  ${group.badgeLabel}  ${group.server.displayName}",
+        style = MaterialTheme.typography.titleMedium,
+        modifier = Modifier.fillMaxWidth().clickable(role = Role.Button) {
+            params.uiState.collapsedPickerServers = if (collapsed) {
+                params.uiState.collapsedPickerServers - group.server.endpointKey
+            } else {
+                params.uiState.collapsedPickerServers + group.server.endpointKey
+            }
+        }.semantics {
+            contentDescription = "${group.server.displayName}, ${if (collapsed) "collapsed" else "expanded"}"
+        }.testTag("start_work_server_${group.server.endpointKey}"),
+    )
+    if (!collapsed) {
+        group.targets.forEach { pickedTarget ->
+            val title = if (pickedTarget.workspaceKey == WorkspaceKey.Global) {
+                stringResource(R.string.sessions_global)
+            } else {
+                workspaceLabel(pickedTarget.workspaceKey, tabTitleLabels)
+                    ?: workspaceSubtitle(pickedTarget.workspaceKey)
+            }
+            filesWorkspaceOption(
+                title = title,
+                subtitle = pickedTarget.serverRef.displayName,
+                marker = if (pickedTarget.workspaceKey == WorkspaceKey.Global) "◆" else "◇",
+                onClick = {
+                    params.uiState.startWorkContext = StartWorkContext(
+                        StartWorkSource.OtherTab,
+                        StartWorkSelection.Selected(pickedTarget),
+                        params.uiState.startWorkContext?.defaultAction,
+                    )
+                    params.uiState.homeDetailSelection = StartWorkSelection.Selected(pickedTarget)
+                    params.uiState.showStartWorkPicker = false
+                    params.uiState.showFilesTabPrompt = false
+                    params.uiState.showStartWorkSheet = true
+                },
+            )
+        }
+    }
+}
+
+internal val createPtyRequestForWorkspace: (WorkspaceKey) -> CreatePtyRequest = { workspaceKey ->
+    CreatePtyRequest(
+        cwd = (workspaceKey as? WorkspaceKey.Directory)?.value,
+        title = terminalTitle(workspaceKey),
+    )
+}
+
+private val terminalTitle: (WorkspaceKey) -> String? = { workspaceKey ->
+    when (workspaceKey) {
+        is WorkspaceKey.Directory -> workspaceKey.value.trimEnd('/').substringAfterLast('/').ifBlank { "Terminal" }
+        WorkspaceKey.Global -> null
+        is WorkspaceKey.SessionScoped -> workspaceKey.sessionId.value
+    }
+}
+
+private val workspaceSubtitle: (WorkspaceKey) -> String = { workspaceKey ->
+    when (workspaceKey) {
+        is WorkspaceKey.Directory -> workspaceKey.value
+        WorkspaceKey.Global -> "No project context"
+        is WorkspaceKey.SessionScoped -> "Session-scoped workspace"
+    }
+}
+
+@Composable
+private fun startWorkActionRow(
     label: String,
     description: String,
     marker: String,
     onClick: () -> Unit,
 ) {
-    FilesWorkspaceOption(
+    filesWorkspaceOption(
         title = label,
         subtitle = description,
         marker = marker,
         onClick = onClick,
+        modifier = Modifier
+            .testTag("start_work_${marker.lowercase()}")
+            .semantics { contentDescription = "$label. $description" },
     )
 }
 
 @Composable
-private fun FilesWorkspaceOption(
+private fun filesWorkspaceOption(
     title: String,
     subtitle: String,
     marker: String,
@@ -767,7 +1134,6 @@ private fun FilesWorkspaceOption(
     modifier: Modifier = Modifier,
 ) {
     val theme = LocalOpenCodeTheme.current
-
     Surface(
         modifier = modifier
             .fillMaxWidth()

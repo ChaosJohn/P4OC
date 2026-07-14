@@ -6,6 +6,7 @@ import dev.blazelight.p4oc.core.haptic.HapticFeedback
 import dev.blazelight.p4oc.core.network.ConnectionManager
 import dev.blazelight.p4oc.core.network.MdnsDiscoveryManager
 import dev.blazelight.p4oc.core.network.PtyWebSocketClient
+import dev.blazelight.p4oc.core.network.ServerConnectionRegistry
 import dev.blazelight.p4oc.core.notification.NotificationEventObserver
 import dev.blazelight.p4oc.core.notification.NotificationHelper
 import dev.blazelight.p4oc.core.security.CredentialStore
@@ -16,7 +17,6 @@ import dev.blazelight.p4oc.data.server.ActiveServerApiProvider
 import dev.blazelight.p4oc.data.server.StaleWorkspaceClientException
 import dev.blazelight.p4oc.data.session.SessionRepositoryImpl
 import dev.blazelight.p4oc.data.session.SessionRepositoryProvider
-import dev.blazelight.p4oc.domain.server.ServerRef
 import dev.blazelight.p4oc.ui.screens.chat.ChatViewModel
 import dev.blazelight.p4oc.ui.screens.chat.ModelSelectionCoordinator
 import dev.blazelight.p4oc.ui.screens.files.FilesViewModel
@@ -77,24 +77,25 @@ val networkModule = module {
     single { MdnsDiscoveryManager(androidContext()) }
     factory { PtyWebSocketClient(get()) }
     single { ConnectionManager(get(), get(), get()) }
+    single {
+        ServerConnectionRegistry(
+            settingsDataStore = get(),
+            connectionManagerFactory = { ConnectionManager(get(), get(), get()) },
+        )
+    }
     single<ActiveServerApiProvider> {
-        val connectionManager: ConnectionManager = get()
+        val registry: ServerConnectionRegistry = get()
         ActiveServerApiProvider { serverRef, generation ->
-            val activeBaseUrl = connectionManager.currentBaseUrl
-                ?: throw StaleWorkspaceClientException("No active server for workspace ${serverRef.endpointKey} generation=${generation.value}")
-            val activeServerRef = ServerRef.fromEndpoint(activeBaseUrl)
-            if (activeServerRef != serverRef) {
-                throw StaleWorkspaceClientException(
-                    "Workspace server ${serverRef.endpointKey} does not match active server ${activeServerRef.endpointKey}",
-                )
-            }
-            val activeGeneration = connectionManager.currentGeneration
+            val activeGeneration = registry.generation(serverRef)
             if (activeGeneration != generation) {
                 throw StaleWorkspaceClientException(
-                    "Workspace generation ${generation.value} does not match active generation ${activeGeneration?.value ?: "<none>"}",
+                    "Workspace generation ${generation.value} does not match server " +
+                        "${serverRef.endpointKey} generation ${activeGeneration?.value ?: "<none>"}",
                 )
             }
-            connectionManager.requireApi()
+            registry.api(serverRef) ?: throw StaleWorkspaceClientException(
+                "No connected API for workspace server ${serverRef.endpointKey} generation=${generation.value}",
+            )
         }
     }
     single { SessionRepositoryProvider(get(), get(), get()) }

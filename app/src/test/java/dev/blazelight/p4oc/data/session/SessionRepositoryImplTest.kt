@@ -204,6 +204,25 @@ class SessionRepositoryImplTest {
     }
 
     @Test
+    fun `refresh explicitly requests complete session history for every scope`() = runTest {
+        val client = FakeWorkspaceClient().apply {
+            projects = listOf(FakeWorkspaceClient.projectDto("p1", "/repo/p1"))
+            sessionsByDirectory = mapOf(null to emptyList(), "/repo/p1" to emptyList())
+        }
+        val repository = SessionRepositoryImpl(
+            client,
+            nowMs = { testScheduler.currentTime },
+            dispatcher = StandardTestDispatcher(testScheduler),
+        )
+
+        repository.refresh()
+
+        assertEquals(2, client.listSessionsCallsLog.size)
+        assertTrue(client.listSessionsCallsLog.all { it.limit == Int.MAX_VALUE })
+        assertTrue(client.listSessionsCallsLog.all { it.start == null })
+    }
+
+    @Test
     fun `searchSessionsInWorkspace searches only requested directory`() = runTest {
         val client = FakeWorkspaceClient().apply {
             projects = listOf(

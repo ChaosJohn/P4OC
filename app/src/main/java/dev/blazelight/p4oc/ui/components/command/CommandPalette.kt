@@ -124,7 +124,7 @@ fun CommandPalette(
                         arguments = commandArgs,
                         onArgumentsChange = { commandArgs = it },
                         onBack = {
-                            selectedCommand = null;
+                            selectedCommand = null
                             commandArgs = ""
                         },
                         onExecute = {

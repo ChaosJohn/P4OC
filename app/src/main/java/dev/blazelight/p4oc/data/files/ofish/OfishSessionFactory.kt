@@ -40,10 +40,12 @@ internal class OfishSessionFactory(
             synchronized(activeSessionIds) { activeSessionIds -= session.id }
             withContext(NonCancellable) {
                 runCatching { client.deleteSession(session.id) }
-                    .onFailure { error -> AppLog.w(
-                        TAG,
-                        "Failed to delete OFISH session ${session.id}: ${error.message}"
-                    ) }
+                    .onFailure { error ->
+                        AppLog.w(
+                            TAG,
+                            "Failed to delete OFISH session ${session.id}: ${error.message}"
+                        )
+                    }
             }
         }
     }

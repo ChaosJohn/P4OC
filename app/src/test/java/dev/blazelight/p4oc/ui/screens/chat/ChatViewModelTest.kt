@@ -404,7 +404,6 @@ class ChatViewModelTest {
         assertTrue(vm.uiState.value.error?.contains("boom") == true)
     }
 
-
     @Test
     fun sendMessage_sendsBackendFileUrls_forWorkspaceAttachmentsWithSpecialCharacters() = runTest {
         val vm = createViewModel()
@@ -437,7 +436,6 @@ class ChatViewModelTest {
             request.captured.parts.single().url,
         )
     }
-
 
     @Test
     fun abortSession_clearsStreamingFlags_andBusyState() = runTest {

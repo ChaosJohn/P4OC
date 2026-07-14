@@ -13,11 +13,12 @@ import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
-import androidx.compose.ui.graphics.RectangleShape
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.semantics.Role
+import androidx.compose.ui.semantics.contentDescription
+import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.text.style.TextOverflow
 import dev.blazelight.p4oc.R
 import dev.blazelight.p4oc.domain.model.SessionConnectionState
@@ -32,6 +33,18 @@ import dev.blazelight.p4oc.ui.theme.Spacing
  * Tab bar showing all open tabs with indicators and close buttons.
  * Reuses visual language from SessionStatusBar.
  */
+private data class TabIndicatorState(
+    val title: String,
+    val icon: ImageVector,
+    val serverBadge: String?,
+    val accessibilityLabel: String,
+    val connectionState: SessionConnectionState?,
+    val isActive: Boolean,
+    val closeable: Boolean = true,
+    val onClick: () -> Unit,
+    val onClose: () -> Unit,
+)
+
 @Composable
 fun TabBar(
     tabs: List<TabInstance>,
@@ -47,9 +60,9 @@ fun TabBar(
     val theme = LocalOpenCodeTheme.current
     val listState = rememberLazyListState()
 
-    // Auto-scroll to active tab when it changes
-    LaunchedEffect(activeTabId) {
-        val activeIndex = tabs.indexOfFirst { it.id == activeTabId }
+    // Home is pinned outside the scrolling work-tab list.
+    LaunchedEffect(activeTabId, tabs) {
+        val activeIndex = tabs.filterNot { it.isPinnedHome }.indexOfFirst { it.id == activeTabId }
         if (activeIndex >= 0) {
             listState.animateScrollToItem(activeIndex)
         }
@@ -67,29 +80,66 @@ fun TabBar(
                 .padding(horizontal = Spacing.xs),
             verticalAlignment = Alignment.CenterVertically
         ) {
+            tabs.firstOrNull { it.isPinnedHome }?.let { home ->
+                tabIndicator(
+                    state = TabIndicatorState(
+                        title = tabTitles.getValue(home.id),
+                        icon = tabIcons.getValue(home.id),
+                        serverBadge = null,
+                        accessibilityLabel = tabTitles.getValue(home.id),
+                        connectionState = null,
+                        isActive = home.id == activeTabId,
+                        closeable = false,
+                        onClick = { onTabClick(home.id) },
+                        onClose = {},
+                    ),
+                    modifier = Modifier.testTag("tab_home"),
+                )
+            }
+
             LazyRow(
                 state = listState,
                 modifier = Modifier.weight(1f),
                 horizontalArrangement = Arrangement.spacedBy(Spacing.xs),
-                verticalAlignment = Alignment.CenterVertically
+                verticalAlignment = Alignment.CenterVertically,
             ) {
                 items(
-                    items = tabs,
-                    key = { it.id }
+                    items = tabs.filterNot { it.isPinnedHome },
+                    key = { it.id },
                 ) { tab ->
-                    val isActive = tab.id == activeTabId
-                    val title = tabTitles[tab.id] ?: "Tab"
-                    val icon = tabIcons[tab.id] ?: Icons.Default.Tab
-                    val connectionState = tabConnectionStates[tab.id]
+                    val title = tabTitles.getValue(tab.id)
+                    val workspaceIdentity = when (val key = tab.workspaceKey) {
+                        is WorkspaceKey.Directory -> key.value
+                        WorkspaceKey.Global -> stringResource(R.string.tab_workspace_global)
+                        is WorkspaceKey.SessionScoped -> stringResource(
+                            R.string.tab_accessibility_session_context,
+                            key.sessionId.value,
+                        )
+                        null -> null
+                    }
+                    val serverIdentity = tab.serverRef?.displayName
+                    val accessibilityLabel = when {
+                        serverIdentity != null && workspaceIdentity != null -> stringResource(
+                            R.string.tab_accessibility_identity,
+                            serverIdentity,
+                            workspaceIdentity,
+                            title,
+                        )
+                        else -> listOfNotNull(serverIdentity, workspaceIdentity, title).joinToString(", ")
+                    }
 
-                    TabIndicator(
-                        title = title,
-                        icon = icon,
-                        connectionState = connectionState,
-                        isActive = isActive,
-                        closeable = !tab.isPinnedHome,
-                        onClick = { onTabClick(tab.id) },
-                        onClose = { onTabClose(tab.id) }
+                    tabIndicator(
+                        state = TabIndicatorState(
+                            title = title,
+                            icon = tabIcons.getValue(tab.id),
+                            serverBadge = tab.serverRef?.badgeLabel,
+                            accessibilityLabel = accessibilityLabel,
+                            connectionState = tabConnectionStates[tab.id],
+                            isActive = tab.id == activeTabId,
+                            onClick = { onTabClick(tab.id) },
+                            onClose = { onTabClose(tab.id) },
+                        ),
+                        modifier = Modifier.testTag("work_tab_${tab.id}"),
                     )
                 }
             }
@@ -101,7 +151,7 @@ fun TabBar(
             ) {
                 Icon(
                     imageVector = Icons.Default.Add,
-                    contentDescription = "New tab",
+                    contentDescription = stringResource(R.string.cd_new_work),
                     modifier = Modifier.size(Sizing.iconSm),
                     tint = theme.textMuted
                 )
@@ -114,78 +164,77 @@ fun TabBar(
  * Individual tab indicator showing icon, title, state, and close button.
  */
 @Composable
-private fun TabIndicator(
-    title: String,
-    icon: ImageVector,
-    connectionState: SessionConnectionState?,
-    isActive: Boolean,
-    closeable: Boolean = true,
-    onClick: () -> Unit,
-    onClose: () -> Unit,
-    modifier: Modifier = Modifier
+private fun tabIndicator(
+    state: TabIndicatorState,
+    modifier: Modifier = Modifier,
 ) {
     val theme = LocalOpenCodeTheme.current
-    val needsAttention = connectionState == SessionPresence.AWAITING_INPUT
-
+    val needsAttention = state.connectionState == SessionPresence.AWAITING_INPUT
     val backgroundColor = when {
-        needsAttention && !isActive -> theme.warning.copy(alpha = 0.15f)
-        isActive -> theme.backgroundElement
+        needsAttention && !state.isActive -> theme.warning.copy(alpha = 0.15f)
+        state.isActive -> theme.backgroundElement
         else -> theme.background
     }
-
     Surface(
         modifier = modifier
             .height(Sizing.tabHeight)
-            .clickable(onClick = onClick, role = Role.Tab),
-        shape = RectangleShape,
-        color = backgroundColor
+            .semantics { contentDescription = state.accessibilityLabel }
+            .clickable(onClick = state.onClick, role = Role.Tab),
+        color = backgroundColor,
     ) {
-        Row(
-            modifier = Modifier.padding(horizontal = Spacing.xs),
-            verticalAlignment = Alignment.CenterVertically,
-            horizontalArrangement = Arrangement.spacedBy(Spacing.xxs)
-        ) {
-            if (connectionState != null) {
-                SessionStatusDot(
-                    presence = connectionState,
-                    size = if (isActive) Sizing.indicatorDotActive else Sizing.indicatorDot,
-                )
-            } else {
-                // Icon for non-chat tabs
-                Icon(
-                    imageVector = icon,
-                    contentDescription = title,
-                    modifier = Modifier.size(Sizing.iconXs),
-                    tint = if (isActive) theme.text else theme.textMuted
-                )
-            }
+        tabIndicatorRow(state = state, needsAttention = needsAttention)
+    }
+}
 
-            // Truncated title
-            Text(
-                text = title,
-                style = MaterialTheme.typography.labelSmall,
-                color = when {
-                    needsAttention -> theme.warning
-                    isActive -> theme.text
-                    else -> theme.textMuted
-                },
-                maxLines = 1,
-                overflow = TextOverflow.Ellipsis,
-                modifier = Modifier.widthIn(max = Sizing.panelWidthSm)
+@Composable
+private fun tabIndicatorRow(state: TabIndicatorState, needsAttention: Boolean) {
+    val theme = LocalOpenCodeTheme.current
+    Row(
+        modifier = Modifier.padding(horizontal = Spacing.xs),
+        verticalAlignment = Alignment.CenterVertically,
+        horizontalArrangement = Arrangement.spacedBy(Spacing.xxs),
+    ) {
+        tabIndicatorIcon(state)
+        Text(
+            text = state.title,
+            style = MaterialTheme.typography.labelSmall,
+            color = when {
+                needsAttention -> theme.warning
+                state.isActive -> theme.text
+                else -> theme.textMuted
+            },
+            maxLines = 1,
+            overflow = TextOverflow.Ellipsis,
+            modifier = Modifier.widthIn(max = Sizing.panelWidthSm),
+        )
+        if (state.isActive && state.closeable) {
+            Icon(
+                imageVector = Icons.Default.Close,
+                contentDescription = stringResource(R.string.cd_close_tab),
+                modifier = Modifier
+                    .size(Sizing.iconXs)
+                    .clickable(onClick = state.onClose, role = Role.Button),
+                tint = theme.textMuted,
             )
-
-            // Close button only shows on the active closeable tab.
-            if (isActive && closeable) {
-                Icon(
-                    imageVector = Icons.Default.Close,
-                    contentDescription = "Close tab",
-                    modifier = Modifier
-                        .size(Sizing.iconXs)
-                        .clickable(onClick = onClose, role = Role.Button),
-                    tint = theme.textMuted
-                )
-            }
         }
+    }
+}
+
+@Composable
+private fun tabIndicatorIcon(state: TabIndicatorState) {
+    val theme = LocalOpenCodeTheme.current
+    if (state.connectionState != null) {
+        SessionStatusDot(
+            presence = state.connectionState,
+            size = if (state.isActive) Sizing.indicatorDotActive else Sizing.indicatorDot,
+        )
+    } else {
+        Icon(
+            imageVector = state.icon,
+            contentDescription = null,
+            modifier = Modifier.size(Sizing.iconXs),
+            tint = if (state.isActive) theme.text else theme.textMuted,
+        )
     }
 }
 
@@ -236,6 +285,21 @@ fun rememberTabTitleLabels(): TabTitleLabels = TabTitleLabels(
     globalWorkspace = stringResource(R.string.tab_workspace_global),
     sessionWorkspace = stringResource(R.string.tab_workspace_session),
 )
+
+fun getTitleForTab(tab: TabInstance, labels: TabTitleLabels): String {
+    if (tab.isPinnedHome) return labels.home
+    val objectTitle = when {
+        tab.sessionId != null -> tab.sessionTitle?.takeIf { it.isNotBlank() } ?: labels.chat
+        else -> getTitleForRoute(tab.startRoute, labels, workspaceKey = null)
+    }
+    return withWorkspaceSuffix(objectTitle, tab.workspaceKey, labels)
+}
+
+fun getIconForTab(tab: TabInstance): ImageVector = when {
+    tab.isPinnedHome -> Icons.Default.Home
+    tab.sessionId != null -> Icons.AutoMirrored.Filled.Chat
+    else -> getIconForRoute(tab.startRoute)
+}
 
 fun getTitleForRoute(
     route: String?,

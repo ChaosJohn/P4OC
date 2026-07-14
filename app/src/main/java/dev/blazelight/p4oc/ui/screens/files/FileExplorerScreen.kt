@@ -509,7 +509,13 @@ private fun FileCreateMenu(
                     expanded = false
                     onCreateFile()
                 },
-                leadingIcon = { Icon(Icons.AutoMirrored.Filled.NoteAdd, contentDescription = null, tint = theme.textMuted) }
+                leadingIcon = {
+                    Icon(
+                        Icons.AutoMirrored.Filled.NoteAdd,
+                        contentDescription = null,
+                        tint = theme.textMuted
+                    )
+                }
             )
             DropdownMenuItem(
                 text = { Text(stringResource(R.string.files_new_folder), color = theme.text) },

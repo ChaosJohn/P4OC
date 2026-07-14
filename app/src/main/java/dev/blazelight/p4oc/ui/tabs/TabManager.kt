@@ -197,21 +197,25 @@ class TabManager {
         }
     }
 
-    fun saveState(serverRef: ServerRef): PersistedTabState? {
-        val currentTabs = _tabs.value
+    fun saveState(): PersistedTabState? {
+        val persistedTabs = _tabs.value.mapNotNull { tab ->
+            if (tab.isPinnedHome) return@mapNotNull null
+            val serverRef = tab.serverRef ?: return@mapNotNull null
+            val workspaceKey = tab.workspaceKey ?: return@mapNotNull null
+            PersistedTab(
+                id = tab.id,
+                startRoute = persistableStartRoute(tab),
+                sessionId = tab.sessionId,
+                sessionTitle = tab.sessionTitle,
+                workspaceKey = PersistedWorkspaceKey.fromWorkspaceKey(workspaceKey),
+                serverEndpointKey = serverRef.endpointKey,
+            )
+        }
+        if (persistedTabs.isEmpty()) return null
         return PersistedTabState(
-            serverEndpointKey = serverRef.endpointKey,
-            activeTabId = _activeTabId.value,
-            tabs = currentTabs.filterNot { it.isPinnedHome }.map { tab ->
-                PersistedTab(
-                    id = tab.id,
-                    startRoute = persistableStartRoute(tab),
-                    sessionId = tab.sessionId,
-                    sessionTitle = tab.sessionTitle,
-                    workspaceKey = tab.workspaceKey?.let(PersistedWorkspaceKey::fromWorkspaceKey),
-                    serverEndpointKey = tab.serverEndpointKey ?: serverRef.endpointKey,
-                )
-            },
+            serverEndpointKey = persistedTabs.first().serverEndpointKey!!,
+            activeTabId = _activeTabId.value?.takeIf { activeId -> persistedTabs.any { it.id == activeId } },
+            tabs = persistedTabs,
         )
     }
 

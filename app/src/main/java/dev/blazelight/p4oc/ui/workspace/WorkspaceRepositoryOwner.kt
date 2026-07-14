@@ -13,6 +13,7 @@ import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.cancel
+import kotlinx.coroutines.launch
 
 class WorkspaceRepositoryOwner(
     val tabId: String,
@@ -35,6 +36,9 @@ class WorkspaceRepositoryOwner(
 
     init {
         AppLog.i(TAG, logPrefix("init"))
+        uploadScope.launch {
+            sessionRepository.refresh()
+        }
     }
 
     fun touch(destinationRoute: String?) {
