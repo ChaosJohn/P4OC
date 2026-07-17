@@ -7,6 +7,7 @@ import dev.blazelight.p4oc.core.datastore.SavedServer
 import dev.blazelight.p4oc.core.datastore.SettingsDataStore
 import dev.blazelight.p4oc.core.log.AppLog
 import dev.blazelight.p4oc.core.network.ConnectionManager
+import dev.blazelight.p4oc.core.network.ConnectionState
 import dev.blazelight.p4oc.core.network.DiscoveredServer
 import dev.blazelight.p4oc.core.network.DiscoverySeed
 import dev.blazelight.p4oc.core.network.DiscoveryState
@@ -34,18 +35,28 @@ data class ServerInventory(
     val nearby: List<DiscoveredServer>,
 )
 
-internal fun buildServerInventory(state: ServerUiState): ServerInventory {
+internal fun buildServerInventory(
+    state: ServerUiState,
+    connectionStates: Map<String, ConnectionState> = emptyMap(),
+): ServerInventory {
     val discoveredByEndpoint = state.discoveredServers.associateBy {
         ServerUrl.endpointKey(it.url) ?: it.url.trim()
     }
     val saved = state.savedServers.distinctBy(SavedServer::endpointKey).map { server ->
         val discovered = discoveredByEndpoint[server.endpointKey]
-        val status = when {
-            state.connectedEndpointKey == server.endpointKey && state.isConnected -> ServerConnectionStatus.CONNECTED
-            state.connectingEndpointKey == server.endpointKey && state.isConnecting -> ServerConnectionStatus.CONNECTING
-            state.failedEndpointKey == server.endpointKey -> ServerConnectionStatus.ERROR
-            discovered != null -> ServerConnectionStatus.AVAILABLE
-            else -> ServerConnectionStatus.DISCONNECTED
+        val status = when (connectionStates[server.endpointKey]) {
+            ConnectionState.Connected -> ServerConnectionStatus.CONNECTED
+            ConnectionState.Connecting -> ServerConnectionStatus.CONNECTING
+            is ConnectionState.Error -> ServerConnectionStatus.ERROR
+            ConnectionState.Disconnected, null -> when {
+                state.connectedEndpointKey == server.endpointKey && state.isConnected ->
+                    ServerConnectionStatus.CONNECTED
+                state.connectingEndpointKey == server.endpointKey && state.isConnecting ->
+                    ServerConnectionStatus.CONNECTING
+                state.failedEndpointKey == server.endpointKey -> ServerConnectionStatus.ERROR
+                discovered != null -> ServerConnectionStatus.AVAILABLE
+                else -> ServerConnectionStatus.DISCONNECTED
+            }
         }
         ServerInventoryEntry(server, discovered, status)
     }

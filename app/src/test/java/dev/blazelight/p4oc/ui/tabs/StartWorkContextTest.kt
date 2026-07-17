@@ -1,8 +1,15 @@
 package dev.blazelight.p4oc.ui.tabs
 
+import dev.blazelight.p4oc.data.session.RepoState
+import dev.blazelight.p4oc.data.session.Snapshot
+import dev.blazelight.p4oc.domain.model.Session
 import dev.blazelight.p4oc.domain.server.ServerRef
 import dev.blazelight.p4oc.domain.server.WorkspaceKey
+import dev.blazelight.p4oc.domain.session.SessionId
+import dev.blazelight.p4oc.domain.session.WorkspaceSession
+import dev.blazelight.p4oc.domain.workspace.Workspace
 import dev.blazelight.p4oc.ui.navigation.Screen
+import dev.blazelight.p4oc.ui.screens.home.ScopedHomeRepositoryState
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertNull
 import org.junit.Assert.assertSame
@@ -10,6 +17,26 @@ import org.junit.Assert.assertTrue
 import org.junit.Test
 
 class StartWorkContextTest {
+    @Test
+    fun `picker targets derive distinct workspace ownership from repository snapshots`() {
+        val alpha = ServerRef.fromEndpointKey("http://alpha.test", "Alpha")
+        val beta = ServerRef.fromEndpointKey("http://beta.test", "Beta")
+        val repositories = listOf(
+            scopedRepository(alpha, session(alpha, "a1", "/repo"), session(alpha, "a2", "/repo")),
+            scopedRepository(beta, session(beta, "b1", "/repo")),
+        )
+
+        val targets = deriveStartWorkPickerTargets(repositories)
+
+        assertEquals(
+            listOf(
+                StartWorkTarget(alpha, WorkspaceKey.Directory("/repo")),
+                StartWorkTarget(beta, WorkspaceKey.Directory("/repo")),
+            ),
+            targets,
+        )
+    }
+
     private val alpha = ServerRef.fromEndpointKey("http://alpha.example:4096")
     private val beta = ServerRef.fromEndpointKey("http://beta.example:4096")
     private val workspace = WorkspaceKey.Directory("/repo")
@@ -226,10 +253,79 @@ class StartWorkContextTest {
     }
 
     @Test
+    fun `picker filter scopes directories to selected server and pins global`() {
+        val groups = buildStartWorkPickerGroups(
+            servers = listOf(
+                Triple(alpha.endpointKey, "Alpha", "A"),
+                Triple(beta.endpointKey, "Beta", "B"),
+            ),
+            openTargets = listOf(
+                StartWorkTarget(alpha, WorkspaceKey.Directory("/repo/needle-alpha")),
+                StartWorkTarget(beta, WorkspaceKey.Directory("/repo/needle-beta")),
+            ),
+            knownHomeTargets = emptyList(),
+        )
+
+        val filtered = StartWorkPickerState(alpha.endpointKey, "needle").filteredTargets(groups)
+
+        assertEquals(WorkspaceKey.Global, filtered.first().workspaceKey)
+        assertEquals(
+            listOf(WorkspaceKey.Global, WorkspaceKey.Directory("/repo/needle-alpha")),
+            filtered.map { it.workspaceKey },
+        )
+        assertTrue(filtered.all { it.serverRef.endpointKey == alpha.endpointKey })
+    }
+
+    @Test
+    fun `picker filter matches workspace path case insensitively`() {
+        val groups = buildStartWorkPickerGroups(
+            servers = listOf(Triple(alpha.endpointKey, "Alpha", "A")),
+            openTargets = listOf(
+                StartWorkTarget(alpha, WorkspaceKey.Directory("/Projects/Android/P4OC")),
+                StartWorkTarget(alpha, WorkspaceKey.Directory("/Projects/Other")),
+            ),
+            knownHomeTargets = emptyList(),
+        )
+
+        val filtered = StartWorkPickerState(alpha.endpointKey, "p4oc").filteredTargets(groups)
+
+        assertEquals(
+            listOf(WorkspaceKey.Global, WorkspaceKey.Directory("/Projects/Android/P4OC")),
+            filtered.map { it.workspaceKey },
+        )
+    }
+
+    @Test
     fun `scoped actions retain new chat files terminal order`() {
         assertEquals(
             listOf(StartWorkAction.NewChat, StartWorkAction.Files, StartWorkAction.Terminal),
             startWorkScopedActionOrder,
         )
     }
+
+    private fun scopedRepository(
+        serverRef: ServerRef,
+        vararg sessions: WorkspaceSession,
+    ) = ScopedHomeRepositoryState(
+        serverRef,
+        RepoState.Live(Snapshot(sessions = sessions.associateBy { it.id.value })),
+    )
+
+    private fun session(
+        serverRef: ServerRef,
+        id: String,
+        directory: String,
+    ) = WorkspaceSession(
+        id = SessionId(id),
+        workspace = Workspace(serverRef, directory),
+        session = Session(
+            id = id,
+            projectID = "project-$id",
+            directory = directory,
+            title = id,
+            version = "1",
+            createdAt = 1L,
+            updatedAt = 1L,
+        ),
+    )
 }

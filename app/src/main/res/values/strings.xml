@@ -851,6 +851,8 @@
     <string name="start_work_in">In</string>
     <string name="start_work_change">Change</string>
     <string name="start_work_choose_context">Choose a server and workspace</string>
+    <string name="start_work_filter_workspaces">Filter workspaces…</string>
+    <string name="start_work_no_matching_workspaces">No matching workspaces</string>
     <string name="start_work_no_servers">No servers configured. Add a server to start work.</string>
     <string name="start_work_new_chat">New chat</string>
     <string name="start_work_files">Files</string>

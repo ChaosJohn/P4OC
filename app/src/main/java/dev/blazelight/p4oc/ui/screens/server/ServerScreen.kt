@@ -35,6 +35,8 @@ import dev.blazelight.p4oc.R
 import dev.blazelight.p4oc.core.datastore.SavedServer
 import dev.blazelight.p4oc.core.network.DiscoveredServer
 import dev.blazelight.p4oc.core.network.DiscoveryState
+import dev.blazelight.p4oc.core.network.ServerConnectionRegistry
+import dev.blazelight.p4oc.core.network.toServerRef
 import dev.blazelight.p4oc.ui.components.TuiConfirmDialog
 import dev.blazelight.p4oc.ui.components.TuiLoadingIndicator
 import dev.blazelight.p4oc.ui.components.status.serverStatusIndicator
@@ -46,6 +48,7 @@ import org.koin.androidx.compose.koinViewModel
 import org.koin.compose.koinInject
 
 @OptIn(ExperimentalMaterial3Api::class)
+@Suppress("LongMethod")
 @Composable
 fun serverScreen(
     onNavigateToSessions: () -> Unit,
@@ -57,10 +60,15 @@ fun serverScreen(
     val viewModel: ServerViewModel = koinViewModel()
     val theme = LocalOpenCodeTheme.current
     val uiState by viewModel.uiState.collectAsStateWithLifecycle()
+    val serverConnectionRegistry: ServerConnectionRegistry = koinInject()
+    val registryStates = uiState.savedServers.associate { saved ->
+        val state by serverConnectionRegistry.connectionState(saved.toServerRef()).collectAsStateWithLifecycle()
+        saved.endpointKey to state
+    }
     val tabManager: TabManager = koinInject()
     val tabs by tabManager.tabs.collectAsState()
     val openTabsByEndpoint = tabs.filterNot { it.isPinnedHome }.groupBy { it.serverEndpointKey }
-    val inventory = remember(uiState) { buildServerInventory(uiState) }
+    val inventory = remember(uiState, registryStates) { buildServerInventory(uiState, registryStates) }
     var showManualForm by rememberSaveable {
         mutableStateOf(uiState.savedServers.isEmpty() && uiState.discoveredServers.isEmpty())
     }

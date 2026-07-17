@@ -291,7 +291,7 @@ class HomeSummaryBuilderTest {
             ),
         )
 
-        val filtered = summary.filteredHomeResults(alphaRef.endpointKey, "  needle ")
+        val filtered = summary.filteredHomeResults(setOf(alphaRef.endpointKey), "  needle ")
 
         assertEquals(listOf("beta", "new", "old"), filtered.sessions.map { it.sessionId.value })
         assertEquals(
@@ -315,10 +315,64 @@ class HomeSummaryBuilderTest {
         )
         val summary = build(listOf(server), repositories = listOf(repository), workspaceLimit = 2)
 
-        val filtered = summary.filteredHomeResults(null, "   ")
+        val filtered = summary.filteredHomeResults(setOf(serverRef.endpointKey), "   ")
 
         assertEquals(2, filtered.workspaces.size)
         assertEquals(listOf("three", "two", "one"), filtered.sessions.map { it.sessionId.value })
+    }
+
+    @Test
+    fun `blank home search combines only enabled servers newest first`() {
+        val (alpha, alphaRef) = server("http://alpha.example.com", "Alpha")
+        val (beta, betaRef) = server("http://beta.example.com", "Beta")
+        val (gamma, gammaRef) = server("http://gamma.example.com", "Gamma")
+        val summary = build(
+            servers = listOf(alpha, beta, gamma),
+            repositories = listOf(
+                scopedRepository(
+                    alphaRef,
+                    RepoState.Live(snapshot(workspaceSession(alphaRef, "alpha", "/alpha", "Alpha", 20L))),
+                ),
+                scopedRepository(
+                    betaRef,
+                    RepoState.Live(snapshot(workspaceSession(betaRef, "beta", "/beta", "Beta", 40L))),
+                ),
+                scopedRepository(
+                    gammaRef,
+                    RepoState.Live(snapshot(workspaceSession(gammaRef, "gamma", "/gamma", "Gamma", 60L))),
+                ),
+            ),
+        )
+
+        val filtered = summary.filteredHomeResults(
+            enabledEndpointKeys = setOf(alphaRef.endpointKey, gammaRef.endpointKey),
+            query = "",
+        )
+
+        assertEquals(listOf("gamma", "alpha"), filtered.sessions.map { it.sessionId.value })
+        assertEquals(
+            setOf(alphaRef.endpointKey, gammaRef.endpointKey),
+            filtered.workspaces.map { it.serverRef.endpointKey }.toSet(),
+        )
+    }
+
+    @Test
+    fun `blank home search with every server off returns no browse results`() {
+        val (server, serverRef) = server("http://alpha.example.com", "Alpha")
+        val summary = build(
+            servers = listOf(server),
+            repositories = listOf(
+                scopedRepository(
+                    serverRef,
+                    RepoState.Live(snapshot(workspaceSession(serverRef, "alpha", "/alpha", "Alpha", 20L))),
+                ),
+            ),
+        )
+
+        val filtered = summary.filteredHomeResults(emptySet(), "")
+
+        assertEquals(emptyList<SessionPreview>(), filtered.sessions)
+        assertEquals(emptyList<WorkspaceSummary>(), filtered.workspaces)
     }
 
     private fun build(

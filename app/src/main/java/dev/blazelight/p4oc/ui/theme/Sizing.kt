@@ -67,6 +67,7 @@ object Sizing {
     val panelWidthSm: Dp = 80.dp
     val panelWidthMd: Dp = 120.dp
     val panelWidthLg: Dp = 180.dp
+    val serverFilterCardWidth: Dp = 104.dp
 
     // Scrollable embedded content (e.g. inline full-text blocks)
     val embeddedScrollMaxHeight: Dp = 360.dp

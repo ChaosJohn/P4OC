@@ -8,8 +8,11 @@ import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.IntrinsicSize
+import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
+import androidx.compose.foundation.layout.fillMaxHeight
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
@@ -20,8 +23,10 @@ import androidx.compose.foundation.layout.widthIn
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.LazyListScope
 import androidx.compose.foundation.lazy.LazyListState
+import androidx.compose.foundation.lazy.LazyRow
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.lazy.rememberLazyListState
+import androidx.compose.foundation.selection.toggleable
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.text.BasicTextField
 import androidx.compose.material.icons.Icons
@@ -45,6 +50,9 @@ import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.RectangleShape
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.semantics.Role
+import androidx.compose.ui.semantics.contentDescription
+import androidx.compose.ui.semantics.semantics
+import androidx.compose.ui.semantics.stateDescription
 import androidx.compose.ui.text.style.TextOverflow
 import dev.blazelight.p4oc.core.network.ConnectionState
 import dev.blazelight.p4oc.domain.model.SessionPresence
@@ -61,9 +69,6 @@ import java.util.concurrent.TimeUnit
 
 private const val RECENT_DAY_LIMIT = 30
 private const val HOME_WORKSPACE_SHORTCUT_LIMIT = 3
-private const val PERSISTENT_SERVER_CARD_LIMIT = 3
-private const val ALL_SERVERS_CARD_WEIGHT = 0.72f
-
 data class HomeActions(
     val onBrowseSessions: (StartWorkTarget) -> Unit,
     val onBrowseAllSessions: () -> Unit = {},
@@ -80,9 +85,10 @@ data class HomeActions(
 
 private data class HomeOverviewInput(
     val summary: HomeSummaryState,
-    val filterEndpointKey: String?,
+    val enabledEndpointKeys: Set<String>,
     val searchQuery: String,
-    val onFilter: (String?) -> Unit,
+    val onToggleServer: (String) -> Unit,
+    val onEnableAllServers: () -> Unit,
     val onSearchQueryChange: (String) -> Unit,
     val showAllWorkspaces: Boolean,
     val onShowAllWorkspacesChange: (Boolean) -> Unit,
@@ -99,48 +105,19 @@ private data class WorkspaceDetailInput(
     val onBack: () -> Unit,
 )
 
-private data class ServerFilterHeaderState(
-    val active: ServerSummary?,
-    val totalCount: Int,
-    val allSelected: Boolean,
-    val expandable: Boolean,
-    val expanded: Boolean,
-)
-
 @Composable
+@Suppress("LongMethod")
 fun homeScreen(
     summary: HomeSummaryState,
     actions: HomeActions,
     modifier: Modifier = Modifier,
 ) {
     var selectedWorkspace by remember { mutableStateOf<WorkspaceSummary?>(null) }
-    var filterEndpointKey by remember { mutableStateOf<String?>(null) }
+    var disabledEndpointKeys by rememberSaveable { mutableStateOf(emptyList<String>()) }
     var searchQuery by rememberSaveable { mutableStateOf("") }
     var showAllWorkspaces by rememberSaveable { mutableStateOf(false) }
     val selected = selectedWorkspace
-    if (selected == null) {
-        homeOverview(
-            input = HomeOverviewInput(
-                summary = summary,
-                filterEndpointKey = filterEndpointKey,
-                searchQuery = searchQuery,
-                onFilter = { filterEndpointKey = it },
-                onSearchQueryChange = { searchQuery = it },
-                showAllWorkspaces = showAllWorkspaces,
-                onShowAllWorkspacesChange = { showAllWorkspaces = it },
-                onWorkspaceClick = {
-                    selectedWorkspace = it
-                    actions.onWorkspaceSelected(it)
-                    actions.onWorkspaceDetailChanged(
-                        StartWorkSelection.Selected(StartWorkTarget(it.serverRef, it.workspaceKey)),
-                    )
-                },
-                actions = actions,
-                listState = rememberLazyListState(),
-            ),
-            modifier = modifier,
-        )
-    } else {
+    if (selected != null) {
         workspaceDetail(
             input = WorkspaceDetailInput(
                 workspace = selected,
@@ -160,14 +137,79 @@ fun homeScreen(
             ),
             modifier = modifier,
         )
+    } else if (showAllWorkspaces) {
+        allWorkspacesScreen(
+            workspaces = summary.filteredHomeResults(
+                enabledEndpointKeys = summary.enabledEndpointKeys(disabledEndpointKeys),
+                query = "",
+            ).workspaces,
+            onWorkspaceClick = {
+                selectedWorkspace = it
+                actions.onWorkspaceSelected(it)
+            },
+            onBack = { showAllWorkspaces = false },
+            modifier = modifier,
+        )
+    } else {
+        homeOverview(
+            input = HomeOverviewInput(
+                summary = summary,
+                enabledEndpointKeys = summary.enabledEndpointKeys(disabledEndpointKeys),
+                searchQuery = searchQuery,
+                onToggleServer = { endpointKey ->
+                    disabledEndpointKeys = disabledEndpointKeys.toggleMembership(endpointKey)
+                },
+                onEnableAllServers = { disabledEndpointKeys = emptyList() },
+                onSearchQueryChange = { searchQuery = it },
+                showAllWorkspaces = showAllWorkspaces,
+                onShowAllWorkspacesChange = { showAllWorkspaces = it },
+                onWorkspaceClick = {
+                    selectedWorkspace = it
+                    actions.onWorkspaceSelected(it)
+                    actions.onWorkspaceDetailChanged(
+                        StartWorkSelection.Selected(StartWorkTarget(it.serverRef, it.workspaceKey)),
+                    )
+                },
+                actions = actions,
+                listState = rememberLazyListState(),
+            ),
+            modifier = modifier,
+        )
+    }
+}
+
+@Composable
+private fun allWorkspacesScreen(
+    workspaces: List<WorkspaceSummary>,
+    onWorkspaceClick: (WorkspaceSummary) -> Unit,
+    onBack: () -> Unit,
+    modifier: Modifier,
+) {
+    LazyColumn(
+        modifier = modifier.fillMaxSize().testTag("home_all_workspaces"),
+        contentPadding = androidx.compose.foundation.layout.PaddingValues(Spacing.md),
+        verticalArrangement = Arrangement.spacedBy(Spacing.xs),
+    ) {
+        item { textAction("‹ Home", "Back to recent workspaces", onBack) }
+        item { sectionLabel("All workspaces · ${workspaces.size}") }
+        item {
+            Column(
+                Modifier.fillMaxWidth(),
+                verticalArrangement = Arrangement.spacedBy(Spacing.xxs),
+            ) {
+                workspaces.forEach { workspace ->
+                    workspaceShortcut(workspace, onWorkspaceClick, Modifier.fillMaxWidth())
+                }
+            }
+        }
     }
 }
 
 @Composable
 private fun homeOverview(input: HomeOverviewInput, modifier: Modifier) {
     val summary = input.summary
-    val results by remember(summary, input.filterEndpointKey, input.searchQuery) {
-        derivedStateOf { summary.filteredHomeResults(input.filterEndpointKey, input.searchQuery) }
+    val results by remember(summary, input.enabledEndpointKeys, input.searchQuery) {
+        derivedStateOf { summary.filteredHomeResults(input.enabledEndpointKeys, input.searchQuery) }
     }
     LazyColumn(
         state = input.listState,
@@ -186,11 +228,18 @@ private fun LazyListScope.homeOverviewContent(
     val summary = input.summary
     item { homeHeader(summary, input.actions.onManageServers) }
     item { homeSearchField(input.searchQuery, input.onSearchQueryChange) }
-    item { serverFilters(summary.servers, input.filterEndpointKey, input.onFilter) }
-    if (input.searchQuery.isNotBlank() && input.filterEndpointKey != null) {
+    item {
+        serverFilters(
+            servers = summary.servers,
+            enabledEndpointKeys = input.enabledEndpointKeys,
+            searchActive = input.searchQuery.isNotBlank(),
+            onToggle = input.onToggleServer,
+        )
+    }
+    if (input.searchQuery.isNotBlank() && input.enabledEndpointKeys.size < summary.servers.size) {
         item {
             Text(
-                "Search results include every server · clear search to return to the selected server",
+                globalSearchOverrideLabel(input.enabledEndpointKeys.size),
                 style = MaterialTheme.typography.labelSmall,
                 color = LocalOpenCodeTheme.current.textMuted,
                 maxLines = 2,
@@ -205,9 +254,30 @@ private fun LazyListScope.homeOverviewContent(
     if (summary.partialFailures.isNotEmpty()) {
         item { infoCard("Some work is unavailable", summary.partialFailures.joinToString(" · ")) }
     }
-    homeWorkspaces(input, results.workspaces)
-    HomeSessions(input, results.sessions)
+    if (input.searchQuery.isBlank() && input.enabledEndpointKeys.isEmpty()) {
+        item {
+            infoCard(
+                "No servers enabled",
+                "Turn on one or more servers above to browse existing work.",
+            )
+        }
+        item {
+            textAction(
+                label = "Select all servers",
+                description = "Include every saved server in Home browsing",
+                onClick = input.onEnableAllServers,
+                modifier = Modifier.testTag("home_enable_all_servers"),
+            )
+        }
+    } else {
+        homeWorkspaces(input, results.workspaces)
+        HomeSessions(input, results.sessions)
+    }
 }
+
+private fun globalSearchOverrideLabel(enabledCount: Int): String =
+    "Global search includes every server · clear search to resume " +
+        "$enabledCount enabled server${if (enabledCount == 1) "" else "s"}"
 
 @Composable
 private fun homeSearchField(query: String, onQueryChange: (String) -> Unit) {
@@ -228,22 +298,37 @@ private fun homeSearchField(query: String, onQueryChange: (String) -> Unit) {
                 Modifier.fillMaxSize().padding(horizontal = Spacing.sm),
                 verticalAlignment = Alignment.CenterVertically,
             ) {
-                if (query.isEmpty()) {
-                    Text(
-                        "/ Search every server, session, or workspace…",
-                        style = MaterialTheme.typography.labelMedium,
-                        color = theme.textMuted,
-                        maxLines = 1,
-                    )
+                Text(
+                    "/",
+                    style = MaterialTheme.typography.labelMedium,
+                    color = theme.textMuted,
+                )
+                Spacer(Modifier.width(Spacing.xs))
+                Box(Modifier.weight(1f), contentAlignment = Alignment.CenterStart) {
+                    field()
+                    if (query.isEmpty()) {
+                        Text(
+                            "Search every server, session, or workspace…",
+                            style = MaterialTheme.typography.labelMedium,
+                            color = theme.textMuted,
+                            maxLines = 1,
+                        )
+                    }
                 }
-                field()
             }
         },
     )
 }
 
 private val HomeSessions: LazyListScope.(HomeOverviewInput, List<SessionPreview>) -> Unit = { input, sessions ->
-    item { sectionLabel("Newest sessions · all ${sessions.size}") }
+    item {
+        val scope = if (input.searchQuery.isNotBlank()) {
+            "all servers"
+        } else {
+            "${input.enabledEndpointKeys.size} server${if (input.enabledEndpointKeys.size == 1) "" else "s"}"
+        }
+        sectionLabel("Newest sessions · $scope · ${sessions.size}")
+    }
     if (sessions.isEmpty()) {
         item {
             infoCard(
@@ -300,8 +385,15 @@ private fun LazyListScope.homeWorkspaces(input: HomeOverviewInput, filteredWorks
             )
         }
     } else if (input.showAllWorkspaces || input.searchQuery.isNotBlank()) {
-        items(filteredWorkspaces, key = { "${it.serverRef.endpointKey}:${it.workspaceKey}" }) { workspace ->
-            workspaceShortcut(workspace, input.onWorkspaceClick, Modifier.fillMaxWidth())
+        item {
+            Column(
+                Modifier.fillMaxWidth(),
+                verticalArrangement = Arrangement.spacedBy(Spacing.xxs),
+            ) {
+                filteredWorkspaces.forEach { workspace ->
+                    workspaceShortcut(workspace, input.onWorkspaceClick, Modifier.fillMaxWidth())
+                }
+            }
         }
         if (input.searchQuery.isBlank()) {
             item {
@@ -371,110 +463,43 @@ private fun homeHeader(summary: HomeSummaryState, onServers: () -> Unit) {
 @Composable
 private fun serverFilters(
     servers: List<ServerSummary>,
-    selected: String?,
-    onSelect: (String?) -> Unit,
+    enabledEndpointKeys: Set<String>,
+    searchActive: Boolean,
+    onToggle: (String) -> Unit,
 ) {
-    var expanded by rememberSaveable { mutableStateOf(false) }
-    val active = servers.firstOrNull { it.serverRef.endpointKey == selected }
-    val useCompactSelector = servers.size > PERSISTENT_SERVER_CARD_LIMIT
     Column(
         Modifier.fillMaxWidth().testTag("home_server_filters"),
         verticalArrangement = Arrangement.spacedBy(Spacing.xxs),
     ) {
-        if (useCompactSelector) {
-            serverFilterHeader(
-                ServerFilterHeaderState(
-                    active = active,
-                    totalCount = servers.sumOf { it.sessionCount },
-                    allSelected = selected == null,
-                    expandable = true,
-                    expanded = expanded,
-                ),
-            ) { expanded = !expanded }
-            if (expanded) {
-                expandedServerSelector(servers, selected) { endpointKey ->
-                    onSelect(endpointKey)
-                    expanded = false
-                }
-            }
-        } else {
-            Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(Spacing.xxs)) {
-                allServersRailCard(
-                    count = servers.sumOf { it.sessionCount },
-                    selected = selected == null,
-                    modifier = Modifier.weight(ALL_SERVERS_CARD_WEIGHT),
-                ) { onSelect(null) }
-                servers.forEach { server ->
-                    serverRailCard(
-                        server = server,
-                        selected = selected == server.serverRef.endpointKey,
-                        modifier = Modifier.weight(1f),
-                    ) { onSelect(server.serverRef.endpointKey) }
-                }
-            }
-        }
-    }
-}
-
-@Composable
-private fun allServersRailCard(count: Int, selected: Boolean, modifier: Modifier, onClick: () -> Unit) {
-    val theme = LocalOpenCodeTheme.current
-    Surface(
-        onClick = onClick,
-        shape = RectangleShape,
-        color = if (selected) theme.backgroundElement else theme.backgroundPanel,
-        modifier = modifier.then(
-            if (selected) Modifier.border(Sizing.strokeMd, theme.accent, RectangleShape) else Modifier,
-        ),
-    ) {
-        Column(Modifier.fillMaxWidth().padding(horizontal = Spacing.sm, vertical = Spacing.xs)) {
+        Row(
+            Modifier.fillMaxWidth(),
+            verticalAlignment = Alignment.CenterVertically,
+            horizontalArrangement = Arrangement.SpaceBetween,
+        ) {
             Text(
-                "All",
-                style = MaterialTheme.typography.labelMedium,
-                color = theme.text,
-                maxLines = 1,
-            )
-            Text(
-                "$count sessions",
+                "Servers · ${enabledEndpointKeys.size}/${servers.size} on",
                 style = MaterialTheme.typography.labelSmall,
-                color = theme.textMuted,
-                maxLines = 1,
+                color = LocalOpenCodeTheme.current.textMuted,
             )
-        }
-    }
-}
-
-@Composable
-private fun serverFilterHeader(
-    state: ServerFilterHeaderState,
-    onClick: () -> Unit,
-) {
-    val theme = LocalOpenCodeTheme.current
-    Surface(
-        onClick = onClick,
-        shape = RectangleShape,
-        color = if (state.allSelected || state.active != null) theme.backgroundElement else theme.backgroundPanel,
-    ) {
-        Row(Modifier.fillMaxWidth().padding(horizontal = Spacing.sm, vertical = Spacing.xs)) {
-            Text(
-                state.active?.displayName ?: "All servers",
-                style = MaterialTheme.typography.labelMedium,
-                color = theme.text,
-                maxLines = 1,
-                overflow = TextOverflow.Ellipsis,
-                modifier = Modifier.weight(1f),
-            )
-            Text(
-                "${state.active?.sessionCount ?: state.totalCount}",
-                style = MaterialTheme.typography.labelSmall,
-                color = theme.textMuted,
-            )
-            if (state.expandable) {
+            if (servers.size > 1) {
                 Text(
-                    if (state.expanded) "▴" else "▾",
+                    "Swipe ›",
                     style = MaterialTheme.typography.labelSmall,
-                    color = theme.accent,
-                    modifier = Modifier.padding(start = Spacing.xs),
+                    color = LocalOpenCodeTheme.current.primary,
+                )
+            }
+        }
+        LazyRow(
+            horizontalArrangement = Arrangement.spacedBy(Spacing.xs),
+            contentPadding = PaddingValues(end = Spacing.xl),
+            modifier = Modifier.fillMaxWidth(),
+        ) {
+            items(servers, key = { it.serverRef.endpointKey }) { server ->
+                serverToggleCard(
+                    server = server,
+                    enabled = server.serverRef.endpointKey in enabledEndpointKeys,
+                    searchActive = searchActive,
+                    onToggle = { onToggle(server.serverRef.endpointKey) },
                 )
             }
         }
@@ -482,124 +507,87 @@ private fun serverFilterHeader(
 }
 
 @Composable
-private fun expandedServerSelector(
-    servers: List<ServerSummary>,
-    selected: String?,
-    onSelect: (String?) -> Unit,
+private fun serverToggleCard(
+    server: ServerSummary,
+    enabled: Boolean,
+    searchActive: Boolean,
+    onToggle: () -> Unit,
 ) {
-    serverSelectorItem("All servers", servers.sumOf { it.sessionCount }, selected == null) {
-        onSelect(null)
+    val theme = LocalOpenCodeTheme.current
+    val status = server.connectionState.toServerStatus()
+    val accessibilityDescription = remember(server, status) {
+        "${server.displayName}, ${status.visualLabel}, ${server.sessionCount} sessions, " +
+            serverEndpointDetail(server)
     }
-    servers.forEach { server ->
-        serverSelectorItem(
-            label = server.displayName,
-            count = server.sessionCount,
-            selected = selected == server.serverRef.endpointKey,
-            status = server.connectionState.toServerStatus(),
-        ) { onSelect(server.serverRef.endpointKey) }
+    Surface(
+        shape = RectangleShape,
+        color = theme.backgroundPanel,
+        modifier = Modifier
+            .width(Sizing.serverFilterCardWidth)
+            .then(
+                if (enabled) Modifier.border(Sizing.strokeMd, theme.primary, RectangleShape) else Modifier,
+            )
+            .toggleable(
+                value = enabled,
+                role = Role.Checkbox,
+                onValueChange = { if (!searchActive) onToggle() },
+            )
+            .semantics {
+                stateDescription = if (searchActive) {
+                    "${if (enabled) "On" else "Off"}; saved filter paused during global search"
+                } else if (enabled) {
+                    "On"
+                } else {
+                    "Off"
+                }
+                contentDescription = accessibilityDescription
+            }
+            .testTag("home_server_toggle_${server.serverRef.endpointKey}"),
+    ) {
+        serverToggleCardContent(server, status, enabled, theme)
     }
 }
 
 @Composable
-private fun serverSelectorItem(
-    label: String,
-    count: Int,
-    selected: Boolean,
-    status: ServerConnectionStatus? = null,
-    onClick: () -> Unit,
+private fun serverToggleCardContent(
+    server: ServerSummary,
+    status: ServerConnectionStatus,
+    enabled: Boolean,
+    theme: OpenCodeTheme,
 ) {
-    val theme = LocalOpenCodeTheme.current
-    Surface(
-        onClick = onClick,
-        shape = RectangleShape,
-        color = if (selected) theme.backgroundElement else theme.backgroundPanel,
-        modifier = if (selected) Modifier.border(Sizing.strokeMd, theme.accent, RectangleShape) else Modifier,
-    ) {
-        Row(
-            Modifier.fillMaxWidth().padding(horizontal = Spacing.sm, vertical = Spacing.xs),
-            verticalAlignment = Alignment.CenterVertically,
-            horizontalArrangement = Arrangement.spacedBy(Spacing.xs),
-        ) {
-            if (status != null) {
-                Box(Modifier.size(Sizing.indicatorDot).background(status.dotColor(theme), CircleShape))
-            }
+    Column(Modifier.padding(horizontal = Spacing.sm, vertical = Spacing.xs)) {
+        Row(verticalAlignment = Alignment.CenterVertically) {
+            Box(
+                Modifier.size(Sizing.indicatorDot)
+                    .background(status.dotColor(theme), CircleShape)
+                    .semantics { contentDescription = status.contentDescription },
+            )
+            Spacer(Modifier.width(Spacing.xs))
             Text(
-                label,
+                server.displayName,
                 style = MaterialTheme.typography.labelMedium,
-                color = theme.text,
+                color = if (enabled) theme.text else theme.textMuted,
                 maxLines = 1,
                 overflow = TextOverflow.Ellipsis,
                 modifier = Modifier.weight(1f),
             )
-            Text("$count", style = MaterialTheme.typography.labelSmall, color = theme.textMuted)
-        }
-    }
-}
-
-@Composable
-private fun serverRailCard(
-    server: ServerSummary,
-    selected: Boolean,
-    modifier: Modifier,
-    onClick: () -> Unit,
-) {
-    val theme = LocalOpenCodeTheme.current
-    Surface(
-        onClick = onClick,
-        shape = RectangleShape,
-        color = if (selected) theme.backgroundElement else theme.backgroundPanel,
-        modifier = modifier.then(
-            if (selected) Modifier.border(Sizing.strokeMd, theme.accent, RectangleShape) else Modifier,
-        ),
-    ) {
-        Row(
-            Modifier.fillMaxWidth().padding(horizontal = Spacing.sm, vertical = Spacing.xs),
-            verticalAlignment = Alignment.CenterVertically,
-        ) {
-            Box(
-                Modifier
-                    .width(Sizing.strokeThick)
-                    .height(Sizing.buttonHeightMd)
-                    .background(ProjectColors.colorForProject("server:${server.serverRef.endpointKey}")),
-            )
-            Spacer(Modifier.width(Spacing.xs))
-            serverRailCardContent(server, theme, Modifier.weight(1f))
-        }
-    }
-}
-
-@Composable
-private fun serverRailCardContent(server: ServerSummary, theme: OpenCodeTheme, modifier: Modifier = Modifier) {
-    Column(modifier) {
-        Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(Spacing.xs)) {
-            Box(
-                Modifier.size(Sizing.indicatorDot)
-                    .background(server.connectionState.toServerStatus().dotColor(theme), CircleShape),
-            )
             Text(
-                server.displayName,
-                style = MaterialTheme.typography.labelMedium,
-                color = theme.text,
-                maxLines = 1,
-                overflow = TextOverflow.Ellipsis,
+                if (enabled) "ON" else "OFF",
+                style = MaterialTheme.typography.labelSmall,
+                color = if (enabled) theme.primary else theme.textMuted,
             )
         }
-        val endpointDetail = serverEndpointDetail(server)
-        if (endpointDetail != server.displayName) {
+        Row {
             Text(
-                endpointDetail,
+                serverEndpointDetail(server),
                 style = MaterialTheme.typography.labelSmall,
                 color = theme.textMuted,
                 maxLines = 1,
                 overflow = TextOverflow.Ellipsis,
+                modifier = Modifier.weight(1f),
             )
+            Text("${server.sessionCount}", style = MaterialTheme.typography.labelSmall, color = theme.textMuted)
         }
-        Text(
-            "${server.sessionCount} sessions",
-            style = MaterialTheme.typography.labelSmall,
-            color = theme.textMuted,
-            maxLines = 1,
-        )
     }
 }
 
@@ -684,55 +672,70 @@ private fun sessionRow(
         modifier = Modifier.fillMaxWidth(),
     ) {
         Row(
-            Modifier.padding(horizontal = Spacing.sm, vertical = Spacing.xs),
-            horizontalArrangement = Arrangement.spacedBy(Spacing.sm),
+            Modifier.fillMaxWidth().height(IntrinsicSize.Min),
             verticalAlignment = Alignment.CenterVertically,
         ) {
-            Column(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(Spacing.xxs)) {
-                Text(
-                    session.title,
-                    style = MaterialTheme.typography.bodyMedium,
-                    color = theme.text,
-                    maxLines = 1,
-                    overflow = TextOverflow.Ellipsis,
-                )
-                Row(
-                    horizontalArrangement = Arrangement.spacedBy(Spacing.sm),
-                    verticalAlignment = Alignment.CenterVertically,
-                ) {
+            Box(
+                Modifier
+                    .width(Sizing.strokeThick)
+                    .fillMaxHeight()
+                    .background(ProjectColors.colorForProject("server:${session.serverRef.endpointKey}")),
+            )
+            Row(
+                Modifier.weight(1f).padding(horizontal = Spacing.sm, vertical = Spacing.xs),
+                horizontalArrangement = Arrangement.spacedBy(Spacing.sm),
+                verticalAlignment = Alignment.CenterVertically,
+            ) {
+                Column(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(Spacing.xxs)) {
                     Text(
-                        "● ${session.status.label()}",
-                        style = MaterialTheme.typography.labelSmall,
-                        color = session.status.statusColor(theme),
+                        session.title,
+                        style = MaterialTheme.typography.bodyMedium,
+                        color = theme.text,
+                        maxLines = 1,
+                        overflow = TextOverflow.Ellipsis,
                     )
-                    Text(
-                        recency(session.updatedAt),
-                        style = MaterialTheme.typography.labelSmall,
-                        color = theme.textMuted,
-                    )
-                    if (session.childCount > 0) {
+                    Row(
+                        horizontalArrangement = Arrangement.spacedBy(Spacing.sm),
+                        verticalAlignment = Alignment.CenterVertically,
+                    ) {
                         Text(
-                            "[${session.childCount} sub]",
+                            "● ${session.status.label()}",
                             style = MaterialTheme.typography.labelSmall,
-                            color = theme.info,
+                            color = session.status.statusColor(theme),
                         )
-                    }
-                    if (session.additions > 0) {
                         Text(
-                            "+${session.additions}",
+                            recency(session.updatedAt),
                             style = MaterialTheme.typography.labelSmall,
-                            color = theme.success,
+                            color = theme.textMuted,
                         )
-                    }
-                    if (session.deletions > 0) {
-                        Text("-${session.deletions}", style = MaterialTheme.typography.labelSmall, color = theme.error)
-                    }
-                    if (session.isShared) {
-                        Text("◈ Shared", style = MaterialTheme.typography.labelSmall, color = theme.info)
+                        if (session.childCount > 0) {
+                            Text(
+                                "[${session.childCount} sub]",
+                                style = MaterialTheme.typography.labelSmall,
+                                color = theme.info,
+                            )
+                        }
+                        if (session.additions > 0) {
+                            Text(
+                                "+${session.additions}",
+                                style = MaterialTheme.typography.labelSmall,
+                                color = theme.success,
+                            )
+                        }
+                        if (session.deletions > 0) {
+                            Text(
+                                "-${session.deletions}",
+                                style = MaterialTheme.typography.labelSmall,
+                                color = theme.error,
+                            )
+                        }
+                        if (session.isShared) {
+                            Text("◈ Shared", style = MaterialTheme.typography.labelSmall, color = theme.info)
+                        }
                     }
                 }
+                SessionWorkspaceLabel(session, onWorkspace)
             }
-            SessionWorkspaceLabel(session, onWorkspace)
         }
     }
 }
@@ -777,6 +780,24 @@ private fun ServerConnectionStatus.dotColor(
     ServerConnectionStatus.DISCONNECTED -> theme.textMuted
     ServerConnectionStatus.ERROR -> theme.error
 }
+
+private val ServerConnectionStatus.contentDescription: String
+    get() = when (this) {
+        ServerConnectionStatus.CONNECTED -> "Connected server"
+        ServerConnectionStatus.CONNECTING -> "Server connecting"
+        ServerConnectionStatus.AVAILABLE -> "Server available"
+        ServerConnectionStatus.DISCONNECTED -> "Server disconnected"
+        ServerConnectionStatus.ERROR -> "Server connection error"
+    }
+
+private val ServerConnectionStatus.visualLabel: String
+    get() = when (this) {
+        ServerConnectionStatus.CONNECTED -> "online"
+        ServerConnectionStatus.CONNECTING -> "connecting"
+        ServerConnectionStatus.AVAILABLE -> "available"
+        ServerConnectionStatus.DISCONNECTED -> "offline"
+        ServerConnectionStatus.ERROR -> "error"
+    }
 
 @Composable
 private fun workspaceDetail(
@@ -924,23 +945,34 @@ internal data class FilteredHomeResults(
     val sessions: List<SessionPreview>,
 )
 
-/** Applies browse scope when idle; a query searches every saved server. */
-internal fun HomeSummaryState.filteredHomeResults(endpointKey: String?, query: String): FilteredHomeResults {
+/** Applies enabled server filters when idle; a query searches every saved server. */
+internal fun HomeSummaryState.filteredHomeResults(
+    enabledEndpointKeys: Set<String>,
+    query: String,
+): FilteredHomeResults {
     val needle = query.trim()
-    val browseEndpointKey = endpointKey.takeIf { needle.isEmpty() }
+    val applyBrowseFilter = needle.isEmpty()
     val matchingWorkspaces = ArrayList<WorkspaceSummary>(workspaces.size)
     for (workspace in workspaces) {
-        if (browseEndpointKey != null && workspace.serverRef.endpointKey != browseEndpointKey) continue
+        if (applyBrowseFilter && workspace.serverRef.endpointKey !in enabledEndpointKeys) continue
         if (needle.isEmpty() || workspace.matchesSearch(needle)) matchingWorkspaces += workspace
     }
     val matchingSessions = ArrayList<SessionPreview>(sessions.size)
     for (session in sessions) {
-        if (browseEndpointKey != null && session.serverRef.endpointKey != browseEndpointKey) continue
+        if (applyBrowseFilter && session.serverRef.endpointKey !in enabledEndpointKeys) continue
         if (needle.isEmpty() || session.matchesSearch(needle)) matchingSessions += session
     }
     matchingSessions.sortByDescending { it.updatedAt }
     return FilteredHomeResults(matchingWorkspaces, matchingSessions)
 }
+
+private fun HomeSummaryState.enabledEndpointKeys(disabledEndpointKeys: Collection<String>): Set<String> =
+    servers.mapTo(LinkedHashSet(servers.size)) { it.serverRef.endpointKey }.apply {
+        removeAll(disabledEndpointKeys)
+    }
+
+private fun List<String>.toggleMembership(value: String): List<String> =
+    if (value in this) this - value else this + value
 
 private fun WorkspaceSummary.matchesSearch(query: String): Boolean =
     serverRef.displayName.contains(query, ignoreCase = true) ||

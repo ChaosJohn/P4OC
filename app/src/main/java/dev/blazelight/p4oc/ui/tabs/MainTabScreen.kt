@@ -2,6 +2,7 @@
 
 package dev.blazelight.p4oc.ui.tabs
 
+import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
@@ -18,9 +19,15 @@ import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.statusBars
 import androidx.compose.foundation.layout.statusBarsPadding
 import androidx.compose.foundation.layout.width
+import androidx.compose.foundation.lazy.LazyColumn
+import androidx.compose.foundation.lazy.LazyRow
+import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.pager.HorizontalPager
 import androidx.compose.foundation.pager.PagerState
 import androidx.compose.foundation.pager.rememberPagerState
+import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.text.BasicTextField
+import androidx.compose.foundation.verticalScroll
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.ModalBottomSheet
@@ -31,6 +38,7 @@ import androidx.compose.material3.SnackbarHostState
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
+import androidx.compose.material3.rememberModalBottomSheetState
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
@@ -45,11 +53,14 @@ import androidx.compose.runtime.setValue
 import androidx.compose.runtime.snapshots.SnapshotStateMap
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.graphics.RectangleShape
+import androidx.compose.ui.graphics.SolidColor
 import androidx.compose.ui.platform.LocalLifecycleOwner
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.semantics.Role
 import androidx.compose.ui.semantics.contentDescription
+import androidx.compose.ui.semantics.selected
 import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.lifecycle.Lifecycle
@@ -85,6 +96,7 @@ import dev.blazelight.p4oc.ui.screens.home.HomeSummaryInput
 import dev.blazelight.p4oc.ui.screens.home.ScopedHomeRepositoryState
 import dev.blazelight.p4oc.ui.screens.home.homeScreen
 import dev.blazelight.p4oc.ui.theme.LocalOpenCodeTheme
+import dev.blazelight.p4oc.ui.theme.Sizing
 import dev.blazelight.p4oc.ui.theme.Spacing
 import dev.blazelight.p4oc.ui.theme.TuiShapes
 import dev.blazelight.p4oc.ui.workspace.WorkspaceRepositoryOwner
@@ -117,7 +129,133 @@ private class StartWorkUiState {
     var showStartWorkPicker: Boolean by mutableStateOf(false)
     var homeDetailSelection: StartWorkSelection by mutableStateOf(StartWorkSelection.NeedsSelection)
     var pendingStartWork: Pair<StartWorkTarget, StartWorkAction>? by mutableStateOf(null)
-    var collapsedPickerServers: Set<String> by mutableStateOf(emptySet())
+    var pickerSelectedEndpointKey: String? by mutableStateOf(null)
+    var pickerSearchQuery: String by mutableStateOf("")
+}
+
+private val startWorkPickerSearch: @Composable (StartWorkUiState) -> Unit = { uiState ->
+    val theme = LocalOpenCodeTheme.current
+    BasicTextField(
+        value = uiState.pickerSearchQuery,
+        onValueChange = { uiState.pickerSearchQuery = it },
+        singleLine = true,
+        textStyle = MaterialTheme.typography.bodyMedium.copy(color = theme.text),
+        cursorBrush = SolidColor(theme.accent),
+        modifier = Modifier
+            .fillMaxWidth()
+            .border(Sizing.strokeThin, theme.border, RectangleShape)
+            .testTag("start_work_search_field"),
+        decorationBox = { field ->
+            Row(
+                Modifier.fillMaxWidth().padding(horizontal = Spacing.sm, vertical = Spacing.xs),
+                verticalAlignment = Alignment.CenterVertically,
+            ) {
+                Text("/", style = MaterialTheme.typography.labelMedium, color = theme.textMuted)
+                Spacer(Modifier.width(Spacing.xs))
+                Box(Modifier.weight(1f), contentAlignment = Alignment.CenterStart) {
+                    field()
+                    if (uiState.pickerSearchQuery.isEmpty()) {
+                        Text(
+                            stringResource(R.string.start_work_filter_workspaces),
+                            style = MaterialTheme.typography.labelMedium,
+                            color = theme.textMuted,
+                            maxLines = 1,
+                        )
+                    }
+                }
+            }
+        },
+    )
+}
+
+private val startWorkServerRail: @Composable (
+    List<StartWorkPickerGroup>,
+    StartWorkPickerGroup?,
+    StartWorkUiState,
+) -> Unit = { groups, selectedGroup, uiState ->
+    val theme = LocalOpenCodeTheme.current
+    LazyRow(horizontalArrangement = Arrangement.spacedBy(Spacing.xs)) {
+        items(groups, key = { it.server.endpointKey }) { group ->
+            val selected = group.server.endpointKey == selectedGroup?.server?.endpointKey
+            Surface(
+                color = theme.backgroundPanel,
+                shape = RectangleShape,
+                modifier = Modifier
+                    .width(Sizing.serverFilterCardWidth)
+                    .then(if (selected) Modifier.border(Sizing.strokeMd, theme.primary) else Modifier)
+                    .clickable(role = Role.Tab) {
+                        uiState.pickerSelectedEndpointKey = group.server.endpointKey
+                        uiState.pickerSearchQuery = ""
+                    }
+                    .semantics {
+                        contentDescription = "${group.server.displayName}, ${group.targets.size - 1} workspaces"
+                        this.selected = selected
+                    }
+                    .testTag("start_work_server_${group.server.endpointKey}"),
+            ) {
+                Column(
+                    Modifier.padding(horizontal = Spacing.sm, vertical = Spacing.xs),
+                ) {
+                    Text(
+                        group.badgeLabel,
+                        style = MaterialTheme.typography.labelMedium,
+                        color = if (selected) theme.primary else theme.text,
+                    )
+                    Text(
+                        group.server.displayName,
+                        style = MaterialTheme.typography.labelSmall,
+                        color = theme.textMuted,
+                        maxLines = 1,
+                        overflow = TextOverflow.Ellipsis,
+                    )
+                }
+            }
+        }
+    }
+}
+
+private val startWorkPickerLedger: @Composable ColumnScope.(
+    MainTabContentParams,
+    List<StartWorkTarget>,
+) -> Unit = { params, targets ->
+    val labels = rememberTabTitleLabels()
+    targets.firstOrNull { it.workspaceKey == WorkspaceKey.Global }?.let { globalTarget ->
+        filesWorkspaceOption(
+            title = stringResource(R.string.sessions_global),
+            subtitle = workspaceSubtitle(globalTarget.workspaceKey),
+            marker = "◆",
+            onClick = { selectStartWorkPickerTarget(params, globalTarget) },
+            modifier = Modifier.testTag("start_work_target_global"),
+        )
+    }
+    val directories = targets.filter { it.workspaceKey != WorkspaceKey.Global }
+    if (directories.isEmpty()) {
+        Text(
+            stringResource(R.string.start_work_no_matching_workspaces),
+            style = MaterialTheme.typography.labelMedium,
+            color = LocalOpenCodeTheme.current.textMuted,
+            modifier = Modifier.padding(vertical = Spacing.md),
+        )
+    } else {
+        LazyColumn(
+            Modifier.fillMaxWidth().weight(1f, fill = false),
+            verticalArrangement = Arrangement.spacedBy(Spacing.hairline),
+        ) {
+            items(
+                items = directories,
+                key = { target -> "target:${target.serverRef.endpointKey}:${target.workspaceKey}" },
+            ) { target ->
+                filesWorkspaceOption(
+                    title = workspaceLabel(target.workspaceKey, labels) ?: workspaceSubtitle(target.workspaceKey),
+                    subtitle = workspaceSubtitle(target.workspaceKey),
+                    marker = "◇",
+                    onClick = { selectStartWorkPickerTarget(params, target) },
+                    modifier = Modifier.testTag("start_work_target_${target.workspaceKey}"),
+                )
+            }
+            item(key = "picker_navigation_bar") { Spacer(Modifier.navigationBarsPadding()) }
+        }
+    }
 }
 
 internal data class StartWorkPickerGroup(
@@ -165,6 +303,7 @@ private data class MainTabContentParams(
     val savedServers: List<SavedServer>,
     val savedServerViews: List<SavedServerView>,
     val scopedConnectionStates: Map<String, ConnectionState>,
+    val homeRepositoryStates: List<ScopedHomeRepositoryState>,
     val closeTab: (String) -> Unit,
     val savedServerExists: (String) -> Boolean,
     val connectSavedServer: (String) -> Unit,
@@ -575,6 +714,13 @@ object MainTabScreen {
         )
         mainTabPresenceCollection(tabs, activeTabId, tabMaps)
 
+        val homeRepositoryStates = tabMaps.workspaceOwners.values
+            .distinctBy { it.workspace.server.endpointKey to it.workspace.key }
+            .map { owner ->
+                val state by owner.sessionRepository.state.collectAsState()
+                ScopedHomeRepositoryState(owner.workspace.server, state)
+            }
+
         val closeTab = rememberCloseTab(deps, tabMaps)
         val snackbarHostState = remember { SnackbarHostState() }
         mainTabPendingStartWorkEffect(deps, uiState, scopedConnectionStates, snackbarHostState)
@@ -589,6 +735,7 @@ object MainTabScreen {
             savedServers = savedServers,
             savedServerViews = savedServerViews,
             scopedConnectionStates = scopedConnectionStates,
+            homeRepositoryStates = homeRepositoryStates,
             closeTab = closeTab,
             savedServerExists = savedServerExists,
             connectSavedServer = connectSavedServer,
@@ -663,12 +810,6 @@ private fun ColumnScope.mainTabPager(
     pagerState: PagerState,
 ) {
     val saveableStateHolder = rememberSaveableStateHolder()
-    val homeRepositoryStates = params.tabMaps.workspaceOwners.values
-        .distinctBy { it.workspace.server.endpointKey to it.workspace.key }
-        .map { owner ->
-            val state by owner.sessionRepository.state.collectAsState()
-            ScopedHomeRepositoryState(owner.workspace.server, state)
-        }
     HorizontalPager(
         state = pagerState,
         modifier = Modifier.weight(1f),
@@ -677,7 +818,7 @@ private fun ColumnScope.mainTabPager(
     ) { pageIndex ->
         params.tabs.getOrNull(pageIndex)?.let { tab ->
             saveableStateHolder.SaveableStateProvider(tab.id) {
-                mainTabPageContent(params, tab, homeRepositoryStates)
+                mainTabPageContent(params, tab, params.homeRepositoryStates)
             }
         }
     }
@@ -877,6 +1018,7 @@ private fun startWorkSheet(params: MainTabContentParams) {
     val target = context.selectedTarget
     ModalBottomSheet(
         onDismissRequest = { uiState.showStartWorkSheet = false },
+        sheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true),
         containerColor = theme.background,
         modifier = Modifier.testTag("start_work_sheet"),
     ) {
@@ -891,7 +1033,13 @@ private fun startWorkSheetContent(
 ) {
     val theme = LocalOpenCodeTheme.current
     Column(
-        Modifier.fillMaxWidth().padding(Spacing.md),
+        Modifier
+            .fillMaxWidth()
+            .verticalScroll(rememberScrollState())
+            .padding(horizontal = Spacing.md)
+            .padding(top = Spacing.md)
+            .navigationBarsPadding()
+            .padding(bottom = Spacing.md),
         verticalArrangement = Arrangement.spacedBy(Spacing.sm),
     ) {
         Text(stringResource(R.string.start_work_title), style = MaterialTheme.typography.titleLarge)
@@ -911,7 +1059,6 @@ private fun startWorkSheetContent(
                 requestScopedAction(params, target, StartWorkAction.BrowseSessions)
             }
         }
-        Spacer(Modifier.navigationBarsPadding())
     }
 }
 
@@ -931,7 +1078,16 @@ private fun startWorkSheetTargetCard(
             Row(verticalAlignment = Alignment.CenterVertically) {
                 Text(stringResource(R.string.start_work_in), color = theme.textMuted)
                 Spacer(Modifier.width(Spacing.sm))
-                Text(target.serverRef.displayName, modifier = Modifier.weight(1f))
+                val connectionStatus = connectionStatusText(
+                    params.scopedConnectionStates[target.serverRef.endpointKey],
+                )
+                Text(
+                    "${target.serverRef.displayName} · $connectionStatus",
+                    color = theme.textMuted,
+                    modifier = Modifier.weight(1f),
+                    maxLines = 1,
+                    overflow = TextOverflow.Ellipsis,
+                )
                 TextButton(onClick = { params.uiState.showStartWorkPicker = true }) {
                     Text(stringResource(R.string.start_work_change))
                 }
@@ -939,10 +1095,6 @@ private fun startWorkSheetTargetCard(
             Text(
                 workspaceLabel(target.workspaceKey, tabTitleLabels)
                     ?: workspaceSubtitle(target.workspaceKey),
-            )
-            Text(
-                connectionStatusText(params.scopedConnectionStates[target.serverRef.endpointKey]),
-                color = theme.textMuted,
             )
         }
     }
@@ -990,12 +1142,9 @@ private fun startWorkPickerSheet(params: MainTabContentParams) {
         val workspaceKey = tab.workspaceKey ?: return@mapNotNull null
         StartWorkTarget(serverRef, workspaceKey)
     }.distinct()
-    val knownHomeTargets = params.tabMaps.workspaceOwners.values.flatMap { owner ->
-        val state by owner.sessionRepository.state.collectAsState()
-        state.snapshot.sessions.values.map { session ->
-            StartWorkTarget(owner.workspace.server, session.workspace.key)
-        }
-    }.distinct()
+    val knownHomeTargets = remember(params.homeRepositoryStates) {
+        deriveStartWorkPickerTargets(params.homeRepositoryStates)
+    }
     ModalBottomSheet(
         onDismissRequest = {
             uiState.showStartWorkPicker = false
@@ -1016,71 +1165,33 @@ private fun startWorkPickerContent(
 ) {
     val theme = LocalOpenCodeTheme.current
     val tabTitleLabels = rememberTabTitleLabels()
-    Column(
-        Modifier.fillMaxWidth().padding(Spacing.md),
-        verticalArrangement = Arrangement.spacedBy(Spacing.sm),
-    ) {
-        Text(
-            stringResource(R.string.start_work_choose_context),
-            style = MaterialTheme.typography.titleLarge,
-        )
-        if (params.savedServerViews.isEmpty()) {
-            Text(stringResource(R.string.start_work_no_servers), color = theme.textMuted)
-        }
-        val groups = buildStartWorkPickerGroups(
+    val uiState = params.uiState
+    val groups = remember(params.savedServerViews, openTargets, knownHomeTargets) {
+        buildStartWorkPickerGroups(
             params.savedServerViews.map { Triple(it.endpointKey, it.displayName, it.badgeLabel) },
             openTargets,
             knownHomeTargets,
         )
-        groups.forEach { group -> startWorkPickerGroup(params, group, tabTitleLabels) }
-        Spacer(Modifier.navigationBarsPadding())
     }
-}
-
-private val startWorkPickerGroup: @Composable (
-    MainTabContentParams,
-    StartWorkPickerGroup,
-    TabTitleLabels,
-) -> Unit = { params, group, tabTitleLabels ->
-    val collapsed = group.server.endpointKey in params.uiState.collapsedPickerServers
-    Text(
-        "${if (collapsed) "▸" else "▾"}  ${group.badgeLabel}  ${group.server.displayName}",
-        style = MaterialTheme.typography.titleMedium,
-        modifier = Modifier.fillMaxWidth().clickable(role = Role.Button) {
-            params.uiState.collapsedPickerServers = if (collapsed) {
-                params.uiState.collapsedPickerServers - group.server.endpointKey
-            } else {
-                params.uiState.collapsedPickerServers + group.server.endpointKey
-            }
-        }.semantics {
-            contentDescription = "${group.server.displayName}, ${if (collapsed) "collapsed" else "expanded"}"
-        }.testTag("start_work_server_${group.server.endpointKey}"),
-    )
-    if (!collapsed) {
-        group.targets.forEach { pickedTarget ->
-            val title = if (pickedTarget.workspaceKey == WorkspaceKey.Global) {
-                stringResource(R.string.sessions_global)
-            } else {
-                workspaceLabel(pickedTarget.workspaceKey, tabTitleLabels)
-                    ?: workspaceSubtitle(pickedTarget.workspaceKey)
-            }
-            filesWorkspaceOption(
-                title = title,
-                subtitle = pickedTarget.serverRef.displayName,
-                marker = if (pickedTarget.workspaceKey == WorkspaceKey.Global) "◆" else "◇",
-                onClick = {
-                    params.uiState.startWorkContext = StartWorkContext(
-                        StartWorkSource.OtherTab,
-                        StartWorkSelection.Selected(pickedTarget),
-                        params.uiState.startWorkContext?.defaultAction,
-                    )
-                    params.uiState.homeDetailSelection = StartWorkSelection.Selected(pickedTarget)
-                    params.uiState.showStartWorkPicker = false
-                    params.uiState.showFilesTabPrompt = false
-                    params.uiState.showStartWorkSheet = true
-                },
-            )
+    LaunchedEffect(groups, uiState.pickerSelectedEndpointKey) {
+        if (groups.none { it.server.endpointKey == uiState.pickerSelectedEndpointKey }) {
+            uiState.pickerSelectedEndpointKey = groups.firstOrNull()?.server?.endpointKey
         }
+    }
+    val pickerState = StartWorkPickerState(uiState.pickerSelectedEndpointKey, uiState.pickerSearchQuery)
+    val selectedGroup = groups.firstOrNull { it.server.endpointKey == pickerState.selectedEndpointKey }
+    val targets = remember(groups, pickerState) { pickerState.filteredTargets(groups) }
+    Column(Modifier.fillMaxWidth().padding(horizontal = Spacing.md)) {
+        Text(
+            stringResource(R.string.start_work_choose_context),
+            style = MaterialTheme.typography.titleMedium,
+        )
+        if (params.savedServerViews.isEmpty()) {
+            Text(stringResource(R.string.start_work_no_servers), color = theme.textMuted)
+        }
+        startWorkPickerSearch(uiState)
+        startWorkServerRail(groups, selectedGroup, uiState)
+        startWorkPickerLedger(params, targets)
     }
 }
 
@@ -1090,6 +1201,19 @@ internal val createPtyRequestForWorkspace: (WorkspaceKey) -> CreatePtyRequest = 
         title = terminalTitle(workspaceKey),
     )
 }
+
+private val selectStartWorkPickerTarget: (MainTabContentParams, StartWorkTarget) -> Unit =
+    { params, pickedTarget ->
+        params.uiState.startWorkContext = StartWorkContext(
+            StartWorkSource.OtherTab,
+            StartWorkSelection.Selected(pickedTarget),
+            params.uiState.startWorkContext?.defaultAction,
+        )
+        params.uiState.homeDetailSelection = StartWorkSelection.Selected(pickedTarget)
+        params.uiState.showStartWorkPicker = false
+        params.uiState.showFilesTabPrompt = false
+        params.uiState.showStartWorkSheet = true
+    }
 
 private val terminalTitle: (WorkspaceKey) -> String? = { workspaceKey ->
     when (workspaceKey) {
@@ -1148,12 +1272,6 @@ private fun filesWorkspaceOption(
             verticalAlignment = Alignment.CenterVertically,
         ) {
             Text(
-                text = ">",
-                style = MaterialTheme.typography.bodyMedium,
-                color = theme.accent.copy(alpha = 0.3f),
-            )
-            Spacer(Modifier.width(Spacing.sm))
-            Text(
                 text = marker,
                 style = MaterialTheme.typography.bodyMedium,
                 color = theme.textMuted,
@@ -1182,7 +1300,7 @@ private fun filesWorkspaceOption(
             Text(
                 text = "→",
                 style = MaterialTheme.typography.bodyMedium,
-                color = theme.accent,
+                color = theme.textMuted,
             )
         }
     }

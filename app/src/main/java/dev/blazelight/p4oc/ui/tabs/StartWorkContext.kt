@@ -2,6 +2,7 @@ package dev.blazelight.p4oc.ui.tabs
 
 import dev.blazelight.p4oc.domain.server.ServerRef
 import dev.blazelight.p4oc.domain.server.WorkspaceKey
+import dev.blazelight.p4oc.ui.screens.home.ScopedHomeRepositoryState
 
 data class StartWorkTarget(
     val serverRef: ServerRef,
@@ -117,6 +118,36 @@ fun startWorkContextForHomeDetail(target: StartWorkTarget): StartWorkContext = S
     source = StartWorkSource.HomeWorkspaceDetail,
     selection = StartWorkSelection.Selected(target),
 )
+
+internal fun deriveStartWorkPickerTargets(
+    repositories: List<ScopedHomeRepositoryState>,
+): List<StartWorkTarget> = repositories.flatMap { repository ->
+    repository.state.snapshot.sessions.values.map { session ->
+        StartWorkTarget(repository.serverRef, session.workspace.key)
+    }
+}.distinct()
+
+internal data class StartWorkPickerState(
+    val selectedEndpointKey: String?,
+    val query: String = "",
+)
+
+internal fun StartWorkPickerState.filteredTargets(
+    groups: List<StartWorkPickerGroup>,
+): List<StartWorkTarget> {
+    val group = groups.firstOrNull { it.server.endpointKey == selectedEndpointKey } ?: return emptyList()
+    val needle = query.trim()
+    return group.targets.filter { target ->
+        target.workspaceKey == WorkspaceKey.Global || needle.isEmpty() ||
+            target.workspaceKey.pickerSearchText().contains(needle, ignoreCase = true)
+    }
+}
+
+private fun WorkspaceKey.pickerSearchText(): String = when (this) {
+    is WorkspaceKey.Directory -> "$value ${value.trimEnd('/').substringAfterLast('/')}"
+    WorkspaceKey.Global -> "global server root no directory"
+    is WorkspaceKey.SessionScoped -> sessionId.value
+}
 
 private fun sourceForRoute(route: String): StartWorkSource = when {
     route.startsWith("chat/") -> StartWorkSource.ChatTab
