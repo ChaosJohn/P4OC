@@ -19,6 +19,7 @@ import kotlinx.coroutines.launch
 import kotlinx.coroutines.test.StandardTestDispatcher
 import kotlinx.coroutines.test.advanceTimeBy
 import kotlinx.coroutines.test.advanceUntilIdle
+import kotlinx.coroutines.test.runCurrent
 import kotlinx.coroutines.test.runTest
 import kotlinx.serialization.json.JsonObject
 import org.junit.Assert.assertEquals
@@ -30,6 +31,7 @@ import org.junit.Assert.assertTrue
 import org.junit.Test
 
 @OptIn(ExperimentalCoroutinesApi::class)
+@Suppress("LargeClass")
 class SessionRepositoryImplTest {
     @Test
     fun `prewarm twice returns same Deferred`() = runTest {
@@ -362,6 +364,29 @@ class SessionRepositoryImplTest {
     }
 
     @Test
+    fun `project events coalesce and authoritatively replace start work projects`() = runTest {
+        val client = FakeWorkspaceClient().apply {
+            projects = listOf(FakeWorkspaceClient.projectDto("old", "/repo/old"))
+        }
+        val repository = SessionRepositoryImpl(
+            client,
+            nowMs = { testScheduler.currentTime },
+            dispatcher = StandardTestDispatcher(testScheduler),
+        )
+        repository.refresh()
+        client.projects = listOf(FakeWorkspaceClient.projectDto("new", "/repo/new"))
+        val callsBeforeEvents = client.listProjectsCalls
+
+        repository.acceptEvent(OpenCodeEvent.ProjectDirectoriesUpdated("old"))
+        repository.acceptEvent(OpenCodeEvent.ProjectDirectoriesUpdated("old"))
+        advanceTimeBy(151)
+        advanceUntilIdle()
+
+        assertEquals(callsBeforeEvents + 1, client.listProjectsCalls)
+        assertEquals(listOf("new"), repository.state.value.snapshot.projects.map { it.id })
+    }
+
+    @Test
     fun `session event during reconnect hydrate replays over hydrated snapshot`() = runTest {
         val client = FakeWorkspaceClient().apply {
             projects = emptyList()
@@ -386,6 +411,38 @@ class SessionRepositoryImplTest {
         val sessions = repository.state.value.snapshot.sessions
         assertTrue(sessions.containsKey("missed"))
         assertTrue(sessions.containsKey("streamed"))
+    }
+
+    @Test
+    fun `older hydration cannot overwrite delete and recreate from newer hydration`() = runTest {
+        val oldHydrationGate = CompletableDeferred<Unit>()
+        val client = FakeWorkspaceClient().apply {
+            projects = emptyList()
+            setSessions(FakeWorkspaceClient.sessionDto(id = "same", title = "Old"))
+            statusBlocker = oldHydrationGate
+        }
+        val repository = SessionRepositoryImpl(
+            client,
+            nowMs = { testScheduler.currentTime },
+            dispatcher = StandardTestDispatcher(testScheduler),
+        )
+
+        val olderHydration = async { repository.refresh() }
+        runCurrent()
+        repository.acceptEvent(OpenCodeEvent.SessionDeleted(session("same").copy(title = "Old")))
+        repository.acceptEvent(OpenCodeEvent.SessionCreated(session("same").copy(title = "Recreated")))
+
+        client.setSessions(FakeWorkspaceClient.sessionDto(id = "same", title = "Recreated"))
+        client.statusBlocker = null
+        repository.refresh()
+        assertEquals("Recreated", repository.state.value.snapshot.sessions.getValue("same").session.title)
+
+        oldHydrationGate.complete(Unit)
+        olderHydration.await()
+
+        val finalSession = repository.state.value.snapshot.sessions.getValue("same").session
+        assertEquals("Recreated", finalSession.title)
+        assertEquals(1L, finalSession.createdAt)
     }
 
     @Test
@@ -457,13 +514,56 @@ class SessionRepositoryImplTest {
         repository.sessionUiState(SessionId("s1"))
         repository.acceptEvent(OpenCodeEvent.Connected)
         advanceUntilIdle()
-        assertTrue(repository.sessionUiState(SessionId("s1")).value.pendingPermissionsByCallId.isNotEmpty())
+        assertTrue(
+            repository.sessionUiState(SessionId("s1"))
+                .value.pendingPermissionsByCallId.isNotEmpty()
+        )
 
         client.permissionsBySession = emptyMap()
         repository.acceptEvent(OpenCodeEvent.Connected)
         advanceUntilIdle()
 
-        assertTrue(repository.sessionUiState(SessionId("s1")).value.pendingPermissionsByCallId.isEmpty())
+        assertTrue(
+            repository.sessionUiState(SessionId("s1"))
+                .value.pendingPermissionsByCallId.isEmpty()
+        )
+    }
+
+    @Test
+    fun `permission reconciliation preserves permission arriving during request`() = runTest {
+        val client = FakeWorkspaceClient().apply {
+            projects = emptyList()
+            listPermissionsBlocker = CompletableDeferred()
+        }
+        val repository =
+            SessionRepositoryImpl(
+                client,
+                nowMs = { testScheduler.currentTime },
+                dispatcher = StandardTestDispatcher(testScheduler)
+            )
+        repository.sessionUiState(SessionId("s1"))
+
+        repository.acceptEvent(OpenCodeEvent.Connected)
+        runCurrent()
+        repository.acceptEvent(
+            OpenCodeEvent.PermissionRequested(
+                Permission(
+                    id = "per_concurrent",
+                    type = "bash",
+                    patterns = listOf("pwd"),
+                    sessionID = "s1",
+                    messageID = "msg-1",
+                    callID = "call-concurrent",
+                    metadata = JsonObject(emptyMap()),
+                    always = emptyList(),
+                )
+            )
+        )
+        client.listPermissionsBlocker?.complete(Unit)
+        advanceUntilIdle()
+
+        val permissions = repository.sessionUiState(SessionId("s1")).value.pendingPermissionsByCallId
+        assertEquals("per_concurrent", permissions.getValue("call-concurrent").id)
     }
 
     @Test
@@ -623,9 +723,37 @@ class SessionRepositoryImplTest {
         repository.acceptEvent(OpenCodeEvent.PermissionRequested(permission))
 
         val uiState = repository.sessionUiState(SessionId("s1")).value
+        assertEquals(permission, uiState.pendingPermissionsByCallId["permission:per_1"])
         assertTrue(
             "Permission without callID should still be visible in session state",
             uiState.pendingPermissionsByCallId.values.any { it.id == "per_1" }
+        )
+    }
+
+    @Test
+    fun `blank callID uses stable permission request identity`() = runTest {
+        val repository = SessionRepositoryImpl(
+            FakeWorkspaceClient().apply { projects = emptyList() },
+            nowMs = { testScheduler.currentTime },
+            dispatcher = StandardTestDispatcher(testScheduler),
+        )
+        val permission = Permission(
+            id = "per_blank",
+            type = "bash",
+            patterns = listOf("pwd"),
+            sessionID = "s1",
+            messageID = "",
+            callID = "",
+            metadata = JsonObject(emptyMap()),
+            always = emptyList(),
+        )
+
+        repository.acceptEvent(OpenCodeEvent.PermissionRequested(permission))
+
+        assertEquals(
+            permission,
+            repository.sessionUiState(SessionId("s1")).value
+                .pendingPermissionsByCallId["permission:per_blank"],
         )
     }
 

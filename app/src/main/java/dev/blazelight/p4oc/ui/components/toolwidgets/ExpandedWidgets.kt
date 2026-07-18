@@ -490,7 +490,7 @@ fun TaskWidgetExpanded(
                 color = color
             )
             Text(
-                text = "Task",
+                text = stringResource(R.string.task),
                 style = MaterialTheme.typography.labelMedium.copy(
                     fontFamily = FontFamily.Monospace,
                     fontSize = TuiCodeFontSize.lg

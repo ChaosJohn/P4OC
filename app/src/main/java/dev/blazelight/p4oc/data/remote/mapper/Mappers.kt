@@ -690,6 +690,7 @@ class EventMapper constructor(
                         MessageError(
                             name = error.name,
                             message = (error.data?.get("message") as? JsonPrimitive)?.contentOrNull,
+                            providerID = (error.data?.get("providerID") as? JsonPrimitive)?.contentOrNull,
                             responseBody = (error.data?.get("responseBody") as? JsonPrimitive)?.contentOrNull,
                         )
                     }
@@ -711,15 +712,15 @@ class EventMapper constructor(
                 val props = json.decodeFromJsonElement<PermissionRepliedPropertiesDto>(dto.properties)
                 OpenCodeEvent.PermissionReplied(props.sessionID, props.requestID, props.reply)
             }
-            "question.asked" -> {
+            "question.asked", "question.v2.asked" -> {
                 val questionDto = json.decodeFromJsonElement<QuestionRequestDto>(dto.properties)
                 OpenCodeEvent.QuestionAsked(mapQuestionRequestDtoToDomain(questionDto))
             }
-            "question.replied" -> {
+            "question.replied", "question.v2.replied" -> {
                 val props = json.decodeFromJsonElement<QuestionRepliedPropertiesDto>(dto.properties)
                 OpenCodeEvent.QuestionReplied(props.sessionID, props.requestID, props.answers)
             }
-            "question.rejected" -> {
+            "question.rejected", "question.v2.rejected" -> {
                 val props = json.decodeFromJsonElement<QuestionRejectedPropertiesDto>(dto.properties)
                 OpenCodeEvent.QuestionRejected(props.sessionID, props.requestID)
             }
@@ -742,6 +743,21 @@ class EventMapper constructor(
                 val props = json.decodeFromJsonElement<VcsBranchPropertiesDto>(dto.properties)
                 OpenCodeEvent.VcsBranchUpdated(props.branch)
             }
+            "project.updated" -> {
+                val props = json.decodeFromJsonElement<ProjectUpdatedPropertiesDto>(dto.properties)
+                OpenCodeEvent.ProjectUpdated(ProjectMapper.mapToDomain(props.info))
+            }
+            "project.directories.updated" -> {
+                val props = json.decodeFromJsonElement<ProjectDirectoriesUpdatedPropertiesDto>(dto.properties)
+                OpenCodeEvent.ProjectDirectoriesUpdated(props.projectID)
+            }
+            "models-dev.refreshed" -> OpenCodeEvent.ModelsRefreshed
+            "catalog.updated" -> OpenCodeEvent.CatalogUpdated
+            "mcp.tools.changed" -> {
+                val props = json.decodeFromJsonElement<McpToolsChangedPropertiesDto>(dto.properties)
+                OpenCodeEvent.McpToolsChanged(props.server)
+            }
+            "global.disposed" -> OpenCodeEvent.GlobalDisposed
             "session.idle" -> {
                 val props = json.decodeFromJsonElement<SessionIdlePropertiesDto>(dto.properties)
                 OpenCodeEvent.SessionIdle(props.sessionID)
@@ -792,7 +808,7 @@ class EventMapper constructor(
             else -> null
         }
     } catch (e: Exception) {
-        AppLog.e("EventMapper", "Failed to map event type=${dto.type}: ${e.message}", e)
+        AppLog.e("EventMapper", "Failed to map event (${e::class.simpleName})")
         null
     }
 }
@@ -850,6 +866,21 @@ private fun mapPtyToDomain(dto: PtyDto): Pty = Pty(
 @kotlinx.serialization.Serializable
 private data class InstallationUpdatedPropertiesDto(
     val version: String
+)
+
+@kotlinx.serialization.Serializable
+private data class ProjectUpdatedPropertiesDto(
+    val info: ProjectDto
+)
+
+@kotlinx.serialization.Serializable
+private data class ProjectDirectoriesUpdatedPropertiesDto(
+    @SerialName("projectID") val projectID: String
+)
+
+@kotlinx.serialization.Serializable
+private data class McpToolsChangedPropertiesDto(
+    val server: String
 )
 
 @kotlinx.serialization.Serializable

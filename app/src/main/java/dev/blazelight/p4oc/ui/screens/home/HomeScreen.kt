@@ -30,7 +30,7 @@ import androidx.compose.foundation.selection.toggleable
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.text.BasicTextField
 import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.filled.Chat
+import androidx.compose.material.icons.automirrored.filled.Chat
 import androidx.compose.material.icons.filled.Folder
 import androidx.compose.material.icons.filled.Terminal
 import androidx.compose.material3.Icon
@@ -46,14 +46,17 @@ import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.alpha
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.RectangleShape
 import androidx.compose.ui.platform.testTag
+import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.semantics.Role
 import androidx.compose.ui.semantics.contentDescription
 import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.semantics.stateDescription
 import androidx.compose.ui.text.style.TextOverflow
+import dev.blazelight.p4oc.R
 import dev.blazelight.p4oc.core.network.ConnectionState
 import dev.blazelight.p4oc.domain.model.SessionPresence
 import dev.blazelight.p4oc.domain.server.WorkspaceKey
@@ -69,6 +72,7 @@ import java.util.concurrent.TimeUnit
 
 private const val RECENT_DAY_LIMIT = 30
 private const val HOME_WORKSPACE_SHORTCUT_LIMIT = 3
+private const val DISABLED_FILTER_ALPHA = 0.5f
 data class HomeActions(
     val onBrowseSessions: (StartWorkTarget) -> Unit,
     val onBrowseAllSessions: () -> Unit = {},
@@ -282,6 +286,7 @@ private fun globalSearchOverrideLabel(enabledCount: Int): String =
 @Composable
 private fun homeSearchField(query: String, onQueryChange: (String) -> Unit) {
     val theme = LocalOpenCodeTheme.current
+    val searchDescription = stringResource(R.string.home_search_accessibility)
     BasicTextField(
         value = query,
         onValueChange = onQueryChange,
@@ -290,8 +295,9 @@ private fun homeSearchField(query: String, onQueryChange: (String) -> Unit) {
         cursorBrush = androidx.compose.ui.graphics.SolidColor(theme.accent),
         modifier = Modifier
             .fillMaxWidth()
-            .height(Sizing.buttonHeightSm)
+            .height(Sizing.minTouchTarget)
             .border(Sizing.strokeThin, theme.border, RectangleShape)
+            .semantics { contentDescription = searchDescription }
             .testTag("home_search_field"),
         decorationBox = { field ->
             Row(
@@ -449,7 +455,7 @@ private fun homeHeader(summary: HomeSummaryState, onServers: () -> Unit) {
         Column(modifier = Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(Spacing.xxs)) {
             Text("[ Home ]", style = MaterialTheme.typography.titleMedium, color = LocalOpenCodeTheme.current.text)
             Text(
-                "${summary.sessions.size} sessions · ${summary.workspaces.size} workspaces",
+                stringResource(R.string.home_summary_counts, summary.sessions.size, summary.workspaces.size),
                 style = MaterialTheme.typography.labelSmall,
                 color = LocalOpenCodeTheme.current.textMuted,
                 maxLines = 1,
@@ -524,13 +530,19 @@ private fun serverToggleCard(
         color = theme.backgroundPanel,
         modifier = Modifier
             .width(Sizing.serverFilterCardWidth)
+            .alpha(if (searchActive) DISABLED_FILTER_ALPHA else 1f)
             .then(
-                if (enabled) Modifier.border(Sizing.strokeMd, theme.primary, RectangleShape) else Modifier,
+                if (enabled && !searchActive) {
+                    Modifier.border(Sizing.strokeMd, theme.primary, RectangleShape)
+                } else {
+                    Modifier
+                },
             )
             .toggleable(
                 value = enabled,
+                enabled = !searchActive,
                 role = Role.Checkbox,
-                onValueChange = { if (!searchActive) onToggle() },
+                onValueChange = { onToggle() },
             )
             .semantics {
                 stateDescription = if (searchActive) {
@@ -730,7 +742,11 @@ private fun sessionRow(
                             )
                         }
                         if (session.isShared) {
-                            Text("◈ Shared", style = MaterialTheme.typography.labelSmall, color = theme.info)
+                            Text(
+                                stringResource(R.string.home_shared_badge),
+                                style = MaterialTheme.typography.labelSmall,
+                                color = theme.info,
+                            )
                         }
                     }
                 }
@@ -871,7 +887,7 @@ private fun androidx.compose.foundation.lazy.LazyListScope.workspaceSessions(inp
 @Composable
 private fun openWorkCard(work: OpenWorkSummary, onFocus: () -> Unit) {
     val icon = when (work.type) {
-        OpenWorkType.Chat -> Icons.Default.Chat
+        OpenWorkType.Chat -> Icons.AutoMirrored.Filled.Chat
         OpenWorkType.Files -> Icons.Default.Folder
         OpenWorkType.Terminal -> Icons.Default.Terminal
     }

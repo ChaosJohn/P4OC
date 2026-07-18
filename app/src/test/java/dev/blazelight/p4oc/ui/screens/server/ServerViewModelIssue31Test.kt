@@ -1,11 +1,13 @@
+@file:Suppress("ImportOrdering")
+
 package dev.blazelight.p4oc.ui.screens.server
 
 import dev.blazelight.p4oc.core.datastore.RecentServer
 import dev.blazelight.p4oc.core.datastore.SavedServer
 import dev.blazelight.p4oc.core.datastore.SettingsDataStore
-import dev.blazelight.p4oc.core.network.ConnectionManager
 import dev.blazelight.p4oc.core.network.DiscoveryState
 import dev.blazelight.p4oc.core.network.MdnsDiscoveryManager
+import dev.blazelight.p4oc.core.network.ServerConnectionRegistry
 import dev.blazelight.p4oc.core.network.ServerConfig
 import dev.blazelight.p4oc.core.security.CredentialStore
 import io.mockk.coEvery
@@ -24,6 +26,9 @@ import kotlinx.coroutines.test.runTest
 import kotlinx.coroutines.test.setMain
 import org.junit.After
 import org.junit.Assert.assertEquals
+import org.junit.Assert.assertFalse
+import org.junit.Assert.assertNull
+import org.junit.Assert.assertTrue
 import org.junit.Before
 import org.junit.Test
 
@@ -44,7 +49,7 @@ class ServerViewModelIssue31Test {
     @Test
     fun `connectToRemote persists no-port https url without appending opencode port`() = runTest(dispatcher) {
         val settingsDataStore = mockk<SettingsDataStore>(relaxUnitFun = true)
-        val connectionManager = mockk<ConnectionManager>()
+        val connectionRegistry = mockk<ServerConnectionRegistry>()
         val credentialStore = mockk<CredentialStore>()
         val discoveryManager = mockk<MdnsDiscoveryManager>()
         val savedConfig = slot<ServerConfig>()
@@ -81,19 +86,20 @@ class ServerViewModelIssue31Test {
             endpointKey = "https://my-host.example.com:443",
             displayName = "Remote Server",
         )
-        coEvery { connectionManager.connect(any(), any()) } returns Result.success(emptyList())
+        coEvery { connectionRegistry.connectAndAwait(any(), any()) } returns Result.success(emptyList())
         every { discoveryManager.discoveredServers } returns MutableStateFlow(emptyList())
         every { discoveryManager.discoveryState } returns MutableStateFlow(DiscoveryState.IDLE)
 
         val viewModel = ServerViewModel(
             settingsDataStore = settingsDataStore,
-            connectionManager = connectionManager,
+            serverConnectionRegistry = connectionRegistry,
             credentialStore = credentialStore,
             mdnsDiscoveryManager = discoveryManager,
         )
         advanceUntilIdle()
 
         viewModel.setRemoteUrl("https://my-host.example.com")
+        viewModel.setPassword("secret")
         viewModel.connectToRemote()
         advanceUntilIdle()
 
@@ -122,5 +128,66 @@ class ServerViewModelIssue31Test {
         assertEquals("https://my-host.example.com", savedConfig.captured.url)
         assertEquals("https://my-host.example.com", recentUrl.captured)
         assertEquals("https://my-host.example.com", savedUrl.captured)
+    }
+
+    @Test
+    fun `public http with credentials is rejected before connection`() = runTest(dispatcher) {
+        val settingsDataStore = mockk<SettingsDataStore>()
+        val connectionRegistry = mockk<ServerConnectionRegistry>()
+        val discoveryManager = mockk<MdnsDiscoveryManager>()
+
+        every { settingsDataStore.recentServers } returns flowOf(emptyList())
+        every { settingsDataStore.savedServers } returns flowOf(emptyList())
+        coEvery { settingsDataStore.getLastConnection() } returns null
+        every { discoveryManager.discoveredServers } returns MutableStateFlow(emptyList())
+        every { discoveryManager.discoveryState } returns MutableStateFlow(DiscoveryState.IDLE)
+
+        val viewModel = ServerViewModel(
+            settingsDataStore = settingsDataStore,
+            serverConnectionRegistry = connectionRegistry,
+            credentialStore = mockk(),
+            mdnsDiscoveryManager = discoveryManager,
+        )
+        advanceUntilIdle()
+
+        viewModel.setRemoteUrl("http://example.com:4096")
+        viewModel.setPassword("secret")
+        viewModel.connectToRemote()
+        advanceUntilIdle()
+
+        coVerify(exactly = 0) { connectionRegistry.connectAndAwait(any(), any()) }
+        assertFalse(viewModel.uiState.value.isConnecting)
+        assertTrue(viewModel.uiState.value.error.orEmpty().contains("HTTPS"))
+    }
+
+    @Test
+    fun `failed remote connection is neither saved nor navigated`() = runTest(dispatcher) {
+        val settingsDataStore = mockk<SettingsDataStore>()
+        val connectionRegistry = mockk<ServerConnectionRegistry>()
+        val discoveryManager = mockk<MdnsDiscoveryManager>()
+        every { settingsDataStore.recentServers } returns flowOf(emptyList())
+        every { settingsDataStore.savedServers } returns flowOf(emptyList())
+        every { discoveryManager.discoveredServers } returns MutableStateFlow(emptyList())
+        every { discoveryManager.discoveryState } returns MutableStateFlow(DiscoveryState.IDLE)
+        coEvery { connectionRegistry.connectAndAwait(any(), any()) } returns
+            Result.failure(IllegalStateException("offline"))
+        val viewModel = ServerViewModel(
+            settingsDataStore = settingsDataStore,
+            serverConnectionRegistry = connectionRegistry,
+            credentialStore = mockk(),
+            mdnsDiscoveryManager = discoveryManager,
+        )
+
+        viewModel.setRemoteUrl("https://offline.example.com")
+        viewModel.connectToRemote()
+        advanceUntilIdle()
+
+        coVerify(exactly = 0) { settingsDataStore.saveLastConnection(any(), any()) }
+        coVerify(exactly = 0) { settingsDataStore.addRecentServer(any(), any(), any(), any(), any()) }
+        coVerify(exactly = 0) {
+            settingsDataStore.addSavedServer(any(), any(), any(), any(), any(), any(), any(), any())
+        }
+        assertFalse(viewModel.uiState.value.isConnected)
+        assertNull(viewModel.uiState.value.navigationDestination)
     }
 }

@@ -19,6 +19,9 @@ import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.launch
 
+/** Conservative share of the Bundle budget for both UTF-16 edit buffers. */
+internal const val MAX_SAVED_EDIT_CONTENT_CHARS = 64 * 1024
+
 @Suppress("TooManyFunctions")
 class FilesViewModel constructor(
     private val fileRepository: FileRepository,
@@ -60,31 +63,53 @@ class FilesViewModel constructor(
     }
 
     private fun restoredEditState(): FileEditState {
-        val path = savedStateHandle.get<String>(KEY_EDIT_PATH) ?: return FileEditState()
-        val originalContent = savedStateHandle[KEY_EDIT_ORIGINAL_CONTENT] ?: ""
-        val currentContent = savedStateHandle[KEY_EDIT_CURRENT_CONTENT] ?: originalContent
-        return FileEditState(
-            path = path,
-            originalContent = originalContent,
-            currentContent = currentContent,
-            isDirty = currentContent != originalContent,
-            contentGeneration = 1,
-            baselineHash = savedStateHandle[KEY_EDIT_BASELINE_HASH],
-        )
+        val path = savedStateHandle.get<String>(KEY_EDIT_PATH)
+        val originalContent = savedStateHandle.get<String>(KEY_EDIT_ORIGINAL_CONTENT)
+        val currentContent = savedStateHandle.get<String>(KEY_EDIT_CURRENT_CONTENT)
+        return if (path == null) {
+            FileEditState()
+        } else if (originalContent == null || currentContent == null) {
+            clearPersistedEditState()
+            FileEditState()
+        } else {
+            FileEditState(
+                path = path,
+                originalContent = originalContent,
+                currentContent = currentContent,
+                isDirty = currentContent != originalContent,
+                contentGeneration = 1,
+                baselineHash = savedStateHandle[KEY_EDIT_BASELINE_HASH],
+            )
+        }
     }
 
     private fun persistEditState(state: FileEditState) {
-        if (state.path == null) {
-            savedStateHandle.remove<String>(KEY_EDIT_PATH)
-            savedStateHandle.remove<String>(KEY_EDIT_ORIGINAL_CONTENT)
-            savedStateHandle.remove<String>(KEY_EDIT_CURRENT_CONTENT)
-            savedStateHandle.remove<String>(KEY_EDIT_BASELINE_HASH)
+        val currentContentFits =
+            state.currentContent.length <= MAX_SAVED_EDIT_CONTENT_CHARS - state.originalContent.length
+        if (state.path == null ||
+            state.originalContent.length > MAX_SAVED_EDIT_CONTENT_CHARS ||
+            !currentContentFits
+        ) {
+            clearPersistedEditState()
             return
         }
-        savedStateHandle[KEY_EDIT_PATH] = state.path
+
+        // The path is the snapshot's commit marker. Invalidate the prior snapshot
+        // before replacing its contents, then publish the new path last.
+        savedStateHandle.remove<String>(KEY_EDIT_PATH)
         savedStateHandle[KEY_EDIT_ORIGINAL_CONTENT] = state.originalContent
         savedStateHandle[KEY_EDIT_CURRENT_CONTENT] = state.currentContent
         savedStateHandle[KEY_EDIT_BASELINE_HASH] = state.baselineHash
+        savedStateHandle[KEY_EDIT_PATH] = state.path
+    }
+
+    private fun clearPersistedEditState() {
+        // Remove the commit marker first. An oversized in-memory edit must restore
+        // by reloading the file, never from partial or stale persisted contents.
+        savedStateHandle.remove<String>(KEY_EDIT_PATH)
+        savedStateHandle.remove<String>(KEY_EDIT_ORIGINAL_CONTENT)
+        savedStateHandle.remove<String>(KEY_EDIT_CURRENT_CONTENT)
+        savedStateHandle.remove<String>(KEY_EDIT_BASELINE_HASH)
     }
 
     private fun updateEditState(transform: (FileEditState) -> FileEditState) {
@@ -99,6 +124,9 @@ class FilesViewModel constructor(
 
     fun navigateTo(path: String) {
         pathStack.add(_uiState.value.currentPath)
+        if (pathStack.size > MAX_PERSISTED_PATH_DEPTH) {
+            pathStack.removeAt(0)
+        }
         loadFiles(path)
     }
 
@@ -113,8 +141,9 @@ class FilesViewModel constructor(
     }
 
     fun updateSearchQuery(query: String) {
-        savedStateHandle[KEY_SEARCH_QUERY] = query
-        _uiState.update { it.copy(searchQuery = query) }
+        val bounded = query.take(MAX_PERSISTED_QUERY_CHARS)
+        savedStateHandle[KEY_SEARCH_QUERY] = bounded
+        _uiState.update { it.copy(searchQuery = bounded) }
     }
 
     fun setSymbolMode(active: Boolean) {
@@ -123,9 +152,10 @@ class FilesViewModel constructor(
     }
 
     fun updateSymbolQuery(query: String) {
-        savedStateHandle[KEY_SYMBOL_QUERY] = query
-        _uiState.update { it.copy(symbolQuery = query) }
-        searchSymbols(query)
+        val bounded = query.take(MAX_PERSISTED_QUERY_CHARS)
+        savedStateHandle[KEY_SYMBOL_QUERY] = bounded
+        _uiState.update { it.copy(symbolQuery = bounded) }
+        searchSymbols(bounded)
     }
 
     fun clearFilters() {
@@ -189,7 +219,12 @@ class FilesViewModel constructor(
 
     private fun loadCapabilities() {
         viewModelScope.launch {
-            _uiState.update { it.copy(capabilities = fileRepository.capabilities()) }
+            _uiState.update {
+                it.copy(
+                    capabilities = fileRepository.capabilities(),
+                    capabilitiesLoaded = true,
+                )
+            }
         }
     }
 
@@ -258,7 +293,12 @@ class FilesViewModel constructor(
         }
     }
 
+    @Suppress("ReturnCount")
     fun requestSave() {
+        if (!_uiState.value.capabilities.canWrite) {
+            clearPendingSaveState()
+            return
+        }
         val state = _editState.value
         if (state.path == null) return
         if (!state.isDirty) {
@@ -293,11 +333,20 @@ class FilesViewModel constructor(
 
     /** Re-issues the write with no baseline hash, suppressing stale-write detection. */
     fun overwriteAnyway() {
+        if (!_uiState.value.capabilities.canWrite) {
+            clearPendingSaveState()
+            return
+        }
         updateEditState { it.copy(conflict = null) }
         performSave(useBaselineHash = false)
     }
 
+    @Suppress("ReturnCount")
     private fun performSave(useBaselineHash: Boolean) {
+        if (!_uiState.value.capabilities.canWrite) {
+            clearPendingSaveState()
+            return
+        }
         val state = _editState.value
         val path = state.path ?: return
         if (state.isSaving) return
@@ -368,6 +417,16 @@ class FilesViewModel constructor(
 
     fun clearSaveError() {
         updateEditState { it.copy(saveError = null) }
+    }
+
+    private fun clearPendingSaveState() {
+        updateEditState {
+            it.copy(
+                isSaving = false,
+                pendingSavePreview = null,
+                conflict = null,
+            )
+        }
     }
 
     fun uploadFromSources(source: UploadSource, sourceIds: List<String>) {
@@ -462,7 +521,9 @@ class FilesViewModel constructor(
         uploadCoordinator.dismiss()
     }
 
-    private companion object {
+    companion object {
+        private const val MAX_PERSISTED_QUERY_CHARS = 1_024
+        private const val MAX_PERSISTED_PATH_DEPTH = 128
         const val ROOT_PATH = ""
         const val KEY_CURRENT_PATH = "files_current_path"
         const val KEY_PATH_STACK = "files_path_stack"
@@ -496,6 +557,7 @@ data class FilesUiState(
     val isSymbolMode: Boolean = false,
     val symbolQuery: String = "",
     val capabilities: FileCapabilities = FileCapabilities(),
+    val capabilitiesLoaded: Boolean = false,
     val isMutating: Boolean = false,
     val mutationMessage: String? = null,
 )

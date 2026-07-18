@@ -1,19 +1,22 @@
+@file:Suppress("ImportOrdering")
+
 package dev.blazelight.p4oc.ui.screens.server
 
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
 import dev.blazelight.p4oc.core.datastore.RecentServer
 import dev.blazelight.p4oc.core.datastore.SavedServer
+import dev.blazelight.p4oc.core.datastore.SavedServerRegistry
 import dev.blazelight.p4oc.core.datastore.SettingsDataStore
 import dev.blazelight.p4oc.core.log.AppLog
-import dev.blazelight.p4oc.core.network.ConnectionManager
 import dev.blazelight.p4oc.core.network.ConnectionState
 import dev.blazelight.p4oc.core.network.DiscoveredServer
 import dev.blazelight.p4oc.core.network.DiscoverySeed
 import dev.blazelight.p4oc.core.network.DiscoveryState
 import dev.blazelight.p4oc.core.network.MdnsDiscoveryManager
-import dev.blazelight.p4oc.core.network.ServerConfig
+import dev.blazelight.p4oc.core.network.ServerConnectionRegistry
 import dev.blazelight.p4oc.core.network.ServerUrl
+import dev.blazelight.p4oc.core.network.toServerConfig
 import dev.blazelight.p4oc.core.security.CredentialStore
 import dev.blazelight.p4oc.domain.server.ServerIdentity
 import kotlinx.coroutines.flow.MutableStateFlow
@@ -73,7 +76,7 @@ private const val TAG = "ServerViewModel"
 
 class ServerViewModel constructor(
     private val settingsDataStore: SettingsDataStore,
-    private val connectionManager: ConnectionManager,
+    private val serverConnectionRegistry: ServerConnectionRegistry,
     private val credentialStore: CredentialStore,
     private val mdnsDiscoveryManager: MdnsDiscoveryManager,
 ) : ViewModel() {
@@ -112,7 +115,7 @@ class ServerViewModel constructor(
         viewModelScope.launch {
             val (lastConfig, password) = settingsDataStore.getLastConnection() ?: return@launch
 
-            AppLog.d(TAG, "Found last connection: ${lastConfig.url}")
+            AppLog.d(TAG, "Found last connection")
             val endpointKey = ServerUrl.endpointKey(lastConfig.url)
             _uiState.update {
                 it.copy(
@@ -125,7 +128,13 @@ class ServerViewModel constructor(
                 )
             }
 
-            val result = connectionManager.connect(lastConfig, password)
+            val server = SavedServerRegistry.fromConnection(
+                url = lastConfig.url,
+                name = lastConfig.name,
+                username = lastConfig.username,
+                allowInsecure = lastConfig.allowInsecure,
+            )
+            val result = serverConnectionRegistry.connectAndAwait(server, password)
 
             result.fold(
                 onSuccess = { projects ->
@@ -142,13 +151,13 @@ class ServerViewModel constructor(
                     }
                 },
                 onFailure = { error ->
-                    AppLog.w(TAG, "Auto-reconnect failed: ${error.message}")
+                    AppLog.w(TAG, "Auto-reconnect failed")
                     _uiState.update {
                         it.copy(
                             isConnecting = false,
                             connectingEndpointKey = null,
                             failedEndpointKey = endpointKey,
-                            error = "Could not reconnect: ${error.message}"
+                            error = "Could not reconnect to the server. Check the address and connection."
                         )
                     }
                 }
@@ -174,7 +183,7 @@ class ServerViewModel constructor(
 
     fun connectToRemote() {
         val state = _uiState.value
-        AppLog.d(TAG, "connectToRemote called, url='${state.remoteUrl}'")
+        AppLog.d(TAG, "connectToRemote called")
 
         if (state.remoteUrl.isBlank()) {
             AppLog.w(TAG, "URL is blank, showing error")
@@ -185,8 +194,20 @@ class ServerViewModel constructor(
         viewModelScope.launch {
             val url = ServerUrl.normalizeConnectUrl(state.remoteUrl)
             if (url == null) {
-                AppLog.w(TAG, "Invalid server URL: '${state.remoteUrl}'")
+                AppLog.w(TAG, "Invalid server URL")
                 _uiState.update { it.copy(isConnecting = false, error = "Invalid server URL") }
+                return@launch
+            }
+            val password = state.password.takeIf { it.isNotBlank() }
+            if (state.username.isNotBlank() && password != null &&
+                !ServerUrl.allowsCleartextCredentials(url)
+            ) {
+                _uiState.update {
+                    it.copy(
+                        isConnecting = false,
+                        error = "Credentials require HTTPS outside a private local network",
+                    )
+                }
                 return@launch
             }
             val endpointKey = ServerUrl.endpointKey(url)
@@ -198,19 +219,17 @@ class ServerViewModel constructor(
                     error = null,
                 )
             }
-            AppLog.d(TAG, "Connecting to normalized URL: $url")
+            AppLog.d(TAG, "Connecting to normalized URL")
             val identity = ServerIdentity.derive(url, state.serverNameCandidate)
 
-            val config = ServerConfig(
+            val candidate = SavedServerRegistry.fromConnection(
                 url = url,
                 name = identity.displayName,
-                isLocal = false,
                 username = state.username.takeIf { it.isNotBlank() },
-                allowInsecure = state.allowInsecure
+                allowInsecure = state.allowInsecure,
             )
-            val password = state.password.takeIf { it.isNotBlank() }
-
-            val result = connectionManager.connect(config, password)
+            val config = candidate.toServerConfig()
+            val result = serverConnectionRegistry.connectAndAwait(candidate, password)
 
             result.fold(
                 onSuccess = { projects ->
@@ -245,7 +264,7 @@ class ServerViewModel constructor(
                     }
                 },
                 onFailure = { error ->
-                    AppLog.e(TAG, "Connection failed: ${error.message}", error)
+                    AppLog.e(TAG, "Connection failed")
                     // Clear password from UI state on failure too - user can re-enter
                     _uiState.update {
                         it.copy(
@@ -253,7 +272,7 @@ class ServerViewModel constructor(
                             connectingEndpointKey = null,
                             failedEndpointKey = endpointKey,
                             password = "",
-                            error = "Failed to connect: ${error.message}"
+                            error = "Could not connect to the server. Check the address, credentials, and connection."
                         )
                     }
                 }

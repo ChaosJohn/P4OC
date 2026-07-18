@@ -1,3 +1,5 @@
+@file:Suppress("ImportOrdering", "Wrapping")
+
 package dev.blazelight.p4oc.data.remote.mapper
 
 import dev.blazelight.p4oc.core.log.AppLog
@@ -11,6 +13,7 @@ import io.mockk.every
 import io.mockk.mockkObject
 import io.mockk.unmockkObject
 import kotlinx.serialization.json.Json
+import kotlinx.serialization.json.buildJsonArray
 import kotlinx.serialization.json.JsonPrimitive
 import kotlinx.serialization.json.buildJsonObject
 import kotlinx.serialization.json.put
@@ -37,6 +40,108 @@ class EventMapperTest {
     @After
     fun tearDown() {
         unmockkObject(AppLog)
+    }
+
+    @Test
+    fun `maps installation update available version`() {
+        val dto = EventDataDto(
+            type = "installation.update-available",
+            properties = buildJsonObject {
+                put("version", "1.18.3")
+                put("ignoredFutureField", true)
+            },
+        )
+
+        assertEquals(
+            OpenCodeEvent.InstallationUpdateAvailable("1.18.3"),
+            eventMapper.mapToEvent(dto),
+        )
+    }
+
+    @Test
+    fun `maps project updated with current project payload`() {
+        val dto = EventDataDto(
+            type = "project.updated",
+            properties = buildJsonObject {
+                putJsonObject("info") {
+                    put("id", "project-1")
+                    put("worktree", "/work/projects/one")
+                    put("vcsDir", "/work/projects/one/.git")
+                    put("vcs", "git")
+                    putJsonObject("time") {
+                        put("created", 1_000L)
+                        put("updated", 2_000L)
+                        put("initialized", 1_500L)
+                    }
+                    putJsonArray("sandboxes") { add(JsonPrimitive("/tmp/sandbox")) }
+                    put("name", "Project One")
+                    putJsonObject("icon") { put("color", "blue") }
+                    putJsonObject("commands") { put("test", "./gradlew test") }
+                }
+            },
+        )
+
+        val event = eventMapper.mapToEvent(dto)
+
+        assertTrue(event is OpenCodeEvent.ProjectUpdated)
+        val project = (event as OpenCodeEvent.ProjectUpdated).project
+        assertEquals("project-1", project.id)
+        assertEquals("/work/projects/one", project.worktree)
+        assertEquals("/work/projects/one/.git", project.vcsDir)
+        assertEquals("git", project.vcs)
+        assertEquals(1_000L, project.createdAt)
+        assertEquals(1_500L, project.initializedAt)
+    }
+
+    @Test
+    fun `maps project directories updated project id`() {
+        val event = eventMapper.mapToEvent(
+            EventDataDto(
+                type = "project.directories.updated",
+                properties = buildJsonObject { put("projectID", "project-2") },
+            ),
+        )
+
+        assertEquals(OpenCodeEvent.ProjectDirectoriesUpdated("project-2"), event)
+    }
+
+    @Test
+    fun `maps models dev refreshed`() {
+        val event = eventMapper.mapToEvent(
+            EventDataDto(type = "models-dev.refreshed", properties = buildJsonObject {}),
+        )
+
+        assertEquals(OpenCodeEvent.ModelsRefreshed, event)
+    }
+
+    @Test
+    fun `maps catalog updated`() {
+        val event = eventMapper.mapToEvent(
+            EventDataDto(type = "catalog.updated", properties = buildJsonObject {}),
+        )
+
+        assertEquals(OpenCodeEvent.CatalogUpdated, event)
+    }
+
+    @Test
+    fun `maps mcp tools changed server`() {
+        val event = eventMapper.mapToEvent(
+            EventDataDto(
+                type = "mcp.tools.changed",
+                properties = buildJsonObject { put("server", "workspace-mcp") },
+            ),
+        )
+
+        assertEquals(OpenCodeEvent.McpToolsChanged("workspace-mcp"), event)
+    }
+
+    @Test
+    fun `maps global disposed`() {
+        val event = eventMapper.mapToEvent(
+            EventDataDto(type = "global.disposed", properties = buildJsonObject {}),
+        )
+
+        assertEquals(OpenCodeEvent.GlobalDisposed, event)
     }
 
     // ── message.updated ─────────────────────────────────────────────────────
@@ -214,6 +319,54 @@ class EventMapperTest {
         assertEquals("once", reply.reply)
     }
 
+    @Test
+    fun `maps question_v2 events`() {
+        val asked = eventMapper.mapToEvent(
+            EventDataDto(
+                type = "question.v2.asked",
+                properties = buildJsonObject {
+                    put("id", "que_1")
+                    put("sessionID", "sess-1")
+                    putJsonArray("questions") {
+                        add(buildJsonObject {
+                            put("header", "Confirm")
+                            put("question", "Continue?")
+                            putJsonArray("options") {
+                                add(buildJsonObject {
+                                    put("label", "Yes")
+                                    put("description", "Continue")
+                                })
+                            }
+                        })
+                    }
+                },
+            )
+        )
+        val replied = eventMapper.mapToEvent(
+            EventDataDto(
+                type = "question.v2.replied",
+                properties = buildJsonObject {
+                    put("sessionID", "sess-1")
+                    put("requestID", "que_1")
+                    putJsonArray("answers") { add(buildJsonArray { add(JsonPrimitive("Yes")) }) }
+                },
+            )
+        )
+        val rejected = eventMapper.mapToEvent(
+            EventDataDto(
+                type = "question.v2.rejected",
+                properties = buildJsonObject {
+                    put("sessionID", "sess-1")
+                    put("requestID", "que_1")
+                },
+            )
+        )
+
+        assertEquals("que_1", (asked as OpenCodeEvent.QuestionAsked).request.id)
+        assertEquals(listOf(listOf("Yes")), (replied as OpenCodeEvent.QuestionReplied).answers)
+        assertEquals("que_1", (rejected as OpenCodeEvent.QuestionRejected).requestID)
+    }
+
     // ── session.status ──────────────────────────────────────────────────────
 
     @Test
@@ -300,6 +453,25 @@ class EventMapperTest {
         val error = (event as OpenCodeEvent.SessionError).error
         assertEquals("MessageAbortedError", error?.name)
         assertEquals("Aborted", error?.message)
+    }
+
+    @Test
+    fun `maps session_error provider id for authentication recovery`() {
+        val properties = buildJsonObject {
+            put("sessionID", "sess-1")
+            putJsonObject("error") {
+                put("name", "ProviderAuthError")
+                putJsonObject("data") {
+                    put("providerID", "anthropic")
+                    put("message", "sensitive backend details")
+                }
+            }
+        }
+
+        val event = eventMapper.mapToEvent(EventDataDto(type = "session.error", properties = properties))
+
+        assertTrue(event is OpenCodeEvent.SessionError)
+        assertEquals("anthropic", (event as OpenCodeEvent.SessionError).error?.providerID)
     }
 
     // ── Unknown type ────────────────────────────────────────────────────────

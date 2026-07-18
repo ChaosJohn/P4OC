@@ -1,8 +1,8 @@
 package dev.blazelight.p4oc.ui.screens.settings
 
-import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.selection.toggleable
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.*
@@ -130,7 +130,12 @@ private fun ConnectionSwitch(
         modifier = Modifier
             .fillMaxWidth()
             .alpha(contentAlpha)
-            .clickable(role = Role.Button, enabled = enabled) { onCheckedChange(!checked) }
+            .toggleable(
+                value = checked,
+                enabled = enabled,
+                role = Role.Switch,
+                onValueChange = onCheckedChange,
+            )
             .padding(horizontal = Spacing.lg, vertical = Spacing.mdLg),
         horizontalArrangement = Arrangement.spacedBy(Spacing.lg),
         verticalAlignment = Alignment.CenterVertically
@@ -159,7 +164,7 @@ private fun ConnectionSwitch(
         }
         TuiSwitch(
             checked = checked,
-            onCheckedChange = { onCheckedChange(!checked) },
+            onCheckedChange = null,
             enabled = enabled,
             modifier = Modifier.testTag(testTag)
         )

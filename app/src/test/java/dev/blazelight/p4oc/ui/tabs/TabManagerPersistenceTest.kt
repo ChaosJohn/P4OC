@@ -125,6 +125,125 @@ class TabManagerPersistenceTest {
     }
 
     @Test
+    fun `restoreState skips workspace records with missing required values`() {
+        val manager = TabManager()
+        val state = PersistedTabState(
+            serverEndpointKey = server.endpointKey,
+            activeTabId = "missing-directory",
+            tabs = listOf(
+                PersistedTab(
+                    id = "missing-directory",
+                    startRoute = Screen.Files.route,
+                    workspaceKey = PersistedWorkspaceKey(PersistedWorkspaceKey.Type.DIRECTORY, null),
+                ),
+                PersistedTab(
+                    id = "missing-session",
+                    startRoute = Screen.Sessions.route,
+                    workspaceKey = PersistedWorkspaceKey(PersistedWorkspaceKey.Type.SESSION_SCOPED, null),
+                ),
+                PersistedTab(
+                    id = "valid-tab",
+                    startRoute = Screen.Sessions.route,
+                    workspaceKey = PersistedWorkspaceKey(PersistedWorkspaceKey.Type.GLOBAL),
+                ),
+            ),
+        )
+
+        val result = manager.restoreState(state, server)
+
+        assertTrue(result is RestoreResult.Restored)
+        assertEquals(1, (result as RestoreResult.Restored).count)
+        assertEquals(listOf(TabInstance.HOME_TAB_ID, "valid-tab"), manager.tabs.value.map { it.id })
+        assertEquals("valid-tab", manager.activeTabId.value)
+    }
+
+    @Test
+    fun `restoreState retains first valid duplicate ID and honors it as active`() {
+        val manager = TabManager()
+        val state = PersistedTabState(
+            serverEndpointKey = server.endpointKey,
+            activeTabId = "duplicate",
+            tabs = listOf(
+                PersistedTab(
+                    id = "duplicate",
+                    startRoute = Screen.Files.route,
+                    workspaceKey = PersistedWorkspaceKey(PersistedWorkspaceKey.Type.DIRECTORY, "/first"),
+                ),
+                PersistedTab(
+                    id = "duplicate",
+                    startRoute = Screen.Sessions.route,
+                    workspaceKey = PersistedWorkspaceKey(PersistedWorkspaceKey.Type.DIRECTORY, "/second"),
+                ),
+            ),
+        )
+
+        val result = manager.restoreState(state, server)
+
+        assertTrue(result is RestoreResult.Restored)
+        assertEquals(1, (result as RestoreResult.Restored).count)
+        val workTab = manager.tabs.value.single { !it.isPinnedHome }
+        assertEquals("duplicate", workTab.id)
+        assertEquals("/first", workTab.workspaceDirectory)
+        assertEquals(Screen.Files.route, workTab.startRoute)
+        assertEquals("duplicate", manager.activeTabId.value)
+    }
+
+    @Test
+    fun `restoreState lets valid occurrence follow malformed duplicate ID`() {
+        val manager = TabManager()
+        val state = PersistedTabState(
+            serverEndpointKey = server.endpointKey,
+            activeTabId = "duplicate",
+            tabs = listOf(
+                PersistedTab(
+                    id = "duplicate",
+                    startRoute = Screen.Files.route,
+                    workspaceKey = PersistedWorkspaceKey(PersistedWorkspaceKey.Type.DIRECTORY, null),
+                ),
+                PersistedTab(
+                    id = "duplicate",
+                    startRoute = Screen.Sessions.route,
+                    workspaceKey = PersistedWorkspaceKey(PersistedWorkspaceKey.Type.DIRECTORY, "/valid"),
+                ),
+            ),
+        )
+
+        val result = manager.restoreState(state, server)
+
+        assertTrue(result is RestoreResult.Restored)
+        assertEquals(1, (result as RestoreResult.Restored).count)
+        assertEquals("/valid", manager.tabs.value.single { !it.isPinnedHome }.workspaceDirectory)
+        assertEquals("duplicate", manager.activeTabId.value)
+    }
+
+    @Test
+    fun `restoreState rejects work tab using reserved Home identity`() {
+        val manager = TabManager()
+        val state = PersistedTabState(
+            serverEndpointKey = server.endpointKey,
+            activeTabId = TabInstance.HOME_TAB_ID,
+            tabs = listOf(
+                PersistedTab(
+                    id = TabInstance.HOME_TAB_ID,
+                    startRoute = Screen.Files.route,
+                    workspaceKey = PersistedWorkspaceKey(PersistedWorkspaceKey.Type.DIRECTORY, "/corrupt"),
+                ),
+                PersistedTab(
+                    id = "valid-tab",
+                    startRoute = Screen.Sessions.route,
+                    workspaceKey = PersistedWorkspaceKey(PersistedWorkspaceKey.Type.GLOBAL),
+                ),
+            ),
+        )
+
+        val result = manager.restoreState(state, server)
+
+        assertTrue(result is RestoreResult.Restored)
+        assertEquals(listOf(TabInstance.HOME_TAB_ID, "valid-tab"), manager.tabs.value.map { it.id })
+        assertEquals(TabInstance.HOME_TAB_ID, manager.activeTabId.value)
+    }
+
+    @Test
     fun `restoreState reports missing server without restoring wrong server`() {
         val manager = TabManager()
         val oldServer = ServerRef.fromEndpointKey("http://old.example:4096")
@@ -421,6 +540,12 @@ class TabManagerPersistenceTest {
         manager.createTab(Screen.Terminal.createRoute("pty-2"), otherWorkspace, server, focus = true)
 
         assertEquals(listOf("terminal/pty-1"), manager.findTerminalTabs(server, workspace).map { it.startRoute })
+    }
+
+    @Test
+    fun `dynamic terminal and diff route arguments are encoded`() {
+        assertEquals("terminal/pty%2Fwith%20space", Screen.Terminal.createRoute("pty/with space"))
+        assertEquals("session_diff/session%2Fwith%20space", Screen.SessionDiff.createRoute("session/with space"))
     }
 
     @Test

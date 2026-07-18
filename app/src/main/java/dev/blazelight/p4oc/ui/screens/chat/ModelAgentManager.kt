@@ -3,17 +3,22 @@ package dev.blazelight.p4oc.ui.screens.chat
 import dev.blazelight.p4oc.core.datastore.SettingsDataStore
 import dev.blazelight.p4oc.core.log.AppLog
 import dev.blazelight.p4oc.core.network.ApiResult
-import dev.blazelight.p4oc.core.network.ConnectionManager
+import dev.blazelight.p4oc.core.network.ServerConnectionRegistry
 import dev.blazelight.p4oc.core.network.safeApiCall
 import dev.blazelight.p4oc.data.remote.dto.AgentDto
 import dev.blazelight.p4oc.data.remote.dto.ModelDto
 import dev.blazelight.p4oc.data.remote.dto.ModelInput
 import dev.blazelight.p4oc.data.remote.dto.reasoningEfforts
+import dev.blazelight.p4oc.data.workspace.WorkspaceClient
+import dev.blazelight.p4oc.domain.model.OpenCodeEvent
 import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.FlowPreview
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.SharingStarted
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
+import kotlinx.coroutines.flow.debounce
+import kotlinx.coroutines.flow.filter
 import kotlinx.coroutines.flow.stateIn
 import kotlinx.coroutines.launch
 
@@ -21,11 +26,12 @@ import kotlinx.coroutines.launch
  * Manages model/agent loading, selection, favorites, and recents.
  */
 class ModelAgentManager(
-    private val connectionManager: ConnectionManager,
+    private val workspaceClient: WorkspaceClient,
     private val settingsDataStore: SettingsDataStore,
     private val scope: CoroutineScope,
     private val sessionId: String? = null,
-    modelSelectionCoordinator: ModelSelectionCoordinator? = null
+    modelSelectionCoordinator: ModelSelectionCoordinator? = null,
+    serverConnectionRegistry: ServerConnectionRegistry? = null,
 ) {
     private val _availableAgents = MutableStateFlow<List<AgentDto>>(emptyList())
     val availableAgents: StateFlow<List<AgentDto>> = _availableAgents.asStateFlow()
@@ -59,22 +65,40 @@ class ModelAgentManager(
                 }
             }
         }
+        serverConnectionRegistry?.let(::observeCatalogEvents)
+    }
+
+    @OptIn(FlowPreview::class)
+    private fun observeCatalogEvents(registry: ServerConnectionRegistry) {
+        scope.launch {
+            registry.events(workspaceClient.workspace.server)
+                .filter { scopedEvent ->
+                    val event = scopedEvent.event
+                    val refreshesCatalog = event is OpenCodeEvent.ModelsRefreshed ||
+                        event is OpenCodeEvent.CatalogUpdated ||
+                        event is OpenCodeEvent.McpToolsChanged
+                    scopedEvent.generation == workspaceClient.generation &&
+                        scopedEvent.workspaceKey == workspaceClient.workspace.key &&
+                        refreshesCatalog
+                }
+                .debounce(EVENT_REFRESH_DEBOUNCE_MS)
+                .collect { event ->
+                    if (event.event !is OpenCodeEvent.McpToolsChanged) loadModels()
+                    loadAgents()
+                }
+        }
     }
 
     fun loadAgents() {
         scope.launch {
-            val api = connectionManager.getApi() ?: run {
-                AppLog.d(TAG, "loadAgents: No API available")
-                return@launch
-            }
-            val result = safeApiCall { api.getAgents() }
+            val result = safeApiCall { workspaceClient.getAgents() }
             when (result) {
                 is ApiResult.Success -> {
                     AppLog.d(TAG, "loadAgents: Got ${result.data.size} agents")
                     val primaryAgents = result.data.filter {
-                        it.mode == "primary" && it.hidden != true
+                        it.mode in PRIMARY_COMPOSER_MODES && it.hidden != true
                     }
-                    AppLog.d(TAG, "loadAgents: ${primaryAgents.size} primary agents: ${primaryAgents.map { it.name }}")
+                    AppLog.d(TAG, "loadAgents: ${primaryAgents.size} primary agents")
                     _availableAgents.value = primaryAgents
                     val persistedAgent = sessionId?.let { settingsDataStore.getSelectedAgentForSession(it) }
                     val selectedAgent = persistedAgent?.let { agentName ->
@@ -83,7 +107,7 @@ class ModelAgentManager(
                     selectedAgent?.name?.let { selectAgent(it, persist = false) }
                 }
                 is ApiResult.Error -> {
-                    AppLog.e(TAG, "loadAgents failed: ${result.message}")
+                    AppLog.e(TAG, "loadAgents failed")
                 }
             }
         }
@@ -113,8 +137,7 @@ class ModelAgentManager(
 
     fun loadModels() {
         scope.launch {
-            val api = connectionManager.getApi() ?: return@launch
-            val result = safeApiCall { api.getProviders() }
+            val result = safeApiCall { workspaceClient.getProviders() }
             when (result) {
                 is ApiResult.Success -> {
                     val models = mutableListOf<Pair<String, ModelDto>>()
@@ -196,5 +219,7 @@ class ModelAgentManager(
 
     private companion object {
         const val TAG = "ModelAgentManager"
+        val PRIMARY_COMPOSER_MODES = setOf("primary", "all")
+        const val EVENT_REFRESH_DEBOUNCE_MS = 150L
     }
 }

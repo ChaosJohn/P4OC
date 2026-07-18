@@ -74,6 +74,7 @@ class FakeWorkspaceClient(
     var sendMessageBlocker: CompletableDeferred<Unit>? = null
     var abortSessionBlocker: CompletableDeferred<Unit>? = null
     var statusBlocker: CompletableDeferred<Unit>? = null
+    var listPermissionsBlocker: CompletableDeferred<Unit>? = null
     var trackStatusConcurrency: Boolean = false
     private val activeStatusCalls = AtomicInteger(0)
     var maxObservedStatusConcurrency: Int = 0
@@ -174,6 +175,7 @@ class FakeWorkspaceClient(
 
     override suspend fun listPermissions(): List<PermissionDto> {
         listPermissionsCalls += 1
+        listPermissionsBlocker?.await()
         return legacyPermissions
     }
 
@@ -231,10 +233,12 @@ class FakeWorkspaceClient(
             title: String = id,
             directory: String = "/workspace",
             updatedAt: Long = 1L,
+            parentID: String? = null,
         ): SessionDto = SessionDto(
             id = id,
             projectID = "project-$id",
             directory = directory,
+            parentID = parentID,
             title = title,
             version = "1",
             time = TimeDto(created = 1L, updated = updatedAt),

@@ -2,7 +2,6 @@ package dev.blazelight.p4oc.ui.components.chat
 
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
-import androidx.compose.foundation.clickable
 import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.rememberScrollState
@@ -27,7 +26,6 @@ import androidx.compose.ui.input.key.onPreviewKeyEvent
 import androidx.compose.ui.input.key.type
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.res.stringResource
-import androidx.compose.ui.semantics.Role
 import androidx.compose.ui.semantics.contentDescription
 import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.text.TextStyle
@@ -35,6 +33,7 @@ import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.input.ImeAction
 import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.text.style.TextOverflow
+import androidx.compose.ui.unit.dp
 import dev.blazelight.p4oc.R
 import dev.blazelight.p4oc.domain.model.Command
 import dev.blazelight.p4oc.ui.components.TuiLoadingIndicator
@@ -181,42 +180,55 @@ fun ChatInputBar(
                         attachedFiles.forEach { file ->
                             val chipColor = if (file.available) theme.accent else theme.warning
                             val chipLabelColor = if (file.available) theme.text else theme.warning
-                            Surface(
-                                shape = RectangleShape,
-                                color = chipColor.copy(alpha = 0.1f),
-                                modifier = Modifier
-                                    .height(Sizing.buttonHeightSm)
-                                    .border(Sizing.strokeMd, chipColor, RectangleShape)
-                            ) {
-                                Row(
-                                    modifier = Modifier.padding(horizontal = Spacing.mdLg),
-                                    verticalAlignment = Alignment.CenterVertically,
-                                    horizontalArrangement = Arrangement.spacedBy(Spacing.sm)
+                            val removeDescription = stringResource(
+                                R.string.chat_action_remove_attachment,
+                                file.name,
+                            )
+                            Box(modifier = Modifier.height(48.dp)) {
+                                Surface(
+                                    shape = RectangleShape,
+                                    color = chipColor.copy(alpha = 0.1f),
+                                    modifier = Modifier
+                                        .align(Alignment.Center)
+                                        .height(Sizing.buttonHeightSm)
+                                        .border(Sizing.strokeMd, chipColor, RectangleShape)
                                 ) {
-                                    Text(
-                                        file.name,
-                                        style = MaterialTheme.typography.bodySmall,
-                                        fontFamily = FontFamily.Monospace,
-                                        color = chipLabelColor,
-                                        maxLines = 1,
-                                        overflow = TextOverflow.Ellipsis,
-                                        modifier = Modifier.widthIn(max = Sizing.panelWidthMd)
-                                    )
-                                    if (!file.available) {
+                                    Row(
+                                        modifier = Modifier.padding(start = Spacing.mdLg),
+                                        verticalAlignment = Alignment.CenterVertically,
+                                        horizontalArrangement = Arrangement.spacedBy(Spacing.sm)
+                                    ) {
                                         Text(
-                                            text = stringResource(R.string.attachment_unavailable),
-                                            style = MaterialTheme.typography.labelSmall,
+                                            file.name,
+                                            style = MaterialTheme.typography.bodySmall,
                                             fontFamily = FontFamily.Monospace,
-                                            color = theme.warning,
+                                            color = chipLabelColor,
+                                            maxLines = 1,
+                                            overflow = TextOverflow.Ellipsis,
+                                            modifier = Modifier.widthIn(max = Sizing.panelWidthMd)
                                         )
+                                        if (!file.available) {
+                                            Text(
+                                                text = stringResource(R.string.attachment_unavailable),
+                                                style = MaterialTheme.typography.labelSmall,
+                                                fontFamily = FontFamily.Monospace,
+                                                color = theme.warning,
+                                            )
+                                        }
+                                        Spacer(modifier = Modifier.width(Sizing.iconButtonMd))
                                     }
+                                }
+                                IconButton(
+                                    onClick = { onRemoveAttachment(file.path) },
+                                    modifier = Modifier
+                                        .align(Alignment.CenterEnd)
+                                        .size(48.dp)
+                                        .semantics { contentDescription = removeDescription }
+                                ) {
                                     Text(
                                         text = "×",
                                         color = theme.textMuted,
                                         fontFamily = FontFamily.Monospace,
-                                        modifier = Modifier.clickable(
-                                            role = Role.Button
-                                        ) { onRemoveAttachment(file.path) }
                                     )
                                 }
                             }

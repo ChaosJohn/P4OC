@@ -7,12 +7,8 @@ import dev.blazelight.p4oc.core.datastore.SettingsDataStore
 import dev.blazelight.p4oc.core.datastore.VisualSettings
 import dev.blazelight.p4oc.core.haptic.HapticFeedback
 import dev.blazelight.p4oc.core.log.AppLog
-import dev.blazelight.p4oc.core.network.Connection
-import dev.blazelight.p4oc.core.network.ConnectionManager
 import dev.blazelight.p4oc.core.network.ConnectionState
 import dev.blazelight.p4oc.core.network.OpenCodeApi
-import dev.blazelight.p4oc.core.network.OpenCodeEventSource
-import dev.blazelight.p4oc.core.network.ServerConfig
 import dev.blazelight.p4oc.data.files.FileRepository
 import dev.blazelight.p4oc.data.files.FileRepositoryFactory
 import dev.blazelight.p4oc.data.remote.dto.FileNodeDto
@@ -67,10 +63,8 @@ class ChatViewModelDraftPersistenceTest {
     @get:Rule
     val mainDispatcherRule = DraftPersistenceMainDispatcherRule()
 
-    private lateinit var connectionManager: ConnectionManager
     private lateinit var messageMapper: MessageMapper
     private lateinit var settingsDataStore: SettingsDataStore
-    private lateinit var eventSource: OpenCodeEventSource
     private lateinit var events: MutableSharedFlow<ScopedEvent>
     private lateinit var api: OpenCodeApi
     private lateinit var workspaceClient: WorkspaceClient
@@ -91,10 +85,8 @@ class ChatViewModelDraftPersistenceTest {
         every { AppLog.e(any(), any<String>()) } returns Unit
         every { AppLog.e(any(), any<String>(), any()) } returns Unit
 
-        connectionManager = mockk()
         messageMapper = MessageMapper(Json { ignoreUnknownKeys = true })
         settingsDataStore = mockk()
-        eventSource = mockk()
         events = MutableSharedFlow(extraBufferCapacity = 32)
         api = mockk(relaxed = true)
         workspaceClient = WorkspaceClient(
@@ -104,20 +96,8 @@ class ChatViewModelDraftPersistenceTest {
             ),
             generation = ServerGeneration(0L),
             apiProvider = ActiveServerApiProvider { _, _ -> api },
+            connectionState = MutableStateFlow(ConnectionState.Disconnected),
         )
-        every { connectionManager.connectionState } returns MutableStateFlow(ConnectionState.Disconnected)
-        every { connectionManager.getApi() } returns api
-        every { connectionManager.getEventSource() } returns eventSource
-        every { eventSource.events } returns MutableSharedFlow(extraBufferCapacity = 32)
-        every { connectionManager.connection } returns MutableStateFlow(
-            Connection(
-                config = ServerConfig.LOCAL_DEFAULT,
-                generation = ServerGeneration(0L),
-                api = api,
-                eventSource = eventSource,
-            )
-        )
-        every { connectionManager.scopedEvents } returns events
         every { settingsDataStore.favoriteModels } returns flowOf(emptySet())
         every { settingsDataStore.recentModels } returns flowOf(emptyList())
         every { settingsDataStore.chatSettings } returns flowOf(ChatSettings())
@@ -142,6 +122,21 @@ class ChatViewModelDraftPersistenceTest {
         vm.updateInput("unsent draft")
 
         assertEquals("unsent draft", savedStateHandle.get<String>("chat_draft_text"))
+    }
+
+    @Test
+    fun updateInput_oversizedDraftRemovesPersistenceAndSmallerDraftRecovers() = runTest {
+        val savedStateHandle = SavedStateHandle(mapOf(Screen.Chat.ARG_SESSION_ID to "session-1"))
+        val vm = createViewModel(savedStateHandle)
+
+        vm.updateInput("x".repeat(70_000))
+
+        assertEquals(70_000, vm.uiState.value.inputText.length)
+        assertNull(savedStateHandle.get<String>("chat_draft_text"))
+
+        vm.updateInput("small again")
+
+        assertEquals("small again", savedStateHandle.get<String>("chat_draft_text"))
     }
 
     @Test
@@ -187,8 +182,34 @@ class ChatViewModelDraftPersistenceTest {
     }
 
     @Test
+    fun attachments_oversizedJsonRemovesPersistenceAndSmallerListRecovers() = runTest {
+        val savedStateHandle = SavedStateHandle(mapOf(Screen.Chat.ARG_SESSION_ID to "session-1"))
+        val vm = createViewModel(savedStateHandle)
+        val oversized = SelectedFile(
+            path = "src/${"x".repeat(70_000)}.kt",
+            name = "Large.kt",
+            mimeType = "text/x-kotlin",
+        )
+
+        vm.filePickerManager.restoreAttachedFiles(listOf(oversized))
+        advanceUntilIdle()
+
+        assertEquals(oversized, vm.filePickerManager.attachedFiles.value.single())
+        assertNull(savedStateHandle.get<String>("chat_attached_files"))
+
+        vm.filePickerManager.detachFile(oversized.path)
+        vm.filePickerManager.restoreAttachedFiles(
+            listOf(SelectedFile(path = "src/Small.kt", name = "Small.kt", mimeType = "text/x-kotlin"))
+        )
+        advanceUntilIdle()
+
+        val persisted = savedStateHandle.get<String>("chat_attached_files")
+        assertEquals("src/Small.kt", Json.decodeFromString<List<SelectedFile>>(persisted!!).single().path)
+    }
+
+    @Test
     fun createViewModel_restoresAvailableAttachmentAsSendable() = runTest {
-        coEvery { api.listFiles("src", "/test") } returns listOf(
+        coEvery { api.listFiles("src", "/test", null) } returns listOf(
             FileNodeDto(
                 name = "Main.kt",
                 path = "src/Main.kt",
@@ -196,7 +217,7 @@ class ChatViewModelDraftPersistenceTest {
                 type = "file",
             )
         )
-        coEvery { api.sendMessageAsync(any(), any(), any()) } returns Unit
+        coEvery { api.sendMessageAsync(any(), any(), any(), null) } returns Unit
         val savedStateHandle = SavedStateHandle(
             mapOf(
                 Screen.Chat.ARG_SESSION_ID to "session-1",
@@ -214,13 +235,13 @@ class ChatViewModelDraftPersistenceTest {
         vm.sendMessage()
         advanceUntilIdle()
 
-        coVerify(exactly = 1) { api.sendMessageAsync("session-1", any(), "/test") }
+        coVerify(exactly = 1) { api.sendMessageAsync("session-1", any(), "/test", null) }
     }
 
     @Test
     fun createViewModel_marksRestoredMissingAttachmentUnavailableAndBlocksSend() = runTest {
-        coEvery { api.listFiles("src", "/test") } returns emptyList()
-        coEvery { api.sendMessageAsync(any(), any(), any()) } returns Unit
+        coEvery { api.listFiles("src", "/test", null) } returns emptyList()
+        coEvery { api.sendMessageAsync(any(), any(), any(), null) } returns Unit
         val savedStateHandle = SavedStateHandle(
             mapOf(
                 Screen.Chat.ARG_SESSION_ID to "session-1",
@@ -239,15 +260,15 @@ class ChatViewModelDraftPersistenceTest {
         vm.sendMessage()
         advanceUntilIdle()
 
-        coVerify(exactly = 0) { api.sendMessageAsync(any(), any(), any()) }
+        coVerify(exactly = 0) { api.sendMessageAsync(any(), any(), any(), null) }
         assertEquals("please read this", vm.uiState.value.inputText)
         assertEquals(listOf("src/Missing.kt"), vm.filePickerManager.attachedFiles.value.map { it.path })
     }
 
     @Test
     fun detachFile_removingUnavailableRestoredAttachmentClearsSendBlocker() = runTest {
-        coEvery { api.listFiles("src", "/test") } returns emptyList()
-        coEvery { api.sendMessageAsync(any(), any(), any()) } returns Unit
+        coEvery { api.listFiles("src", "/test", null) } returns emptyList()
+        coEvery { api.sendMessageAsync(any(), any(), any(), null) } returns Unit
         val savedStateHandle = SavedStateHandle(
             mapOf(
                 Screen.Chat.ARG_SESSION_ID to "session-1",
@@ -264,12 +285,12 @@ class ChatViewModelDraftPersistenceTest {
         advanceUntilIdle()
 
         assertTrue(vm.filePickerManager.attachedFiles.value.isEmpty())
-        coVerify(exactly = 1) { api.sendMessageAsync("session-1", any(), "/test") }
+        coVerify(exactly = 1) { api.sendMessageAsync("session-1", any(), "/test", null) }
     }
 
     @Test
     fun createViewModel_marksRestoredAttachmentUnavailableWhenValidationFails() = runTest {
-        coEvery { api.listFiles("src", "/test") } throws HttpException(
+        coEvery { api.listFiles("src", "/test", null) } throws HttpException(
             Response.error<Unit>(403, "forbidden".toResponseBody(null))
         )
         val savedStateHandle = SavedStateHandle(
@@ -291,8 +312,8 @@ class ChatViewModelDraftPersistenceTest {
     fun sendMessage_successClearsPersistedDraftAndAttachments() = runTest {
         val savedStateHandle = SavedStateHandle(mapOf(Screen.Chat.ARG_SESSION_ID to "session-1"))
         val vm = createViewModel(savedStateHandle)
-        coEvery { api.sendMessageAsync(any(), any(), any()) } returns Unit
-        coEvery { api.listFiles("src", "/test") } returns listOf(
+        coEvery { api.sendMessageAsync(any(), any(), any(), null) } returns Unit
+        coEvery { api.listFiles("src", "/test", null) } returns listOf(
             FileNodeDto(
                 name = "Main.kt",
                 path = "src/Main.kt",
@@ -337,7 +358,6 @@ class ChatViewModelDraftPersistenceTest {
             workspaceClient = workspaceClient,
             sessionRepository = sessionRepository,
             uploadCoordinator = testUploadCoordinator(fileRepository),
-            connectionManager = connectionManager,
             settingsDataStore = settingsDataStore,
             hapticFeedback = hapticFeedback,
         ).also { advanceUntilIdle() }

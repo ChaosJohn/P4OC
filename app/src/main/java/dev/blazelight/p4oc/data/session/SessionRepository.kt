@@ -21,13 +21,20 @@ interface SessionRepository {
 
     fun sessionUiState(sessionId: SessionId): StateFlow<SessionUiState>
 
+    /**
+     * Keeps the cached message and UI state for [sessionId] alive until the returned
+     * lease is closed. The final lease release evicts that per-session state.
+     */
+    fun acquireSession(sessionId: SessionId): AutoCloseable
+
     fun clearPermission(sessionId: SessionId, permissionId: String)
 
     fun clearPermissionByRequestId(sessionId: SessionId, requestId: String)
 
     fun clearQuestion(sessionId: SessionId, requestId: String? = null)
 
-    suspend fun loadMessages(sessionId: SessionId, limit: Int? = null)
+    /** Loads the newest [limit] messages and returns the number supplied by the server. */
+    suspend fun loadMessages(sessionId: SessionId, limit: Int): Int
 
     fun sendMessageAsync(sessionId: SessionId, request: SendMessageRequest): Deferred<Result<Unit>>
 

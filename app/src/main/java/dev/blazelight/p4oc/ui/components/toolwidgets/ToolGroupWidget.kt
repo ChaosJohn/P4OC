@@ -13,8 +13,11 @@ import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.RectangleShape
+import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.semantics.Role
+import androidx.compose.ui.semantics.contentDescription
+import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.text.SpanStyle
 import androidx.compose.ui.text.buildAnnotatedString
 import androidx.compose.ui.text.font.FontFamily
@@ -57,12 +60,14 @@ private data class ToolGroup(
  * Expanded: HUD + full tool widgets
  */
 @Composable
+@Suppress("CyclomaticComplexMethod", "LongParameterList", "LongMethod", "FunctionNaming")
 fun ToolGroupWidget(
     tools: List<Part.Tool>,
     defaultState: ToolWidgetState,
     pendingPermissionIdsByCallId: Map<String, String> = emptyMap(),
     onToolApprove: (String) -> Unit,
     onToolDeny: (String) -> Unit,
+    onToolAlways: (String) -> Unit,
     onOpenSubSession: ((String) -> Unit)? = null,
     modifier: Modifier = Modifier
 ) {
@@ -150,6 +155,7 @@ fun ToolGroupWidget(
             Row(
                 modifier = Modifier
                     .fillMaxWidth()
+                    .heightIn(min = Sizing.minTouchTarget)
                     .background(theme.backgroundPanel.copy(alpha = 0.5f))
                     .clickable(role = Role.Button) { currentState = currentState.next() }
                     .padding(horizontal = Spacing.sm, vertical = Spacing.xxs),
@@ -193,12 +199,16 @@ fun ToolGroupWidget(
                             // Show approval buttons for live or recovered pending permissions.
                             if (tool.callID in pendingPermissionIdsByCallId.keys) {
                                 PendingApprovalButtonsInline(
+                                    requestId = pendingPermissionIdsByCallId[tool.callID] ?: tool.callID,
                                     onApprove = {
                                         onToolApprove(
                                             pendingPermissionIdsByCallId[tool.callID] ?: tool.callID
                                         )
                                     },
-                                    onDeny = { onToolDeny(pendingPermissionIdsByCallId[tool.callID] ?: tool.callID) }
+                                    onAlways = {
+                                        onToolAlways(pendingPermissionIdsByCallId[tool.callID] ?: tool.callID)
+                                    },
+                                    onDeny = { onToolDeny(pendingPermissionIdsByCallId[tool.callID] ?: tool.callID) },
                                 )
                             }
                         }
@@ -207,13 +217,27 @@ fun ToolGroupWidget(
                             ToolCallExpanded(
                                 tool = tool,
                                 onClick = { currentState = currentState.next() },
-                                showApprovalActions = tool.callID in pendingPermissionIdsByCallId.keys,
+                                showApprovalActions = false,
                                 approvalRequestId = pendingPermissionIdsByCallId[tool.callID] ?: tool.callID,
                                 onToolApprove = onToolApprove,
                                 onToolDeny = onToolDeny,
                                 onOpenSubSession = onOpenSubSession,
                                 modifier = Modifier.fillMaxWidth()
                             )
+                            if (tool.callID in pendingPermissionIdsByCallId.keys) {
+                                PendingApprovalButtonsInline(
+                                    requestId = pendingPermissionIdsByCallId[tool.callID] ?: tool.callID,
+                                    onApprove = {
+                                        onToolApprove(pendingPermissionIdsByCallId[tool.callID] ?: tool.callID)
+                                    },
+                                    onAlways = {
+                                        onToolAlways(pendingPermissionIdsByCallId[tool.callID] ?: tool.callID)
+                                    },
+                                    onDeny = {
+                                        onToolDeny(pendingPermissionIdsByCallId[tool.callID] ?: tool.callID)
+                                    },
+                                )
+                            }
                         }
                         else -> {} // Oneline handled above
                     }
@@ -224,8 +248,11 @@ fun ToolGroupWidget(
 }
 
 @Composable
+@Suppress("FunctionNaming")
 private fun PendingApprovalButtonsInline(
+    requestId: String,
     onApprove: () -> Unit,
+    onAlways: () -> Unit,
     onDeny: () -> Unit
 ) {
     val theme = LocalOpenCodeTheme.current
@@ -234,14 +261,16 @@ private fun PendingApprovalButtonsInline(
             .fillMaxWidth()
             .background(theme.secondary.copy(alpha = 0.2f))
             .padding(horizontal = Spacing.md, vertical = Spacing.xs),
-        horizontalArrangement = Arrangement.spacedBy(Spacing.md)
+        horizontalArrangement = Arrangement.spacedBy(Spacing.xs)
     ) {
         OutlinedButton(
             onClick = onDeny,
             modifier = Modifier
                 .weight(1f)
-                .height(Sizing.chipHeight),
-            contentPadding = PaddingValues(horizontal = Spacing.md, vertical = Spacing.none),
+                .heightIn(min = Sizing.minTouchTarget)
+                .semantics { contentDescription = "Deny permission $requestId" }
+                .testTag("tool_permission_deny_$requestId"),
+            contentPadding = PaddingValues(horizontal = Spacing.xs, vertical = Spacing.none),
             shape = RectangleShape
         ) {
             Text(stringResource(R.string.deny), style = MaterialTheme.typography.labelSmall)
@@ -250,11 +279,25 @@ private fun PendingApprovalButtonsInline(
             onClick = onApprove,
             modifier = Modifier
                 .weight(1f)
-                .height(Sizing.chipHeight),
-            contentPadding = PaddingValues(horizontal = Spacing.md, vertical = Spacing.none),
+                .heightIn(min = Sizing.minTouchTarget)
+                .semantics { contentDescription = "Allow permission once $requestId" }
+                .testTag("tool_permission_allow_once_$requestId"),
+            contentPadding = PaddingValues(horizontal = Spacing.xs, vertical = Spacing.none),
             shape = RectangleShape
         ) {
             Text(stringResource(R.string.allow), style = MaterialTheme.typography.labelSmall)
+        }
+        OutlinedButton(
+            onClick = onAlways,
+            modifier = Modifier
+                .weight(1f)
+                .heightIn(min = Sizing.minTouchTarget)
+                .semantics { contentDescription = "Always allow permission $requestId" }
+                .testTag("tool_permission_allow_always_$requestId"),
+            contentPadding = PaddingValues(horizontal = Spacing.xs, vertical = Spacing.none),
+            shape = RectangleShape,
+        ) {
+            Text(stringResource(R.string.always_allow), style = MaterialTheme.typography.labelSmall)
         }
     }
 }

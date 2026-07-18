@@ -2,7 +2,7 @@ package dev.blazelight.p4oc.ui.screens.chat
 
 import dev.blazelight.p4oc.core.datastore.SettingsDataStore
 import dev.blazelight.p4oc.core.log.AppLog
-import dev.blazelight.p4oc.core.network.ConnectionManager
+import dev.blazelight.p4oc.core.network.ConnectionState
 import dev.blazelight.p4oc.core.network.OpenCodeApi
 import dev.blazelight.p4oc.data.remote.dto.AgentDto
 import dev.blazelight.p4oc.data.remote.dto.ModelDto
@@ -10,6 +10,11 @@ import dev.blazelight.p4oc.data.remote.dto.ModelInput
 import dev.blazelight.p4oc.data.remote.dto.ModelRefDto
 import dev.blazelight.p4oc.data.remote.dto.ProviderDto
 import dev.blazelight.p4oc.data.remote.dto.ProvidersResponseDto
+import dev.blazelight.p4oc.data.server.ActiveServerApiProvider
+import dev.blazelight.p4oc.data.workspace.WorkspaceClient
+import dev.blazelight.p4oc.domain.server.ServerGeneration
+import dev.blazelight.p4oc.domain.server.ServerRef
+import dev.blazelight.p4oc.domain.workspace.Workspace
 import io.mockk.coEvery
 import io.mockk.coVerify
 import io.mockk.every
@@ -17,6 +22,7 @@ import io.mockk.mockk
 import io.mockk.mockkObject
 import io.mockk.unmockkObject
 import kotlinx.coroutines.ExperimentalCoroutinesApi
+import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.flowOf
 import kotlinx.coroutines.test.advanceUntilIdle
 import kotlinx.coroutines.test.runCurrent
@@ -29,9 +35,14 @@ import org.junit.Test
 @OptIn(ExperimentalCoroutinesApi::class)
 class ModelAgentManagerTest {
 
-    private val connectionManager: ConnectionManager = mockk()
     private val settingsDataStore: SettingsDataStore = mockk(relaxed = true)
     private val api: OpenCodeApi = mockk()
+    private val workspaceClient = WorkspaceClient(
+        workspace = Workspace(ServerRef.fromEndpointKey("http://test.local"), "/test"),
+        generation = ServerGeneration(1L),
+        apiProvider = ActiveServerApiProvider { _, _ -> api },
+        connectionState = MutableStateFlow(ConnectionState.Disconnected),
+    )
 
     @Before
     fun setUp() {
@@ -40,7 +51,6 @@ class ModelAgentManagerTest {
         every { AppLog.d(any(), any<() -> String>()) } returns Unit
         every { AppLog.e(any(), any<String>()) } returns Unit
         every { AppLog.e(any(), any<String>(), any()) } returns Unit
-        every { connectionManager.getApi() } returns api
         every { settingsDataStore.favoriteModels } returns flowOf(emptySet())
         every { settingsDataStore.recentModels } returns flowOf(emptyList())
     }
@@ -68,23 +78,25 @@ class ModelAgentManagerTest {
     // ── loadAgents ──────────────────────────────────────────────────────────
 
     @Test
-    fun `loadAgents filters to primary non-hidden agents`() = runTest {
+    fun `loadAgents includes primary and all non-hidden agents`() = runTest {
         val agents = listOf(
             makeAgent("build", mode = "primary"),
             makeAgent("code", mode = "primary"),
+            makeAgent("general", mode = "all"),
             makeAgent("hidden-agent", mode = "primary", hidden = true),
             makeAgent("subagent", mode = "subagent")
         )
-        coEvery { api.getAgents() } returns agents
+        coEvery { api.getAgents(any(), null) } returns agents
 
-        val manager = ModelAgentManager(connectionManager, settingsDataStore, this)
+        val manager = ModelAgentManager(workspaceClient, settingsDataStore, this)
         manager.loadAgents()
         advanceUntilIdle()
 
         val result = manager.availableAgents.value
-        assertEquals(2, result.size)
+        assertEquals(3, result.size)
         assertEquals("build", result[0].name)
         assertEquals("code", result[1].name)
+        assertEquals("general", result[2].name)
     }
 
     @Test
@@ -94,9 +106,9 @@ class ModelAgentManagerTest {
             makeAgent("build", mode = "primary"),
             makeAgent("ask", mode = "primary")
         )
-        coEvery { api.getAgents() } returns agents
+        coEvery { api.getAgents(any(), null) } returns agents
 
-        val manager = ModelAgentManager(connectionManager, settingsDataStore, this)
+        val manager = ModelAgentManager(workspaceClient, settingsDataStore, this)
         manager.loadAgents()
         advanceUntilIdle()
 
@@ -109,9 +121,9 @@ class ModelAgentManagerTest {
             makeAgent("code", mode = "primary"),
             makeAgent("ask", mode = "primary")
         )
-        coEvery { api.getAgents() } returns agents
+        coEvery { api.getAgents(any(), null) } returns agents
 
-        val manager = ModelAgentManager(connectionManager, settingsDataStore, this)
+        val manager = ModelAgentManager(workspaceClient, settingsDataStore, this)
         manager.loadAgents()
         advanceUntilIdle()
 
@@ -127,9 +139,9 @@ class ModelAgentManagerTest {
                 model = ModelRefDto(providerID = "anthropic", modelID = "claude-3")
             )
         )
-        coEvery { api.getAgents() } returns agents
+        coEvery { api.getAgents(any(), null) } returns agents
 
-        val manager = ModelAgentManager(connectionManager, settingsDataStore, this)
+        val manager = ModelAgentManager(workspaceClient, settingsDataStore, this)
         manager.loadAgents()
         advanceUntilIdle()
 
@@ -150,9 +162,9 @@ class ModelAgentManagerTest {
                 model = ModelRefDto(providerID = "anthropic", modelID = "claude-3")
             )
         )
-        coEvery { api.getAgents() } returns agents
+        coEvery { api.getAgents(any(), null) } returns agents
 
-        val manager = ModelAgentManager(connectionManager, settingsDataStore, this)
+        val manager = ModelAgentManager(workspaceClient, settingsDataStore, this)
         manager.loadAgents()
         advanceUntilIdle()
 
@@ -184,10 +196,10 @@ class ModelAgentManagerTest {
             default = mapOf("openai" to "gpt-4"),
             connected = listOf("openai")
         )
-        coEvery { api.getAgents() } returns agents
-        coEvery { api.getProviders() } returns providersResponse
+        coEvery { api.getAgents(any(), null) } returns agents
+        coEvery { api.getProviders(any(), null) } returns providersResponse
 
-        val manager = ModelAgentManager(connectionManager, settingsDataStore, this)
+        val manager = ModelAgentManager(workspaceClient, settingsDataStore, this)
         manager.loadAgents()
         advanceUntilIdle()
         manager.loadModels()
@@ -197,22 +209,10 @@ class ModelAgentManagerTest {
     }
 
     @Test
-    fun `loadAgents handles null API gracefully`() = runTest {
-        every { connectionManager.getApi() } returns null
-
-        val manager = ModelAgentManager(connectionManager, settingsDataStore, this)
-        manager.loadAgents()
-        advanceUntilIdle()
-
-        assertTrue(manager.availableAgents.value.isEmpty())
-        assertNull(manager.selectedAgent.value)
-    }
-
-    @Test
     fun `loadAgents handles API error gracefully`() = runTest {
-        coEvery { api.getAgents() } throws RuntimeException("Network error")
+        coEvery { api.getAgents(any(), null) } throws RuntimeException("Network error")
 
-        val manager = ModelAgentManager(connectionManager, settingsDataStore, this)
+        val manager = ModelAgentManager(workspaceClient, settingsDataStore, this)
         manager.loadAgents()
         advanceUntilIdle()
 
@@ -241,9 +241,9 @@ class ModelAgentManagerTest {
             default = mapOf("openai" to "gpt-4"),
             connected = listOf("anthropic")
         )
-        coEvery { api.getProviders() } returns providersResponse
+        coEvery { api.getProviders(any(), null) } returns providersResponse
 
-        val manager = ModelAgentManager(connectionManager, settingsDataStore, this)
+        val manager = ModelAgentManager(workspaceClient, settingsDataStore, this)
         advanceUntilIdle()
 
         manager.loadModels()
@@ -282,9 +282,9 @@ class ModelAgentManagerTest {
             default = mapOf("openai" to "gpt-4"),
             connected = listOf("anthropic", "openai")
         )
-        coEvery { api.getProviders() } returns providersResponse
+        coEvery { api.getProviders(any(), null) } returns providersResponse
 
-        val manager = ModelAgentManager(connectionManager, settingsDataStore, this)
+        val manager = ModelAgentManager(workspaceClient, settingsDataStore, this)
         advanceUntilIdle()
 
         manager.loadModels()
@@ -318,9 +318,9 @@ class ModelAgentManagerTest {
             default = mapOf("openai" to "gpt-4"),
             connected = listOf("anthropic", "openai")
         )
-        coEvery { api.getProviders() } returns providersResponse
+        coEvery { api.getProviders(any(), null) } returns providersResponse
 
-        val manager = ModelAgentManager(connectionManager, settingsDataStore, this)
+        val manager = ModelAgentManager(workspaceClient, settingsDataStore, this)
         manager.selectModel(selectedModel)
         advanceUntilIdle()
 
@@ -347,9 +347,9 @@ class ModelAgentManagerTest {
             default = mapOf("openai" to "gpt-4"),
             connected = listOf("openai")
         )
-        coEvery { api.getProviders() } returns providersResponse
+        coEvery { api.getProviders(any(), null) } returns providersResponse
 
-        val manager = ModelAgentManager(connectionManager, settingsDataStore, this)
+        val manager = ModelAgentManager(workspaceClient, settingsDataStore, this)
         manager.selectModel(staleModel)
         advanceUntilIdle()
 
@@ -387,9 +387,9 @@ class ModelAgentManagerTest {
             default = mapOf("anthropic" to "claude-3"),
             connected = listOf("anthropic")
         )
-        coEvery { api.getProviders() } returns providersResponse
+        coEvery { api.getProviders(any(), null) } returns providersResponse
 
-        val manager = ModelAgentManager(connectionManager, settingsDataStore, this)
+        val manager = ModelAgentManager(workspaceClient, settingsDataStore, this)
         advanceUntilIdle()
 
         manager.loadModels()
@@ -421,9 +421,9 @@ class ModelAgentManagerTest {
             default = mapOf("openai" to "gpt-4"),
             connected = listOf("openai")
         )
-        coEvery { api.getProviders() } returns providersResponse
+        coEvery { api.getProviders(any(), null) } returns providersResponse
 
-        val manager = ModelAgentManager(connectionManager, settingsDataStore, this)
+        val manager = ModelAgentManager(workspaceClient, settingsDataStore, this)
         advanceUntilIdle()
 
         manager.loadModels()
@@ -438,7 +438,7 @@ class ModelAgentManagerTest {
     @Test
     fun `active model change updates selection when no agent or explicit model override`() = runTest {
         val coordinator = ModelSelectionCoordinator()
-        val manager = ModelAgentManager(connectionManager, settingsDataStore, backgroundScope, null, coordinator)
+        val manager = ModelAgentManager(workspaceClient, settingsDataStore, backgroundScope, null, coordinator)
         advanceUntilIdle()
         runCurrent()
 
@@ -452,7 +452,7 @@ class ModelAgentManagerTest {
     @Test
     fun `active model change does not replace explicit user selection`() = runTest {
         val coordinator = ModelSelectionCoordinator()
-        val manager = ModelAgentManager(connectionManager, settingsDataStore, backgroundScope, null, coordinator)
+        val manager = ModelAgentManager(workspaceClient, settingsDataStore, backgroundScope, null, coordinator)
         val explicitModel = ModelInput(providerID = "openai", modelID = "gpt-4")
         manager.selectModel(explicitModel)
         advanceUntilIdle()
@@ -474,8 +474,8 @@ class ModelAgentManagerTest {
                 model = ModelRefDto(providerID = "openai", modelID = "gpt-4")
             )
         )
-        coEvery { api.getAgents() } returns agents
-        val manager = ModelAgentManager(connectionManager, settingsDataStore, backgroundScope, null, coordinator)
+        coEvery { api.getAgents(any(), null) } returns agents
+        val manager = ModelAgentManager(workspaceClient, settingsDataStore, backgroundScope, null, coordinator)
         manager.loadAgents()
         advanceUntilIdle()
         runCurrent()
@@ -492,7 +492,7 @@ class ModelAgentManagerTest {
     fun `selectModel adds to recent models`() = runTest {
         val model = ModelInput(providerID = "anthropic", modelID = "claude-3")
 
-        val manager = ModelAgentManager(connectionManager, settingsDataStore, this)
+        val manager = ModelAgentManager(workspaceClient, settingsDataStore, this)
         manager.selectModel(model)
         advanceUntilIdle()
 

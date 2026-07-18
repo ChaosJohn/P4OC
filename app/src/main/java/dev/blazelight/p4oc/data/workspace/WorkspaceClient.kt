@@ -1,26 +1,38 @@
+@file:Suppress("ImportOrdering")
+
 package dev.blazelight.p4oc.data.workspace
 
+import dev.blazelight.p4oc.core.network.ConnectionState
 import dev.blazelight.p4oc.core.network.OpenCodeApi
+import dev.blazelight.p4oc.data.remote.dto.AddMcpServerRequest
+import dev.blazelight.p4oc.data.remote.dto.AgentDto
 import dev.blazelight.p4oc.data.remote.dto.CommandDto
+import dev.blazelight.p4oc.data.remote.dto.ConfigDto
 import dev.blazelight.p4oc.data.remote.dto.CreateSessionRequest
 import dev.blazelight.p4oc.data.remote.dto.ExecuteCommandRequest
 import dev.blazelight.p4oc.data.remote.dto.FileContentDto
-import dev.blazelight.p4oc.data.remote.dto.FileDiffDto
 import dev.blazelight.p4oc.data.remote.dto.FileNodeDto
 import dev.blazelight.p4oc.data.remote.dto.FileStatusDto
 import dev.blazelight.p4oc.data.remote.dto.ForkSessionRequest
 import dev.blazelight.p4oc.data.remote.dto.InitSessionRequest
+import dev.blazelight.p4oc.data.remote.dto.McpStatusDto
 import dev.blazelight.p4oc.data.remote.dto.MessageWrapperDto
+import dev.blazelight.p4oc.data.remote.dto.OAuthCallbackRequest
 import dev.blazelight.p4oc.data.remote.dto.PermissionDto
 import dev.blazelight.p4oc.data.remote.dto.PermissionResponseRequest
 import dev.blazelight.p4oc.data.remote.dto.PermissionV2RequestDto
 import dev.blazelight.p4oc.data.remote.dto.ProjectDto
+import dev.blazelight.p4oc.data.remote.dto.ProviderAuthAuthorizationDto
+import dev.blazelight.p4oc.data.remote.dto.ProviderAuthAuthorizeRequest
+import dev.blazelight.p4oc.data.remote.dto.ProviderAuthMethodDto
+import dev.blazelight.p4oc.data.remote.dto.ProvidersResponseDto
 import dev.blazelight.p4oc.data.remote.dto.QuestionReplyRequest
 import dev.blazelight.p4oc.data.remote.dto.QuestionRequestDto
 import dev.blazelight.p4oc.data.remote.dto.RevertSessionRequest
 import dev.blazelight.p4oc.data.remote.dto.SendMessageRequest
 import dev.blazelight.p4oc.data.remote.dto.SessionDto
 import dev.blazelight.p4oc.data.remote.dto.SessionStatusDto
+import dev.blazelight.p4oc.data.remote.dto.SnapshotFileDiffDto
 import dev.blazelight.p4oc.data.remote.dto.ShellCommandRequest
 import dev.blazelight.p4oc.data.remote.dto.SymbolDto
 import dev.blazelight.p4oc.data.remote.dto.TodoDto
@@ -29,6 +41,9 @@ import dev.blazelight.p4oc.data.remote.dto.VcsInfoDto
 import dev.blazelight.p4oc.data.server.ActiveServerApiProvider
 import dev.blazelight.p4oc.domain.server.ServerGeneration
 import dev.blazelight.p4oc.domain.workspace.Workspace
+import kotlinx.coroutines.flow.StateFlow
+import kotlinx.serialization.SerializationException
+
 import retrofit2.HttpException
 import java.io.IOException
 
@@ -36,12 +51,17 @@ class WorkspaceClient(
     override val workspace: Workspace,
     val generation: ServerGeneration,
     private val apiProvider: ActiveServerApiProvider,
+    val connectionState: StateFlow<ConnectionState>,
 ) : SessionWorkspaceClient {
     private val api: OpenCodeApi
         get() = apiProvider.apiFor(workspace.server, generation)
     private val directory: String? = workspace.directory
 
-    override suspend fun listProjects(): List<ProjectDto> = api.listProjects()
+    override suspend fun listProjects(): List<ProjectDto> = api.listProjects(directory = null, workspace = null)
+
+    /** Probes a directory returned by [listProjects] using that project as API scope. */
+    suspend fun listProjectFiles(projectDirectory: String, path: String = "."): List<FileNodeDto> =
+        api.listFiles(path, projectDirectory, workspace = null)
 
     override suspend fun listSessions(
         directory: String?,
@@ -50,64 +70,103 @@ class WorkspaceClient(
         start: Long?,
         search: String?,
         limit: Int?,
-    ): List<SessionDto> = api.listSessions(directory, scope, roots, start, search, limit)
-
-    override suspend fun createSession(request: CreateSessionRequest): SessionDto =
-        api.createSession(directory = directory, request = request)
-
-    override suspend fun getSession(id: String): SessionDto = api.getSession(id, directory)
-
-    suspend fun getVcsInfo(): VcsInfoDto = api.getVcsInfo(directory)
-
-    override suspend fun deleteSession(id: String): Boolean = api.deleteSession(id, directory)
-
-    override suspend fun updateSession(id: String, request: UpdateSessionRequest): SessionDto =
-        api.updateSession(id, request, directory)
-
-    override suspend fun getSessionStatuses(directory: String?): Map<String, SessionStatusDto> = api.getSessionStatuses(
-        directory
+    ): List<SessionDto> = api.listSessions(
+        directory = directory,
+        workspace = null,
+        scope = scope,
+        path = null,
+        roots = roots,
+        start = start,
+        search = search,
+        limit = limit,
     )
 
+    override suspend fun createSession(request: CreateSessionRequest): SessionDto =
+        api.createSession(directory = directory, workspace = null, request = request)
+
+    override suspend fun getSession(id: String): SessionDto = api.getSession(id, directory, workspace = null)
+
+    suspend fun getVcsInfo(): VcsInfoDto = api.getVcsInfo(directory, workspace = null)
+
+    suspend fun getAgents(): List<AgentDto> = api.getAgents(directory, workspace = null)
+
+    suspend fun getProviders(): ProvidersResponseDto = api.getProviders(directory, workspace = null)
+
+    suspend fun getMcpStatus(): Map<String, McpStatusDto> = api.getMcpStatus(directory, workspace = null)
+
+    suspend fun addMcpServer(request: AddMcpServerRequest): Map<String, McpStatusDto> =
+        api.addMcpServer(request, directory = directory, workspace = null)
+
+    suspend fun getConfig(): ConfigDto = api.getConfig(directory, workspace = null)
+
+    suspend fun updateConfig(config: ConfigDto): ConfigDto = api.updateConfig(config, directory, workspace = null)
+
+    /** Persists the workspace's default model without replacing unrelated configuration. */
+    suspend fun updateCurrentModel(model: String): ConfigDto {
+        val currentConfig = api.getConfig(directory, workspace = null)
+        return api.updateConfig(currentConfig.copy(model = model), directory, workspace = null)
+    }
+
+    suspend fun getProviderAuthMethods(): Map<String, List<ProviderAuthMethodDto>> =
+        api.getProviderAuthMethods(directory, workspace = null)
+
+    suspend fun authorizeProvider(
+        providerId: String,
+        request: ProviderAuthAuthorizeRequest,
+    ): ProviderAuthAuthorizationDto =
+        api.authorizeProvider(providerId, request, directory, workspace = null)
+
+    suspend fun completeProviderOAuth(providerId: String, request: OAuthCallbackRequest): Boolean =
+        api.oauthCallback(providerId, request, directory, workspace = null)
+
+    override suspend fun deleteSession(id: String): Boolean = api.deleteSession(id, directory, workspace = null)
+
+    override suspend fun updateSession(id: String, request: UpdateSessionRequest): SessionDto =
+        api.updateSession(id, request, directory, workspace = null)
+
+    override suspend fun getSessionStatuses(directory: String?): Map<String, SessionStatusDto> =
+        api.getSessionStatuses(directory, workspace = null)
+
     override suspend fun abortSession(id: String): Boolean {
-        val response = api.abortSession(id, directory)
+        val response = api.abortSession(id, directory, workspace = null)
         if (response.isSuccessful) return true
 
         throw IOException("Unable to stop run (${response.code()})")
     }
 
-    suspend fun getSessionTodos(id: String): List<TodoDto> = api.getSessionTodos(id, directory)
+    suspend fun getSessionTodos(id: String): List<TodoDto> = api.getSessionTodos(id, directory, workspace = null)
 
     suspend fun forkSession(id: String, request: ForkSessionRequest): SessionDto =
-        api.forkSession(id, request, directory)
+        api.forkSession(id, request, directory, workspace = null)
 
     suspend fun initSession(id: String, request: InitSessionRequest): Boolean =
-        api.initSession(id, request, directory)
+        api.initSession(id, request, directory, workspace = null)
 
-    override suspend fun shareSession(id: String): SessionDto = api.shareSession(id, directory)
+    override suspend fun shareSession(id: String): SessionDto = api.shareSession(id, directory, workspace = null)
 
-    override suspend fun unshareSession(id: String): SessionDto = api.unshareSession(id, directory)
+    override suspend fun unshareSession(id: String): SessionDto = api.unshareSession(id, directory, workspace = null)
 
-    override suspend fun summarizeSession(id: String): Boolean = api.summarizeSession(id, directory)
+    override suspend fun summarizeSession(id: String): Boolean = api.summarizeSession(id, directory, workspace = null)
 
     suspend fun revertSession(id: String, request: RevertSessionRequest): SessionDto =
-        api.revertSession(id, request, directory)
+        api.revertSession(id, request, directory, workspace = null)
 
-    suspend fun unrevertSession(id: String): SessionDto = api.unrevertSession(id, directory)
+    suspend fun unrevertSession(id: String): SessionDto = api.unrevertSession(id, directory, workspace = null)
 
-    suspend fun getSessionDiff(id: String, messageId: String? = null): List<FileDiffDto> =
-        api.getSessionDiff(id, messageId, directory)
+    suspend fun getSessionDiff(id: String, messageId: String? = null): List<SnapshotFileDiffDto> =
+        api.getSessionDiff(id, messageId, directory, workspace = null)
 
     suspend fun getMessages(sessionId: String, limit: Int? = null): List<MessageWrapperDto> =
-        api.getMessages(sessionId, limit, directory)
+        api.getMessages(sessionId, limit, before = null, directory = directory, workspace = null)
 
     override suspend fun sendMessageAsync(sessionId: String, request: SendMessageRequest) {
-        api.sendMessageAsync(sessionId, request, directory)
+        api.sendMessageAsync(sessionId, request, directory, workspace = null)
     }
 
     override suspend fun listSessionPermissionsV2(sessionId: String): List<PermissionV2RequestDto> =
         api.listSessionPermissionsV2(sessionId).data
 
-    override suspend fun listPermissions(): List<PermissionDto> = api.listPermissions(directory)
+    override suspend fun listPermissions(): List<PermissionDto> = api.listPermissions(directory, workspace = null)
 
     suspend fun respondToPermission(
         sessionId: String,
@@ -123,30 +182,85 @@ class WorkspaceClient(
     }
 
     suspend fun respondToPermissionLegacy(requestId: String, request: PermissionResponseRequest): Boolean =
-        api.respondToPermission(requestId, request, directory)
+        api.respondToPermission(requestId, request, directory, workspace = null)
 
-    suspend fun respondToQuestion(requestId: String, request: QuestionReplyRequest): Boolean =
-        api.respondToQuestion(requestId, request, directory)
+    suspend fun respondToQuestion(
+        sessionId: String,
+        requestId: String,
+        request: QuestionReplyRequest,
+    ): Boolean {
+        try {
+            val legacy = api.respondToQuestion(requestId, request, directory, workspace = null)
+            if (legacy.isUsableQuestionResponse()) return legacy.body() == true
+            if (!legacy.isUnavailableQuestionEndpoint()) throw HttpException(legacy)
+        } catch (_: SerializationException) {
+            // Matches the bounded HTML-route endpoint-unavailable behavior used by question endpoints.
+        }
 
-    suspend fun rejectQuestion(requestId: String): Boolean =
-        api.rejectQuestion(requestId, directory)
+        return api.respondToQuestionV2(sessionId, requestId, request).requireUsableV2Response()
+    }
+
+    suspend fun rejectQuestion(sessionId: String, requestId: String): Boolean {
+        try {
+            val legacy = api.rejectQuestion(requestId, directory, workspace = null)
+            if (legacy.isUsableQuestionResponse()) return legacy.body() == true
+            if (!legacy.isUnavailableQuestionEndpoint()) throw HttpException(legacy)
+        } catch (_: SerializationException) {
+            // Matches the bounded HTML-route endpoint-unavailable behavior used by question endpoints.
+        }
+
+        return api.rejectQuestionV2(sessionId, requestId).requireUsableV2Response()
+    }
+
+    override suspend fun listSessionQuestions(sessionId: String): List<QuestionRequestDto> {
+        try {
+            val legacy = api.listPendingQuestions(directory, workspace = null)
+            if (legacy.isUsableQuestionResponse()) {
+                return legacy.body().orEmpty().filter { it.sessionID == sessionId }
+            }
+            if (!legacy.isUnavailableQuestionEndpoint()) throw HttpException(legacy)
+        } catch (_: SerializationException) {
+            // Matches the bounded HTML-route endpoint-unavailable behavior used by question endpoints.
+        }
+
+        val response = api.listSessionQuestionsV2(sessionId)
+        if (!response.isUsableV2Response()) throw HttpException(response)
+        return response.body()?.data.orEmpty()
+    }
 
     suspend fun listPendingQuestions(): List<QuestionRequestDto> =
-        api.listPendingQuestions(directory)
+        api.listPendingQuestions(directory, workspace = null).let { response ->
+            if (!response.isUsableQuestionResponse()) throw HttpException(response)
+            response.body().orEmpty()
+        }
 
-    suspend fun listCommands(): List<CommandDto> = api.listCommands(directory)
+    private fun retrofit2.Response<*>.isUsableV2Response(): Boolean =
+        isSuccessful && !headers()["Content-Type"].orEmpty().startsWith("text/html")
+
+    private fun retrofit2.Response<*>.isUsableQuestionResponse(): Boolean =
+        isSuccessful && !headers()["Content-Type"].orEmpty().startsWith("text/html")
+
+    private fun retrofit2.Response<*>.isUnavailableQuestionEndpoint(): Boolean =
+        code() == 404 || headers()["Content-Type"].orEmpty().startsWith("text/html")
+
+    private fun retrofit2.Response<Unit>.requireUsableV2Response(): Boolean {
+        if (!isUsableV2Response()) throw HttpException(this)
+        return true
+    }
+
+    suspend fun listCommands(): List<CommandDto> = api.listCommands(directory, workspace = null)
 
     suspend fun executeCommand(sessionId: String, request: ExecuteCommandRequest): MessageWrapperDto =
-        api.executeCommand(sessionId, request, directory)
+        api.executeCommand(sessionId, request, directory, workspace = null)
 
     suspend fun executeShellCommand(sessionId: String, request: ShellCommandRequest): MessageWrapperDto =
-        api.executeShellCommand(sessionId, request, directory)
+        api.executeShellCommand(sessionId, request, directory, workspace = null)
 
-    suspend fun listFiles(path: String): List<FileNodeDto> = api.listFiles(path, directory)
+    suspend fun listFiles(path: String): List<FileNodeDto> = api.listFiles(path, directory, workspace = null)
 
-    suspend fun readFile(path: String): FileContentDto = api.readFile(path, directory)
+    suspend fun readFile(path: String): FileContentDto = api.readFile(path, directory, workspace = null)
 
-    suspend fun getFileStatus(): List<FileStatusDto> = api.getFileStatus(directory)
+    suspend fun getFileStatus(): List<FileStatusDto> = api.getFileStatus(directory, workspace = null)
 
-    suspend fun searchSymbols(query: String): List<SymbolDto> = api.searchSymbols(query, directory)
+    suspend fun searchSymbols(query: String): List<SymbolDto> = api.searchSymbols(query, directory, workspace = null)
 }

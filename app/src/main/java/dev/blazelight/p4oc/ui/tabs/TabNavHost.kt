@@ -7,13 +7,13 @@ import androidx.compose.animation.*
 import androidx.compose.animation.core.tween
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
-import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableLongStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.platform.LocalContext
+import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.navigation.NavBackStackEntry
 import androidx.navigation.NavHostController
 import androidx.navigation.NavType
@@ -85,16 +85,20 @@ fun TabNavHost(
 ) {
     // Read visual settings for sub-agent tab behavior
     val settingsDataStore: SettingsDataStore = koinInject()
-    val visualSettings by settingsDataStore.visualSettings.collectAsState(initial = VisualSettings())
-    val savedServers by settingsDataStore.savedServers.collectAsState(initial = emptyList())
+    val visualSettings by settingsDataStore.visualSettings.collectAsStateWithLifecycle(
+        initialValue = VisualSettings(),
+    )
+    val savedServers by settingsDataStore.savedServers.collectAsStateWithLifecycle(
+        initialValue = emptyList(),
+    )
     val serverConnectionRegistry: ServerConnectionRegistry = koinInject()
     val homeConnectionStates = savedServers.associate { savedServer ->
         val savedServerRef = ServerRef.fromEndpointKey(savedServer.endpointKey, savedServer.displayName)
-        val state by serverConnectionRegistry.connectionState(savedServerRef).collectAsState()
+        val state by serverConnectionRegistry.connectionState(savedServerRef).collectAsStateWithLifecycle()
         savedServer.endpointKey to state
     }
     val openSubAgentInNewTab = visualSettings.openSubAgentInNewTab
-    val tabs by tabManager.tabs.collectAsState()
+    val tabs by tabManager.tabs.collectAsStateWithLifecycle()
     val tab = tabs.firstOrNull { it.id == tabId }
     val workspaceRevision = tab?.workspaceRevision ?: 0
 
@@ -354,12 +358,7 @@ fun TabNavHost(
                 ChatScreen(
                     viewModel = koinViewModel(
                         parameters = {
-                            parametersOf(
-                                workspaceViewModel.workspaceClient,
-                                workspaceViewModel.sessionRepository,
-                                workspaceViewModel.fileRepository,
-                                workspaceViewModel.uploadCoordinator,
-                            )
+                            parametersOf(workspaceOwner)
                         },
                     ),
                     onNavigateBack = {
@@ -394,6 +393,9 @@ fun TabNavHost(
                             navController.navigate(Screen.Chat.createRoute(subSessionId))
                         }
                     },
+                    onProviderAuthRequired = {
+                        navController.navigate(Screen.ProviderConfig.route)
+                    },
                     onSessionLoaded = { sessionId, sessionTitle ->
                         // Update tab's session binding
                         tabManager.updateTabSession(tabId, sessionId, sessionTitle)
@@ -413,6 +415,7 @@ fun TabNavHost(
                     backStackEntry.destination.route
                 )
                 ProjectsScreen(
+                    workspaceClient = workspaceOwner.workspaceClient,
                     onNavigateBack = {
                         navController.popBackStack()
                     },
@@ -435,6 +438,7 @@ fun TabNavHost(
                     navArgument(Screen.Terminal.ARG_PTY_ID) { type = NavType.StringType }
                 )
             ) { backStackEntry ->
+                val routePtyId = requireNotNull(backStackEntry.arguments?.getString(Screen.Terminal.ARG_PTY_ID))
                 TouchWorkspaceViewModel(
                     backStackEntry,
                     navController,
@@ -443,6 +447,10 @@ fun TabNavHost(
                     backStackEntry.destination.route
                 )
                 TerminalScreen(
+                    viewModel = koinViewModel(
+                        key = "${workspaceOwner.tabId}:${workspaceOwner.generation.value}:$routePtyId",
+                        parameters = { parametersOf(workspaceOwner) },
+                    ),
                     onPtyLoaded = { ptyId, ptyTitle ->
                         // Update tab binding with PTY id and title
                         tabManager.updateTabSession(tabId, ptyId, ptyTitle)
@@ -568,10 +576,17 @@ fun TabNavHost(
                     backStackEntry.destination.route
                 )
                 SettingsScreen(
+                    viewModel = koinViewModel(
+                        key = "${workspaceOwner.tabId}:${workspaceOwner.generation.value}:settings",
+                        parameters = { parametersOf(SettingsConnectionContext.Tab(workspaceOwner)) },
+                    ),
                     onNavigateBack = { navController.popBackStack() },
                     onDisconnect = onDisconnect,
                     onProviderConfig = {
                         navController.navigate(Screen.ProviderConfig.route)
+                    },
+                    onModelControls = {
+                        navController.navigate(Screen.ModelControls.route)
                     },
                     onChatSettings = {
                         navController.navigate(Screen.ChatSettings.route)
@@ -619,6 +634,11 @@ fun TabNavHost(
                     backStackEntry.destination.route
                 )
                 ProviderConfigScreen(
+                    workspaceOwner = workspaceOwner,
+                    viewModel = koinViewModel(
+                        key = "${workspaceOwner.tabId}:${workspaceOwner.generation.value}:provider-config",
+                        parameters = { parametersOf(workspaceOwner) },
+                    ),
                     onNavigateBack = { navController.popBackStack() }
                 )
             }
@@ -658,6 +678,10 @@ fun TabNavHost(
                     backStackEntry.destination.route
                 )
                 ModelControlsScreen(
+                    viewModel = koinViewModel(
+                        key = "${workspaceOwner.tabId}:${workspaceOwner.generation.value}:model-controls",
+                        parameters = { parametersOf(workspaceOwner.workspaceClient) },
+                    ),
                     onNavigateBack = { navController.popBackStack() }
                 )
             }
@@ -671,6 +695,10 @@ fun TabNavHost(
                     backStackEntry.destination.route
                 )
                 AgentsConfigScreen(
+                    viewModel = koinViewModel(
+                        key = "${workspaceOwner.tabId}:${workspaceOwner.generation.value}:agents-config",
+                        parameters = { parametersOf(workspaceOwner.workspaceClient) },
+                    ),
                     onNavigateBack = { navController.popBackStack() }
                 )
             }
@@ -684,6 +712,10 @@ fun TabNavHost(
                     backStackEntry.destination.route
                 )
                 SkillsScreen(
+                    viewModel = koinViewModel(
+                        key = "${workspaceOwner.tabId}:${workspaceOwner.generation.value}:skills",
+                        parameters = { parametersOf(workspaceOwner.workspaceClient) },
+                    ),
                     onNavigateBack = { navController.popBackStack() }
                 )
             }

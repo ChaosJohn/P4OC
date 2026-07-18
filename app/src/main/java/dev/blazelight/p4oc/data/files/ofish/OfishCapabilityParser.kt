@@ -58,6 +58,8 @@ internal object OfishCapabilityParser {
             hasRm = values["rm"].toBooleanFlag(),
             hasAwk = values["awk"].toBooleanFlag(),
             hasMktemp = values["mktemp"].toBooleanFlag(),
+            hasChmod = values["chmod"].toBooleanFlag(),
+            modeCommand = values["mode"].toModeCommand(),
         )
     }
 
@@ -70,6 +72,8 @@ internal object OfishCapabilityParser {
         if (!capabilities.hasRm) add("rm")
         if (!capabilities.hasAwk) add("awk")
         if (!capabilities.hasMktemp) add("mktemp")
+        if (!capabilities.hasChmod) add("chmod")
+        if (capabilities.modeCommand == null) add("stat_mode")
     }
 
     private fun String?.toBooleanFlag(): Boolean = this == "1" || equals("true", ignoreCase = true)
@@ -80,6 +84,12 @@ internal object OfishCapabilityParser {
         HashCommand.SHA256SUM.wireName -> HashCommand.SHA256SUM
         HashCommand.SHASUM_256.wireName -> HashCommand.SHASUM_256
         HashCommand.MD5SUM.wireName -> HashCommand.MD5SUM
+        else -> null
+    }
+
+    private fun String?.toModeCommand(): ModeCommand? = when (this?.trim()) {
+        ModeCommand.STAT_GNU.wireName -> ModeCommand.STAT_GNU
+        ModeCommand.STAT_BSD.wireName -> ModeCommand.STAT_BSD
         else -> null
     }
 }

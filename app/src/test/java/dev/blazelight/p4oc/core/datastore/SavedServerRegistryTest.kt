@@ -23,7 +23,7 @@ class SavedServerRegistryTest {
     }
 
     @Test
-    fun `merge dedupes equivalent endpoint forms by endpoint key`() {
+    fun `merge keeps authoritative TLS configuration when deduping endpoint forms`() {
         val bare = SavedServerRegistry.fromConnection(
             url = "https://my-host.example.com",
             name = "Remote",
@@ -40,7 +40,7 @@ class SavedServerRegistryTest {
         assertEquals(1, merged.size)
         assertEquals("https://my-host.example.com", merged.single().endpoint)
         assertEquals("https://my-host.example.com:4096", merged.single().endpointKey)
-        assertTrue(merged.single().allowInsecure)
+        assertFalse(merged.single().allowInsecure)
         assertTrue(merged.single().pinned)
     }
 
@@ -92,8 +92,31 @@ class SavedServerRegistryTest {
         val alpha = migrated.first { it.endpointKey == "https://alpha.example.com:4096" }
         assertEquals("https://alpha.example.com", alpha.endpoint)
         assertEquals("last-user", alpha.username)
-        assertTrue(alpha.allowInsecure)
+        assertFalse(alpha.allowInsecure)
         assertTrue(migrated.any { it.displayName == "Beta recent" })
+    }
+
+    @Test
+    fun `secure upsert stays secure when merged with stale insecure representations`() {
+        val insecure = SavedServerRegistry.fromConnection(
+            url = "https://alpha.example.com",
+            name = "Alpha",
+            allowInsecure = true,
+            pinned = true,
+        )
+        val secure = insecure.copy(allowInsecure = false)
+
+        val resaved = SavedServerRegistry.upsert(listOf(insecure), secure).single()
+        val merged = SavedServerRegistry.merge(
+            listOf(
+                resaved,
+                insecure.copy(endpoint = "https://alpha.example.com:4096"),
+            ),
+        ).single()
+
+        assertFalse(resaved.allowInsecure)
+        assertFalse(merged.allowInsecure)
+        assertTrue(merged.pinned)
     }
 
     @Test

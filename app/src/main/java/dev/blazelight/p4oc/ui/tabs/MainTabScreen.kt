@@ -1,4 +1,7 @@
-@file:Suppress("DEPRECATION") // LocalLifecycleOwner – platform version until lifecycle-runtime-compose upgrade
+@file:Suppress(
+    "DEPRECATION", // LocalLifecycleOwner – platform version until lifecycle-runtime-compose upgrade
+    "TooManyFunctions",
+)
 
 package dev.blazelight.p4oc.ui.tabs
 
@@ -14,6 +17,7 @@ import androidx.compose.foundation.layout.WindowInsets
 import androidx.compose.foundation.layout.consumeWindowInsets
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.navigationBarsPadding
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.statusBars
@@ -35,6 +39,7 @@ import androidx.compose.material3.Scaffold
 import androidx.compose.material3.SnackbarDuration
 import androidx.compose.material3.SnackbarHost
 import androidx.compose.material3.SnackbarHostState
+import androidx.compose.material3.SnackbarResult
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
@@ -42,7 +47,6 @@ import androidx.compose.material3.rememberModalBottomSheetState
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
-import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateMapOf
 import androidx.compose.runtime.mutableStateOf
@@ -56,6 +60,7 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.RectangleShape
 import androidx.compose.ui.graphics.SolidColor
 import androidx.compose.ui.platform.LocalLifecycleOwner
+import androidx.compose.ui.platform.LocalResources
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.semantics.Role
@@ -65,6 +70,7 @@ import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.lifecycle.Lifecycle
 import androidx.lifecycle.LifecycleOwner
+import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.lifecycle.repeatOnLifecycle
 import androidx.navigation.NavHostController
 import androidx.navigation.compose.currentBackStackEntryAsState
@@ -74,15 +80,16 @@ import dev.blazelight.p4oc.core.datastore.SavedServer
 import dev.blazelight.p4oc.core.datastore.SettingsDataStore
 import dev.blazelight.p4oc.core.log.AppLog
 import dev.blazelight.p4oc.core.network.ApiResult
-import dev.blazelight.p4oc.core.network.ConnectionManager
 import dev.blazelight.p4oc.core.network.ConnectionState
 import dev.blazelight.p4oc.core.network.ServerConnectionRegistry
 import dev.blazelight.p4oc.core.network.safeApiCall
 import dev.blazelight.p4oc.core.network.toServerRef
+import dev.blazelight.p4oc.core.notification.NotificationRoute
 import dev.blazelight.p4oc.data.remote.dto.CreatePtyRequest
 import dev.blazelight.p4oc.data.remote.dto.CreateSessionRequest
 import dev.blazelight.p4oc.data.session.SessionRepositoryProvider
 import dev.blazelight.p4oc.data.session.presence
+import dev.blazelight.p4oc.domain.model.OpenCodeEvent
 import dev.blazelight.p4oc.domain.model.SessionConnectionState
 import dev.blazelight.p4oc.domain.model.SessionStatus
 import dev.blazelight.p4oc.domain.server.ServerRef
@@ -101,6 +108,7 @@ import dev.blazelight.p4oc.ui.theme.Spacing
 import dev.blazelight.p4oc.ui.theme.TuiShapes
 import dev.blazelight.p4oc.ui.workspace.WorkspaceRepositoryOwner
 import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.launch
 import org.koin.compose.koinInject
 
@@ -114,7 +122,6 @@ private data class SavedServerView(
 
 private data class MainTabDeps(
     val tabManager: TabManager,
-    val connectionManager: ConnectionManager,
     val settingsDataStore: SettingsDataStore,
     val serverConnectionRegistry: ServerConnectionRegistry,
     val sessionRepositoryProvider: SessionRepositoryProvider,
@@ -133,8 +140,29 @@ private class StartWorkUiState {
     var pickerSearchQuery: String by mutableStateOf("")
 }
 
+internal enum class PendingStartDisposition {
+    WaitForConnection,
+    Run,
+    SavedServerMissing,
+    ConnectionFailed,
+    ApiUnavailable,
+}
+
+internal fun pendingStartDisposition(
+    savedServerExists: Boolean,
+    connectionState: ConnectionState?,
+    apiAvailable: Boolean,
+): PendingStartDisposition = when {
+    !savedServerExists -> PendingStartDisposition.SavedServerMissing
+    connectionState is ConnectionState.Error -> PendingStartDisposition.ConnectionFailed
+    connectionState !is ConnectionState.Connected -> PendingStartDisposition.WaitForConnection
+    !apiAvailable -> PendingStartDisposition.ApiUnavailable
+    else -> PendingStartDisposition.Run
+}
+
 private val startWorkPickerSearch: @Composable (StartWorkUiState) -> Unit = { uiState ->
     val theme = LocalOpenCodeTheme.current
+    val searchDescription = stringResource(R.string.start_work_filter_workspaces)
     BasicTextField(
         value = uiState.pickerSearchQuery,
         onValueChange = { uiState.pickerSearchQuery = it },
@@ -144,6 +172,7 @@ private val startWorkPickerSearch: @Composable (StartWorkUiState) -> Unit = { ui
         modifier = Modifier
             .fillMaxWidth()
             .border(Sizing.strokeThin, theme.border, RectangleShape)
+            .semantics { contentDescription = searchDescription }
             .testTag("start_work_search_field"),
         decorationBox = { field ->
             Row(
@@ -174,6 +203,7 @@ private val startWorkServerRail: @Composable (
     StartWorkUiState,
 ) -> Unit = { groups, selectedGroup, uiState ->
     val theme = LocalOpenCodeTheme.current
+    val resources = LocalResources.current
     LazyRow(horizontalArrangement = Arrangement.spacedBy(Spacing.xs)) {
         items(groups, key = { it.server.endpointKey }) { group ->
             val selected = group.server.endpointKey == selectedGroup?.server?.endpointKey
@@ -188,7 +218,11 @@ private val startWorkServerRail: @Composable (
                         uiState.pickerSearchQuery = ""
                     }
                     .semantics {
-                        contentDescription = "${group.server.displayName}, ${group.targets.size - 1} workspaces"
+                        contentDescription = resources.getString(
+                            R.string.start_work_server_workspaces,
+                            group.server.displayName,
+                            group.targets.size - 1,
+                        )
                         this.selected = selected
                     }
                     .testTag("start_work_server_${group.server.endpointKey}"),
@@ -313,7 +347,6 @@ private data class MainTabContentParams(
 @Composable
 private fun rememberMainTabDeps(): MainTabDeps {
     val tabManager: TabManager = koinInject()
-    val connectionManager: ConnectionManager = koinInject()
     val settingsDataStore: SettingsDataStore = koinInject()
     val serverConnectionRegistry: ServerConnectionRegistry = koinInject()
     val sessionRepositoryProvider: SessionRepositoryProvider = koinInject()
@@ -321,7 +354,6 @@ private fun rememberMainTabDeps(): MainTabDeps {
     return remember(coroutineScope) {
         MainTabDeps(
             tabManager = tabManager,
-            connectionManager = connectionManager,
             settingsDataStore = settingsDataStore,
             serverConnectionRegistry = serverConnectionRegistry,
             sessionRepositoryProvider = sessionRepositoryProvider,
@@ -352,7 +384,7 @@ private val rememberScopedConnectionStates: @Composable (
 ) -> Map<String, ConnectionState> = { savedServers, registry ->
     savedServers.associate { saved ->
         val serverRef = ServerRef.fromEndpointKey(saved.endpointKey, saved.displayName)
-        val state by registry.connectionState(serverRef).collectAsState()
+        val state by registry.connectionState(serverRef).collectAsStateWithLifecycle()
         saved.endpointKey to state
     }
 }
@@ -377,11 +409,11 @@ private val rememberConnectSavedServer: @Composable (
     }
 }
 
-private val mainTabForegroundEffect: @Composable (ConnectionManager, LifecycleOwner) -> Unit =
-    { connectionManager, lifecycleOwner ->
+private val mainTabForegroundEffect: @Composable (ServerConnectionRegistry, LifecycleOwner) -> Unit =
+    { serverConnectionRegistry, lifecycleOwner ->
         LaunchedEffect(lifecycleOwner) {
             lifecycleOwner.lifecycle.repeatOnLifecycle(Lifecycle.State.STARTED) {
-                connectionManager.onAppForegrounded()
+                serverConnectionRegistry.onAppForegrounded()
             }
         }
     }
@@ -454,7 +486,7 @@ private fun mainTabWorkspaceOwnersEffect(
     val tabOwnerInputs = tabs.mapNotNull { tab ->
         val serverRef = tab.serverRef ?: return@mapNotNull null
         val workspaceKey = tab.workspaceKey ?: return@mapNotNull null
-        val connection by deps.serverConnectionRegistry.connection(serverRef).collectAsState()
+        val connection by deps.serverConnectionRegistry.connection(serverRef).collectAsStateWithLifecycle()
         val generation = deps.serverConnectionRegistry.generation(serverRef)
         TabOwnerInput(tab.id, serverRef, workspaceKey, connection != null, generation)
     }
@@ -533,7 +565,7 @@ private fun mainTabPresenceCollection(
         if (sessionId != null && workspaceOwner != null) {
             val sessionState by workspaceOwner.sessionRepository
                 .sessionUiState(SessionId(sessionId))
-                .collectAsState()
+                .collectAsStateWithLifecycle()
             LaunchedEffect(tab.id, activeTabId, sessionState.responseCompletedToken) {
                 if (tab.id == activeTabId) {
                     tabMaps.readTokens[tab.id] = sessionState.responseCompletedToken
@@ -546,7 +578,7 @@ private fun mainTabPresenceCollection(
                 tabMaps.connectionStates[tab.id] = sessionState.presence(hasUnread = hasUnread)
             }
         } else {
-            val tabSessionState by tab.connectionState.collectAsState()
+            val tabSessionState by tab.connectionState.collectAsStateWithLifecycle()
             LaunchedEffect(tab.id, tabSessionState) {
                 val currentState = tabSessionState
                 if (currentState != null) {
@@ -571,14 +603,20 @@ private fun rememberCloseTab(
             if (route != null && route.startsWith("terminal/")) {
                 val ptyId = tabMaps.ptyIds[tabId]
                 if (ptyId != null) {
-                    val serverRef = deps.tabManager.tabs.value
-                        .firstOrNull { it.id == tabId }
-                        ?.serverRef
-                    val api = serverRef?.let(deps.serverConnectionRegistry::api)
+                    val owner = tabMaps.workspaceOwners[tabId]
+                    val api = owner?.let {
+                        deps.serverConnectionRegistry.api(it.workspace.server, it.generation)
+                    }
                     if (api != null) {
-                        val result = safeApiCall { api.deletePtySession(ptyId) }
+                        val result = safeApiCall {
+                            api.deletePtySession(
+                                id = ptyId,
+                                directory = owner.workspace.directory,
+                                workspace = null,
+                            )
+                        }
                         if (result is ApiResult.Error) {
-                            AppLog.e(TAG, "Failed to delete PTY $ptyId: ${result.message}")
+                            AppLog.e(TAG, "Failed to delete PTY")
                         }
                     }
                 }
@@ -592,25 +630,66 @@ private fun rememberCloseTab(
 }
 
 @Composable
+@Suppress("CyclomaticComplexMethod", "LongMethod", "LongParameterList")
 private fun mainTabPendingStartWorkEffect(
     deps: MainTabDeps,
     uiState: StartWorkUiState,
     scopedConnectionStates: Map<String, ConnectionState>,
+    savedServerExists: (String) -> Boolean,
+    connectSavedServer: (String) -> Unit,
     snackbarHostState: SnackbarHostState,
 ) {
     LaunchedEffect(uiState.pendingStartWork, scopedConnectionStates) {
         val pending = uiState.pendingStartWork ?: return@LaunchedEffect
         val target = pending.first
         val action = pending.second
-        if (scopedConnectionStates[target.serverRef.endpointKey] !is ConnectionState.Connected) {
-            return@LaunchedEffect
+        val endpointKey = target.serverRef.endpointKey
+        val connectionState = scopedConnectionStates[endpointKey]
+        val api = if (connectionState is ConnectionState.Connected) {
+            deps.serverConnectionRegistry.api(target.serverRef)
+        } else {
+            null
         }
-        val api = deps.serverConnectionRegistry.api(target.serverRef) ?: return@LaunchedEffect
+        when (pendingStartDisposition(savedServerExists(endpointKey), connectionState, api != null)) {
+            PendingStartDisposition.WaitForConnection -> return@LaunchedEffect
+            PendingStartDisposition.Run -> Unit
+            PendingStartDisposition.SavedServerMissing -> {
+                uiState.pendingStartWork = null
+                deps.coroutineScope.launch {
+                    snackbarHostState.showSnackbar(
+                        message = "This saved server is no longer available. Choose a server and workspace again.",
+                        duration = SnackbarDuration.Long,
+                        withDismissAction = true,
+                    )
+                }
+                return@LaunchedEffect
+            }
+            PendingStartDisposition.ConnectionFailed,
+            PendingStartDisposition.ApiUnavailable,
+            -> {
+                uiState.pendingStartWork = null
+                deps.coroutineScope.launch {
+                    val result = snackbarHostState.showSnackbar(
+                        message = "Could not connect to this server. Check its settings and try again.",
+                        actionLabel = "Retry",
+                        duration = SnackbarDuration.Indefinite,
+                        withDismissAction = true,
+                    )
+                    if (result == SnackbarResult.ActionPerformed && savedServerExists(endpointKey)) {
+                        uiState.pendingStartWork = target to action
+                        connectSavedServer(endpointKey)
+                    }
+                }
+                return@LaunchedEffect
+            }
+        }
+        checkNotNull(api)
         when (action) {
             StartWorkAction.NewChat -> {
                 val result = safeApiCall {
                     api.createSession(
                         directory = (target.workspaceKey as? WorkspaceKey.Directory)?.value,
+                        workspace = null,
                         request = CreateSessionRequest(),
                     )
                 }
@@ -624,12 +703,29 @@ private fun mainTabPendingStartWorkEffect(
                             focus = true,
                         )
                     }
-                    is ApiResult.Error -> snackbarHostState.showSnackbar(result.message)
+                    is ApiResult.Error -> {
+                        uiState.pendingStartWork = null
+                        deps.coroutineScope.launch {
+                            val retry = snackbarHostState.showSnackbar(
+                                message = "Could not create the session. Check the connection and try again.",
+                                actionLabel = "Retry",
+                                duration = SnackbarDuration.Indefinite,
+                                withDismissAction = true,
+                            )
+                            if (retry == SnackbarResult.ActionPerformed && savedServerExists(endpointKey)) {
+                                uiState.pendingStartWork = target to action
+                            }
+                        }
+                    }
                 }
             }
             StartWorkAction.Terminal -> {
                 val result = safeApiCall {
-                    api.createPtySession(createPtyRequestForWorkspace(target.workspaceKey))
+                    api.createPtySession(
+                        directory = (target.workspaceKey as? WorkspaceKey.Directory)?.value,
+                        workspace = null,
+                        request = createPtyRequestForWorkspace(target.workspaceKey),
+                    )
                 }
                 when (result) {
                     is ApiResult.Success -> {
@@ -641,7 +737,20 @@ private fun mainTabPendingStartWorkEffect(
                             focus = true,
                         )
                     }
-                    is ApiResult.Error -> snackbarHostState.showSnackbar(result.message)
+                    is ApiResult.Error -> {
+                        uiState.pendingStartWork = null
+                        deps.coroutineScope.launch {
+                            val retry = snackbarHostState.showSnackbar(
+                                message = "Could not start the terminal. Check the connection and try again.",
+                                actionLabel = "Retry",
+                                duration = SnackbarDuration.Indefinite,
+                                withDismissAction = true,
+                            )
+                            if (retry == SnackbarResult.ActionPerformed && savedServerExists(endpointKey)) {
+                                uiState.pendingStartWork = target to action
+                            }
+                        }
+                    }
                 }
             }
             else -> uiState.pendingStartWork = null
@@ -656,10 +765,11 @@ private fun mainTabSnackbarEffects(
     uiState: StartWorkUiState,
     snackbarHostState: SnackbarHostState,
 ) {
+    val resources = LocalResources.current
     LaunchedEffect(showTabWarning) {
         if (showTabWarning) {
             snackbarHostState.showSnackbar(
-                message = "Multiple tabs may affect performance",
+                message = resources.getString(R.string.tabs_performance_warning),
                 duration = SnackbarDuration.Short,
             )
             deps.tabManager.dismissTabWarning()
@@ -671,12 +781,30 @@ private fun mainTabSnackbarEffects(
             uiState.restoreError = null
         }
     }
+    LaunchedEffect(deps.serverConnectionRegistry) {
+        deps.serverConnectionRegistry.scopedEvents.collect { scopedEvent ->
+            when (val event = scopedEvent.event) {
+                is OpenCodeEvent.InstallationUpdateAvailable -> snackbarHostState.showSnackbar(
+                    message = resources.getString(R.string.server_update_available, event.version),
+                    duration = SnackbarDuration.Long,
+                )
+                is OpenCodeEvent.InstallationUpdated -> snackbarHostState.showSnackbar(
+                    message = resources.getString(R.string.server_updated, event.version),
+                    duration = SnackbarDuration.Short,
+                )
+                else -> Unit
+            }
+        }
+    }
 }
 
 object MainTabScreen {
     @OptIn(ExperimentalMaterial3Api::class)
     @Composable
+    @Suppress("LongMethod")
     operator fun invoke(
+        pendingNotificationRoute: StateFlow<NotificationRoute?>,
+        onNotificationRouteConsumed: (NotificationRoute) -> Unit,
         onDisconnect: () -> Unit,
         modifier: Modifier = Modifier,
     ) {
@@ -686,12 +814,14 @@ object MainTabScreen {
         val lifecycleOwner = LocalLifecycleOwner.current
 
         LaunchedEffect(Unit) { deps.tabManager.ensureHomeTab(focus = false) }
-        mainTabForegroundEffect(deps.connectionManager, lifecycleOwner)
+        mainTabForegroundEffect(deps.serverConnectionRegistry, lifecycleOwner)
 
-        val tabs by deps.tabManager.tabs.collectAsState()
-        val activeTabId by deps.tabManager.activeTabId.collectAsState()
-        val showTabWarning by deps.tabManager.showTabWarning.collectAsState()
-        val savedServers by deps.settingsDataStore.savedServers.collectAsState(initial = emptyList())
+        val tabs by deps.tabManager.tabs.collectAsStateWithLifecycle()
+        val activeTabId by deps.tabManager.activeTabId.collectAsStateWithLifecycle()
+        val showTabWarning by deps.tabManager.showTabWarning.collectAsStateWithLifecycle()
+        val savedServers by deps.settingsDataStore.savedServers.collectAsStateWithLifecycle(
+            initialValue = emptyList(),
+        )
         val scopedConnectionStates = rememberScopedConnectionStates(
             savedServers,
             deps.serverConnectionRegistry,
@@ -701,6 +831,27 @@ object MainTabScreen {
         }
         val savedServerExists = rememberSavedServerExists(savedServers)
         val connectSavedServer = rememberConnectSavedServer(deps.serverConnectionRegistry, savedServers)
+
+        val notificationRoute by pendingNotificationRoute.collectAsStateWithLifecycle()
+        LaunchedEffect(notificationRoute, savedServers) {
+            val route = notificationRoute ?: return@LaunchedEffect
+            val ownedServer = findSavedServerForNotification(route, savedServers)
+            if (ownedServer != null) {
+                val existing = deps.tabManager.findTabByNotificationRoute(route)
+                if (existing != null) {
+                    deps.tabManager.focusTab(existing.id)
+                } else {
+                    deps.tabManager.createTab(
+                        startRoute = Screen.Chat.createRoute(route.sessionId),
+                        workspaceKey = route.workspaceKey,
+                        serverRef = ServerRef.fromEndpointKey(ownedServer.endpointKey, ownedServer.displayName),
+                        focus = true,
+                    )
+                }
+            }
+            // Missing/removed servers safely fall back to the current screen; never guess another owner.
+            onNotificationRouteConsumed(route)
+        }
 
         mainTabRestoreEffect(deps, savedServers, uiState)
         savedServerConnectionEffect(deps.serverConnectionRegistry, savedServers)
@@ -717,13 +868,20 @@ object MainTabScreen {
         val homeRepositoryStates = tabMaps.workspaceOwners.values
             .distinctBy { it.workspace.server.endpointKey to it.workspace.key }
             .map { owner ->
-                val state by owner.sessionRepository.state.collectAsState()
+                val state by owner.sessionRepository.state.collectAsStateWithLifecycle()
                 ScopedHomeRepositoryState(owner.workspace.server, state)
             }
 
         val closeTab = rememberCloseTab(deps, tabMaps)
         val snackbarHostState = remember { SnackbarHostState() }
-        mainTabPendingStartWorkEffect(deps, uiState, scopedConnectionStates, snackbarHostState)
+        mainTabPendingStartWorkEffect(
+            deps,
+            uiState,
+            scopedConnectionStates,
+            savedServerExists,
+            connectSavedServer,
+            snackbarHostState,
+        )
         mainTabSnackbarEffects(deps, showTabWarning, uiState, snackbarHostState)
 
         val params = MainTabContentParams(
@@ -949,7 +1107,7 @@ private val mainTabEmptyContent: @Composable (MainTabContentParams, TabInstance)
             params.scopedConnectionStates[tab.serverRef?.endpointKey] !is ConnectionState.Connected
         ) {
             Text(
-                text = "Not connected to server",
+                text = stringResource(R.string.server_not_connected),
                 color = theme.textMuted,
                 modifier = Modifier.align(Alignment.Center),
             )
@@ -1238,6 +1396,7 @@ private fun startWorkActionRow(
     marker: String,
     onClick: () -> Unit,
 ) {
+    val actionDescription = stringResource(R.string.start_work_action_accessibility, label, description)
     filesWorkspaceOption(
         title = label,
         subtitle = description,
@@ -1245,7 +1404,7 @@ private fun startWorkActionRow(
         onClick = onClick,
         modifier = Modifier
             .testTag("start_work_${marker.lowercase()}")
-            .semantics { contentDescription = "$label. $description" },
+            .semantics { contentDescription = actionDescription },
     )
 }
 
@@ -1261,6 +1420,7 @@ private fun filesWorkspaceOption(
     Surface(
         modifier = modifier
             .fillMaxWidth()
+            .heightIn(min = Sizing.minTouchTarget)
             .clickable(role = Role.Button, onClick = onClick),
         color = theme.backgroundElement,
         shape = TuiShapes.small,

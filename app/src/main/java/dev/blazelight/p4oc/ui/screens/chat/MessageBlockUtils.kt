@@ -93,12 +93,14 @@ private fun revertTargetsByUserId(messages: List<MessageWithParts>): Map<String,
 }
 
 @Composable
+@Suppress("LongParameterList", "FunctionNaming")
 internal fun MessageBlockView(
     block: MessageBlock,
     onToolApprove: (String) -> Unit,
     onToolDeny: (String) -> Unit,
     onToolAlways: (String) -> Unit,
     onOpenSubSession: ((String) -> Unit)? = null,
+    onProviderAuthRequired: ((String) -> Unit)? = null,
     defaultToolWidgetState: ToolWidgetState = ToolWidgetState.COMPACT,
     pendingPermissionsByCallId: Map<String, Permission> = emptyMap(),
     onRevert: ((String) -> Unit)? = null
@@ -111,6 +113,7 @@ internal fun MessageBlockView(
                 onToolDeny = onToolDeny,
                 onToolAlways = onToolAlways,
                 onOpenSubSession = onOpenSubSession,
+                onProviderAuthRequired = onProviderAuthRequired,
                 defaultToolWidgetState = defaultToolWidgetState,
                 pendingPermissionsByCallId = pendingPermissionsByCallId,
                 onRevert = block.revertMessageId?.let { messageId ->
@@ -126,6 +129,7 @@ internal fun MessageBlockView(
                 onToolDeny = onToolDeny,
                 onToolAlways = onToolAlways,
                 onOpenSubSession = onOpenSubSession,
+                onProviderAuthRequired = onProviderAuthRequired,
                 defaultToolWidgetState = defaultToolWidgetState,
                 pendingPermissionsByCallId = pendingPermissionsByCallId,
             )

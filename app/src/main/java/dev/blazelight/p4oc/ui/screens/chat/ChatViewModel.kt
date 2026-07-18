@@ -10,8 +10,8 @@ import dev.blazelight.p4oc.core.haptic.HapticFeedback
 import dev.blazelight.p4oc.core.log.AppLog
 import dev.blazelight.p4oc.core.mime.FilenameMimeType
 import dev.blazelight.p4oc.core.network.ApiResult
-import dev.blazelight.p4oc.core.network.ConnectionManager
 import dev.blazelight.p4oc.core.network.ConnectionState
+import dev.blazelight.p4oc.core.network.ServerConnectionRegistry
 import dev.blazelight.p4oc.core.network.safeApiCall
 import dev.blazelight.p4oc.data.remote.dto.ExecuteCommandRequest
 import dev.blazelight.p4oc.data.remote.dto.PartInputDto
@@ -31,6 +31,7 @@ import dev.blazelight.p4oc.domain.session.SessionId
 import dev.blazelight.p4oc.ui.components.chat.SelectedFile
 import dev.blazelight.p4oc.ui.navigation.Screen
 import dev.blazelight.p4oc.ui.screens.files.upload.UploadCoordinator
+import kotlinx.coroutines.FlowPreview
 import kotlinx.coroutines.flow.*
 import kotlinx.coroutines.launch
 import kotlinx.serialization.SerializationException
@@ -43,18 +44,20 @@ import java.net.URI
  * dialogs, model/agent selection, and file picking. Retains session
  * lifecycle, message sending, command execution, and SSE event routing.
  */
+@Suppress("LargeClass", "LongParameterList")
 class ChatViewModel constructor(
     private val savedStateHandle: SavedStateHandle,
     private val workspaceClient: WorkspaceClient,
     private val sessionRepository: SessionRepositoryImpl,
     private val uploadCoordinator: UploadCoordinator,
-    private val connectionManager: ConnectionManager,
     private val settingsDataStore: SettingsDataStore,
     private val hapticFeedback: HapticFeedback,
-    private val modelSelectionCoordinator: ModelSelectionCoordinator = ModelSelectionCoordinator()
+    private val modelSelectionCoordinator: ModelSelectionCoordinator = ModelSelectionCoordinator(),
+    private val serverConnectionRegistry: ServerConnectionRegistry? = null,
 ) : ViewModel() {
     private val sessionId: String = savedStateHandle.get<String>(Screen.Chat.ARG_SESSION_ID)
         ?: throw IllegalArgumentException("sessionId is required for ChatViewModel")
+    private val sessionLease = sessionRepository.acquireSession(SessionId(sessionId))
 
     // JSON serializer for SavedStateHandle persistence
     private val json = Json { ignoreUnknownKeys = true }
@@ -62,11 +65,12 @@ class ChatViewModel constructor(
     // --- Sub-managers ---
     val dialogManager = DialogQueueManager(savedStateHandle, json, viewModelScope)
     val modelAgentManager = ModelAgentManager(
-        connectionManager,
+        workspaceClient,
         settingsDataStore,
         viewModelScope,
         sessionId,
-        modelSelectionCoordinator
+        modelSelectionCoordinator,
+        serverConnectionRegistry,
     )
     val filePickerManager = FilePickerManager(workspaceClient, viewModelScope, uploadCoordinator, settingsDataStore)
 
@@ -81,7 +85,7 @@ class ChatViewModel constructor(
     private val repositorySessionState: StateFlow<dev.blazelight.p4oc.data.session.SessionUiState> =
         sessionRepository.sessionUiState(SessionId(sessionId))
 
-    val connectionState: StateFlow<ConnectionState> = connectionManager.connectionState
+    val connectionState: StateFlow<ConnectionState> = workspaceClient.connectionState
 
     private val _branchName = MutableStateFlow<String?>(null)
     val branchName: StateFlow<String?> = _branchName.asStateFlow()
@@ -90,6 +94,28 @@ class ChatViewModel constructor(
     private val _hasUnreadResponse = MutableStateFlow(false)
     val hasUnreadResponse: StateFlow<Boolean> = _hasUnreadResponse.asStateFlow()
     private val _isActiveTab = MutableStateFlow(false)
+
+    init {
+        serverConnectionRegistry?.let(::observeCommandCatalogEvents)
+    }
+
+    @OptIn(FlowPreview::class)
+    private fun observeCommandCatalogEvents(registry: ServerConnectionRegistry) {
+        viewModelScope.launch {
+            registry.events(workspaceClient.workspace.server)
+                .filter { scopedEvent ->
+                    val event = scopedEvent.event
+                    val refreshesCommands = event is OpenCodeEvent.ModelsRefreshed ||
+                        event is OpenCodeEvent.CatalogUpdated ||
+                        event is OpenCodeEvent.McpToolsChanged
+                    scopedEvent.generation == workspaceClient.generation &&
+                        scopedEvent.workspaceKey == workspaceClient.workspace.key &&
+                        refreshesCommands
+                }
+                .debounce(COMMAND_CATALOG_REFRESH_DEBOUNCE_MS)
+                .collect { refreshCommandsInBackground() }
+        }
+    }
 
     /**
      * UI presence for tab indicators. Awaiting input is reserved for real
@@ -143,8 +169,15 @@ class ChatViewModel constructor(
 
     private companion object {
         const val TAG = "ChatViewModel"
+        private const val INITIAL_HISTORY_LIMIT = 100
+        private const val HISTORY_PAGE_SIZE = 100
         private const val KEY_DRAFT_TEXT = "chat_draft_text"
         private const val KEY_ATTACHED_FILES = "chat_attached_files"
+        private const val COMMAND_CATALOG_REFRESH_DEBOUNCE_MS = 150L
+
+        // SavedState shares Android's Binder transaction budget with the rest of the Activity.
+        private const val MAX_PERSISTED_DRAFT_CHARS = 64 * 1024
+        private const val MAX_PERSISTED_ATTACHMENTS_JSON_CHARS = 64 * 1024
         private const val UNAVAILABLE_ATTACHMENTS_ERROR =
             "Remove unavailable attachments before sending."
 
@@ -173,18 +206,18 @@ class ChatViewModel constructor(
         return try {
             json.decodeFromString<List<SelectedFile>>(jsonString)
         } catch (e: SerializationException) {
-            AppLog.e(TAG, "Failed to restore attached files", e)
+            AppLog.e(TAG, "Failed to restore attached files")
             savedStateHandle.remove<String>(KEY_ATTACHED_FILES)
             emptyList()
         } catch (e: IllegalArgumentException) {
-            AppLog.e(TAG, "Failed to restore attached files", e)
+            AppLog.e(TAG, "Failed to restore attached files")
             savedStateHandle.remove<String>(KEY_ATTACHED_FILES)
             emptyList()
         }
     }
 
     private fun persistInputText(text: String) {
-        if (text.isEmpty()) {
+        if (text.isEmpty() || text.length > MAX_PERSISTED_DRAFT_CHARS) {
             savedStateHandle.remove<String>(KEY_DRAFT_TEXT)
         } else {
             savedStateHandle[KEY_DRAFT_TEXT] = text
@@ -195,7 +228,12 @@ class ChatViewModel constructor(
         if (files.isEmpty()) {
             savedStateHandle.remove<String>(KEY_ATTACHED_FILES)
         } else {
-            savedStateHandle[KEY_ATTACHED_FILES] = json.encodeToString(files)
+            val encoded = json.encodeToString(files)
+            if (encoded.length <= MAX_PERSISTED_ATTACHMENTS_JSON_CHARS) {
+                savedStateHandle[KEY_ATTACHED_FILES] = encoded
+            } else {
+                savedStateHandle.remove<String>(KEY_ATTACHED_FILES)
+            }
         }
     }
 
@@ -273,18 +311,26 @@ class ChatViewModel constructor(
         viewModelScope.launch {
             _uiState.update { it.copy(isLoading = true) }
             beginLoadStep("Loading session messages")
-            AppLog.d(TAG, "loadMessages() called for session: $sessionId")
+            AppLog.d(TAG, "loadMessages() called")
 
-            val result = safeApiCall { sessionRepository.loadMessages(SessionId(sessionId), limit = null) }
+            val result = safeApiCall {
+                sessionRepository.loadMessages(SessionId(sessionId), limit = INITIAL_HISTORY_LIMIT)
+            }
             endLoadStep("Loading session messages")
 
             when (result) {
                 is ApiResult.Success -> {
                     AppLog.d(TAG, "Loaded ${messages.value.size} messages")
-                    _uiState.update { it.copy(isLoading = false) }
+                    _uiState.update {
+                        it.copy(
+                            isLoading = false,
+                            historyLimit = INITIAL_HISTORY_LIMIT,
+                            hasOlderMessages = result.data >= INITIAL_HISTORY_LIMIT,
+                        )
+                    }
                 }
                 is ApiResult.Error -> {
-                    AppLog.e(TAG, "Failed to load messages: ${result.message}", result.throwable)
+                    AppLog.e(TAG, "Failed to load messages")
                     if (result.code == 404) {
                         _sessionMissing.emit(Unit)
                     } else {
@@ -297,12 +343,44 @@ class ChatViewModel constructor(
         }
     }
 
+    fun loadOlderMessages() {
+        val current = _uiState.value
+        if (current.isLoading || current.isLoadingOlderMessages || !current.hasOlderMessages) return
+
+        val nextLimit = current.historyLimit + HISTORY_PAGE_SIZE
+        _uiState.update { it.copy(isLoadingOlderMessages = true) }
+        viewModelScope.launch {
+            when (
+                val result = safeApiCall {
+                    sessionRepository.loadMessages(SessionId(sessionId), limit = nextLimit)
+                }
+            ) {
+                is ApiResult.Success -> _uiState.update {
+                    it.copy(
+                        isLoadingOlderMessages = false,
+                        historyLimit = nextLimit,
+                        hasOlderMessages = result.data >= nextLimit,
+                    )
+                }
+                is ApiResult.Error -> {
+                    AppLog.e(TAG, "Failed to load older messages")
+                    _uiState.update {
+                        it.copy(
+                            isLoadingOlderMessages = false,
+                            error = "Failed to load older messages",
+                        )
+                    }
+                }
+            }
+        }
+    }
+
     private fun loadVcsInfo() {
         viewModelScope.launch {
             beginLoadStep("Loading workspace status")
             when (val result = safeApiCall { workspaceClient.getVcsInfo() }) {
                 is ApiResult.Success -> _branchName.value = result.data.branch
-                is ApiResult.Error -> AppLog.w(TAG, "Failed to load VCS info: ${result.message}")
+                is ApiResult.Error -> AppLog.w(TAG, "Failed to load VCS info")
             }
             endLoadStep("Loading workspace status")
         }
@@ -396,7 +474,7 @@ class ChatViewModel constructor(
                 _uiState.update {
                     it.copy(
                         isSending = false,
-                        error = "Failed to send: ${result.message}"
+                        error = "Could not send the message. Check the connection and try again."
                     )
                 }
                 updateInput(text)
@@ -455,7 +533,7 @@ class ChatViewModel constructor(
                         sessionRepository.clearPermission(SessionId(sessionId), permissionId)
                         it
                     } else {
-                        it.copy(error = "Failed to respond to permission: ${result.message}")
+                        it.copy(error = "Could not respond to the permission request. Try again.")
                     }
                 }
             }
@@ -465,11 +543,11 @@ class ChatViewModel constructor(
     fun respondToQuestion(requestId: String, answers: List<List<String>>) {
         viewModelScope.launch {
             val request = QuestionReplyRequest(answers = answers)
-            when (val result = safeApiCall { workspaceClient.respondToQuestion(requestId, request) }) {
+            when (val result = safeApiCall { workspaceClient.respondToQuestion(sessionId, requestId, request) }) {
                 is ApiResult.Success -> sessionRepository.clearQuestion(SessionId(sessionId), requestId)
                 is ApiResult.Error -> _uiState.update {
                     it.copy(
-                        error = "Failed to answer question: ${result.message}"
+                        error = "Could not answer the question. Try again."
                     )
                 }
             }
@@ -483,13 +561,13 @@ class ChatViewModel constructor(
             // goes idle). The local modal is cleared optimistically; the matching
             // question.rejected SSE event (handled in SessionRepositoryImpl) will
             // also reconcile any other attached client.
-            when (val result = safeApiCall { workspaceClient.rejectQuestion(requestId) }) {
+            when (val result = safeApiCall { workspaceClient.rejectQuestion(sessionId, requestId) }) {
                 is ApiResult.Success -> sessionRepository.clearQuestion(SessionId(sessionId), requestId)
                 is ApiResult.Error -> {
                     // A NotFound here means it was already resolved elsewhere — clear
                     // locally anyway so the user is not stuck on a dead modal.
                     sessionRepository.clearQuestion(SessionId(sessionId), requestId)
-                    AppLog.w(TAG, "rejectQuestion failed (clearing locally): ${result.message}")
+                    AppLog.w(TAG, "Question rejection failed; clearing resolved prompt locally")
                 }
             }
         }
@@ -524,16 +602,33 @@ class ChatViewModel constructor(
                     }
                 }
                 is ApiResult.Error -> {
-                    AppLog.e(TAG, "loadCommands failed: ${result.message}", result.throwable)
+                    AppLog.e(TAG, "loadCommands failed")
                     _uiState.update {
                         it.copy(
                             commands = it.commands.ifEmpty { BUILTIN_COMMANDS },
                             isLoadingCommands = false,
                             hasLoadedWorkspaceCommands = false,
-                            commandLoadError = result.message.ifBlank { "Unable to load workspace commands" }
+                            commandLoadError = "Could not load workspace commands. Try again."
                         )
                     }
                 }
+            }
+        }
+    }
+
+    private fun refreshCommandsInBackground() {
+        viewModelScope.launch {
+            when (val result = safeApiCall { workspaceClient.listCommands() }) {
+                is ApiResult.Success -> {
+                    val apiCommands = result.data.map(CommandMapper::mapToDomain)
+                    _uiState.update {
+                        it.copy(
+                            commands = (BUILTIN_COMMANDS + apiCommands).distinctBy(Command::name),
+                            hasLoadedWorkspaceCommands = true,
+                        )
+                    }
+                }
+                is ApiResult.Error -> AppLog.d(TAG, "Background command refresh failed")
             }
         }
     }
@@ -568,7 +663,7 @@ class ChatViewModel constructor(
                 }
                 is ApiResult.Error -> {
                     _uiState.update {
-                        it.copy(isSending = false, error = "Failed to execute command: ${result.message}")
+                        it.copy(isSending = false, error = "Could not execute the command. Try again.")
                     }
                 }
             }
@@ -645,7 +740,7 @@ class ChatViewModel constructor(
                     loadSession()
                 }
                 is ApiResult.Error -> {
-                    _uiState.update { it.copy(isSending = false, error = "Failed to $action: ${result.message}") }
+                    _uiState.update { it.copy(isSending = false, error = "Could not $action. Try again.") }
                 }
             }
         }
@@ -660,7 +755,7 @@ class ChatViewModel constructor(
                     loadSession() // Refresh to get updated revert state
                 }
                 is ApiResult.Error -> {
-                    _uiState.update { it.copy(error = "Failed to revert: ${result.message}") }
+                    _uiState.update { it.copy(error = "Could not revert the session. Try again.") }
                 }
             }
         }
@@ -674,7 +769,7 @@ class ChatViewModel constructor(
                     loadSession() // Refresh to clear revert state
                 }
                 is ApiResult.Error -> {
-                    _uiState.update { it.copy(error = "Failed to unrevert: ${result.message}") }
+                    _uiState.update { it.copy(error = "Could not restore the session. Try again.") }
                 }
             }
         }
@@ -690,20 +785,22 @@ class ChatViewModel constructor(
                     _uiState.update { it.copy(isBusy = false, isSending = false) }
                 }
                 is ApiResult.Error -> _uiState.update {
-                    it.copy(error = "Failed to stop run: ${result.message.toHumanAbortError()}")
+                    it.copy(error = "Could not stop the run. Try again.")
                 }
             }
         }
     }
 
-    private fun String.toHumanAbortError(): String {
-        val trimmed = trim()
-        if (trimmed.startsWith("{") || trimmed.startsWith("[")) return "Unable to stop run"
-        return trimmed.ifBlank { "Unable to stop run" }
+    override fun onCleared() {
+        sessionLease.close()
+        super.onCleared()
     }
 
-    private fun dev.blazelight.p4oc.domain.model.MessageError.toHumanMessage(): String =
-        message?.toHumanAbortError() ?: "An error occurred"
+    private fun dev.blazelight.p4oc.domain.model.MessageError.toHumanMessage(): String = when {
+        name == "ProviderAuthError" -> "Provider authentication required"
+        isRetryable -> "The request failed temporarily. Try again."
+        else -> "The run failed. Try again."
+    }
 
     private fun <T> Result<T>.toApiResult(): ApiResult<T> = fold(
         onSuccess = { ApiResult.Success(it) },
@@ -719,6 +816,9 @@ data class ChatUiState(
     val session: Session? = null,
     val inputText: String = "",
     val isLoading: Boolean = false,
+    val isLoadingOlderMessages: Boolean = false,
+    val hasOlderMessages: Boolean = false,
+    val historyLimit: Int = 0,
     val loadingSteps: Set<String> = emptySet(),
     val isSending: Boolean = false,
     val isBusy: Boolean = false,

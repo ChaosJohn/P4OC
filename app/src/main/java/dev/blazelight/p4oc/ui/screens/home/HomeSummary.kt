@@ -156,7 +156,7 @@ private fun appendRepositoryFailures(
 ) {
     repositories.mapNotNullTo(failures) { scoped ->
         (scoped.state as? RepoState.Stale)?.let {
-            "${scoped.serverRef.displayName}: ${it.reason ?: "session data unavailable"}"
+            "${scoped.serverRef.displayName}: session data unavailable"
         }
     }
 }

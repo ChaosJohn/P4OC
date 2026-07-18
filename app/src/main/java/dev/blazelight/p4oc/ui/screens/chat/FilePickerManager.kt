@@ -57,7 +57,7 @@ class FilePickerManager(
             val effectivePath = path ?: rememberedPath?.ifBlank { null } ?: "."
             val result = loadPickerFilesForPath(workspaceKey, effectivePath)
             if (result is ApiResult.Error && path == null && effectivePath != ".") {
-                AppLog.w(TAG, "Remembered upload folder '$effectivePath' unavailable; falling back to root")
+                AppLog.w(TAG, "Remembered upload folder unavailable; falling back to root")
                 settingsDataStore.setLastUploadDirectory(workspaceKey, null)
                 loadPickerFilesForPath(workspaceKey, ".")
             }
@@ -86,8 +86,8 @@ class FilePickerManager(
                 return ApiResult.Success(Unit)
             }
             is ApiResult.Error -> {
-                AppLog.w(TAG, "Failed to load files for path=$path: ${result.message}")
-                _pickerError.value = result.message
+                AppLog.w(TAG, "Failed to load files")
+                _pickerError.value = "Could not load files. Check the connection and try again."
                 _isPickerLoading.value = false
                 return result
             }

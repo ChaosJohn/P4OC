@@ -44,10 +44,10 @@ import dev.blazelight.p4oc.ui.theme.LocalOpenCodeTheme
 import dev.blazelight.p4oc.ui.theme.ProjectColors
 import dev.blazelight.p4oc.ui.theme.Sizing
 import dev.blazelight.p4oc.ui.theme.Spacing
-import kotlinx.datetime.Instant
 import kotlinx.datetime.TimeZone
 import kotlinx.datetime.toLocalDateTime
 import org.koin.androidx.compose.koinViewModel
+import kotlin.time.Instant
 
 private data class SessionNode(
     val sessionWithProject: SessionWithProject,
@@ -483,18 +483,28 @@ private data class SearchStatusVisual(
 )
 
 private fun buildSessionTree(sessions: List<SessionWithProject>): List<SessionNode> {
+    val sessionIds = sessions.map { it.session.id }.toSet()
     val childrenByParent = sessions
         .mapNotNull { swp -> swp.session.parentID?.let { parentId -> parentId to swp } }
         .groupBy({ it.first }, { it.second })
 
-    fun buildNode(sessionWithProject: SessionWithProject): SessionNode {
-        val children = childrenByParent[sessionWithProject.session.id]?.map { buildNode(it) } ?: emptyList()
+    val included = mutableSetOf<String>()
+    fun buildNode(sessionWithProject: SessionWithProject, ancestors: Set<String>): SessionNode {
+        val id = sessionWithProject.session.id
+        included += id
+        val children = childrenByParent[id]
+            .orEmpty()
+            .filterNot { it.session.id in ancestors || it.session.id == id }
+            .map { buildNode(it, ancestors + id) }
         return SessionNode(sessionWithProject, children)
     }
 
-    return sessions
-        .filter { it.session.parentID == null }
-        .map { buildNode(it) }
+    val roots = sessions.filter { it.session.parentID == null || it.session.parentID !in sessionIds }
+        .map { buildNode(it, emptySet()) }
+        .toMutableList()
+    sessions.filterNot { it.session.id in included }
+        .forEach { roots += buildNode(it, emptySet()) }
+    return roots
 }
 
 @Composable
@@ -683,7 +693,7 @@ private fun SessionCard(
                 ) {
                     if (childCount > 0) {
                         Text(
-                            text = "[$childCount sub]",
+                            text = "[${stringResource(R.string.sessions_sub_count, childCount)}]",
                             style = MaterialTheme.typography.labelSmall,
                             color = theme.info
                         )
@@ -805,11 +815,12 @@ private fun ProjectChip(
     projectName: String,
     onClick: (() -> Unit)?
 ) {
+    val openDescription = stringResource(R.string.sessions_open_project, projectName)
     val modifier = Modifier
         .padding(start = Spacing.md)
         .widthIn(max = Sizing.chipMaxWidth)
         .testTag("session_directory_chip_$projectName")
-        .semantics { contentDescription = "Open sessions for $projectName" }
+        .semantics { contentDescription = openDescription }
     Surface(
         onClick = onClick ?: {},
         enabled = onClick != null,
@@ -848,7 +859,7 @@ private fun SessionStatusIndicator(status: SessionStatus?, presence: SessionPres
 private fun formatDateTime(epochMillis: Long): String {
     val instant = Instant.fromEpochMilliseconds(epochMillis)
     val local = instant.toLocalDateTime(TimeZone.currentSystemDefault())
-    return "${local.monthNumber}/${local.dayOfMonth}/${local.year} ${local.hour}:${local.minute.toString().padStart(
+    return "${local.month.ordinal + 1}/${local.day}/${local.year} ${local.hour}:${local.minute.toString().padStart(
         2,
         '0'
     )}"

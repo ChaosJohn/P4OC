@@ -1,7 +1,26 @@
 <?xml version="1.0" encoding="utf-8"?>
 <resources>
     <string name="app_name">OpenCode</string>
+    <string name="terminal_disconnected">Terminal disconnected</string>
+    <string name="terminal_exited">Terminal process exited</string>
+    <string name="terminal_accessibility_label">Interactive terminal. Terminal output is visible on screen. Activate to enter commands.</string>
+    <string name="terminal_accessibility_connected">Connected and ready for input</string>
+    <string name="terminal_accessibility_reconnecting">Reconnecting to terminal</string>
+    <string name="terminal_accessibility_focus_input">Focus terminal input</string>
+
+    <string name="chat_delegated_to">Delegated to %1$s: %2$s</string>
+    <string name="chat_retry_attempt">Retrying request (attempt %1$d)</string>
+    <string name="chat_context_compacted">Context compacted</string>
+    <string name="chat_run_aborted">Run aborted</string>
+    <string name="chat_provider_auth_required">Provider authentication required</string>
+    <string name="chat_run_retryable_error">The request failed temporarily. Try again.</string>
+    <string name="chat_run_failed">Run failed</string>
+    <string name="server_update_available">OpenCode server %1$s is available</string>
+    <string name="server_updated">OpenCode server updated to %1$s</string>
     <string name="home_title">Home</string>
+    <string name="home_search_accessibility">Search every server, session, or workspace</string>
+    <string name="home_summary_counts">%1$d sessions · %2$d workspaces</string>
+    <string name="home_shared_badge">◈ Shared</string>
     
     <!-- Server Screen -->
     <string name="server_connect_title">Connect to Server</string>
@@ -22,6 +41,7 @@
     <string name="server_credentials">Credentials and security</string>
     <string name="server_tls_checks_on">TLS checks on</string>
     <string name="server_tls_checks_off">TLS checks off</string>
+    <string name="server_cleartext_credentials_warning">Warning: HTTP sends credentials without transport encryption. This is allowed only for a trusted loopback or private LAN IP.</string>
     <string name="server_auth_configured">Authentication configured</string>
     <string name="server_auth_default">Default authentication</string>
     <string name="server_actions">Server actions</string>
@@ -108,8 +128,10 @@
     
     <!-- Settings Screen -->
     <string name="settings_title">Settings</string>
-    <string name="settings_provider_model">Provider &amp; Model</string>
-    <string name="settings_provider_model_desc">Configure AI providers and models</string>
+    <string name="settings_providers">Providers</string>
+    <string name="settings_providers_desc">Connect and authenticate AI providers</string>
+    <string name="settings_model_controls">Model Controls</string>
+    <string name="settings_model_controls_desc">Choose models and favorites</string>
     <string name="settings_agents">Agents</string>
     <string name="settings_agents_desc">Configure AI agents</string>
     <string name="settings_skills">Skills</string>
@@ -214,6 +236,7 @@
     <string name="sessions_quick_custom">New with custom directory</string>
     <string name="sessions_quick_custom_desc">Specify a directory on the server</string>
     <string name="sessions_create_in_project">Create session in %1$s</string>
+    <string name="sessions_open_project">Open sessions for %1$s</string>
     
     <!-- Chat Screen -->
     <string name="chat_search_action">Search chat</string>
@@ -221,12 +244,14 @@
     <string name="chat_search_no_matches">No matches</string>
     <string name="chat_empty_title">Start a conversation</string>
     <string name="chat_empty_description">Type a message below to begin</string>
+    <string name="chat_load_older_messages">Load older messages</string>
     <string name="chat_input_placeholder">Type a message…</string>
     <string name="chat_input_placeholder_with_commands">Type a message or / for commands…</string>
     <string name="chat_send">Send</string>
     <string name="chat_action_send">Send</string>
     <string name="chat_action_stop">Stop session</string>
     <string name="chat_action_attach">Attach file</string>
+    <string name="chat_action_remove_attachment">Remove file %1$s</string>
     <string name="chat_disabled_disconnected">Disconnected</string>
     <string name="chat_disabled_empty">Message is empty</string>
     <string name="chat_queued_prefix">queued</string>
@@ -285,12 +310,17 @@
     <!-- File Explorer Screen -->
     <string name="files_search_placeholder">Search files…</string>
     <string name="files_workspace_global">Global workspace</string>
+    <string name="files_breadcrumb_root">Workspace root</string>
     <string name="files_copy_path">Copy Path</string>
     <string name="files_copy_name">Copy Name</string>
+    <string name="files_type_file">File</string>
+    <string name="files_type_folder">Folder</string>
+    <string name="files_item_description">%1$s, %2$s, path %3$s</string>
+    <string name="files_item_description_git">%1$s, %2$s, path %3$s, Git status %4$s</string>
     <string name="files_no_matching_files">-- no matching files --</string>
     <string name="files_empty_folder">-- empty folder --</string>
-    <string name="files_symbol_search_failed">Symbol search failed: %1$s</string>
-    <string name="files_restored_path_unavailable">Restored path is unavailable; showing workspace root. %1$s</string>
+    <string name="files_symbol_search_failed">Could not search symbols. Check the connection and try again.</string>
+    <string name="files_restored_path_unavailable">Restored path is unavailable; showing workspace root.</string>
     <string name="files_create">Create</string>
     <string name="files_new_file">New file</string>
     <string name="files_new_folder">New folder</string>
@@ -303,6 +333,7 @@
     <string name="files_delete_title">Delete item?</string>
     <string name="files_delete_confirm">Delete %1$s from this workspace? This cannot be undone.</string>
     <string name="files_operation_failed">File operation failed</string>
+    <string name="files_operation_failed_hint">The file operation could not be completed. Check the connection and try again.</string>
     
     <!-- Git Screen -->
     <string name="git_title">Git</string>
@@ -406,6 +437,7 @@
     <string name="agents_appear_here">Agents will appear here once configured on the server</string>
     <string name="agents_tools">Tools</string>
     <string name="agents_system_prompt">System Prompt</string>
+    <string name="agent_selector_current">Select agent. Current agent: %1$s</string>
     
     <!-- Skills Screen -->
     <string name="skills_title">Skills</string>
@@ -441,13 +473,29 @@
     <string name="provider_current_model">Current Model</string>
     <string name="provider_not_configured">Not configured</string>
     <string name="provider_requires_api_key">Requires API key</string>
+    <string name="provider_auth_title">Authenticate provider</string>
+    <string name="provider_auth_open_browser">Open browser</string>
+    <string name="provider_auth_code">Authorization code</string>
+    <string name="provider_auth_complete">Complete authentication</string>
+    <string name="provider_auth_action">Authenticate</string>
     
     <!-- Model Controls Screen -->
     <string name="models_favorites">Favorites</string>
     <string name="models_all">All Models</string>
+    <string name="models_current_model">Current model</string>
     <string name="models_context_format">Context: %s</string>
     <string name="models_tools">Tools</string>
     <string name="models_reasoning">Reasoning</string>
+    <string name="models_load_failed_title">Could not load models</string>
+    <string name="models_load_failed_description">Check the server connection, then try again.</string>
+    <string name="models_empty_title">No models available</string>
+    <string name="models_empty_description">Connect or configure a provider, then refresh this list.</string>
+    <string name="models_no_results_title">No matching models</string>
+    <string name="models_no_results_description">Try a different search or provider filter.</string>
+    <string name="models_clear_search_filters">Clear search and filters</string>
+    <string name="chat_patch_files">Patch: %1$d file(s)</string>
+    <string name="tabs_performance_warning">Multiple tabs may affect performance</string>
+    <string name="server_not_connected">Not connected to server</string>
     
     <!-- Git Screen -->
     <string name="git_not_repo">Not a Git Repository</string>
@@ -462,6 +510,8 @@
     <string name="projects_title">Projects</string>
     <string name="projects_no_projects">No Projects</string>
     <string name="projects_appear_here">Projects you\'ve worked on will appear here</string>
+    <string name="projects_load_failed">Could not load projects. Check the connection and try again.</string>
+    <string name="models_operation_failed">Could not update model settings. Check the connection and try again.</string>
     
     <!-- Session List Screen -->
     <string name="session_working">Working</string>
@@ -469,6 +519,9 @@
     
     <!-- Common Actions -->
     <string name="retry">Retry</string>
+    <string name="files_load_failed">Could not load this folder</string>
+    <string name="files_load_failed_hint">Check the connection and try again.</string>
+    <string name="files_refresh_failed">Could not refresh. Showing the last loaded files.</string>
     <string name="reset">Reset</string>
     <string name="allow">Allow</string>
     <string name="deny">Deny</string>
@@ -526,6 +579,7 @@
     <string name="no_commands_available">No commands available</string>
     <string name="no_matching_commands">No matching commands</string>
     <string name="subtask">subtask</string>
+    <string name="task">Task</string>
     <string name="cd_select">Select</string>
     <string name="arguments_optional">Arguments (optional)</string>
     <string name="enter_command_arguments">Enter command arguments…</string>
@@ -567,7 +621,7 @@
     <string name="file_editor_reload">Reload</string>
     <string name="file_editor_save_diff_title">Review changes</string>
     <string name="file_editor_save_no_changes">No changes to save.</string>
-    <string name="file_editor_save_failed">Failed to save: %1$s</string>
+    <string name="file_editor_save_failed">Could not save the file. Check the connection and try again.</string>
     <string name="file_editor_unsaved_title">Discard unsaved changes?</string>
     <string name="file_editor_unsaved_body">You have unsaved edits in this file. Going back will discard them.</string>
     <string name="file_editor_conflict_title">File changed on disk</string>
@@ -615,9 +669,11 @@
     <string name="diff_viewer_title">Diff Viewer</string>
     <string name="diff_no_content">No diff content to display</string>
     <string name="session_diff_title">Session Changes</string>
-    <string name="session_diff_no_changes">No file changes in this session</string>
+    <string name="session_diff_no_changes">No changes in this session</string>
+    <string name="session_diff_unknown_file">Unknown file</string>
     <string name="session_diff_summary">%1$d files changed  +%2$d -%3$d</string>
     <string name="session_diff_loading">Loading changes…</string>
+    <string name="session_diff_load_failed">Could not load session changes. Check the connection and try again.</string>
     
     <!-- Message Branching -->
     <string name="conversation_branches">Conversation Branches</string>
@@ -846,6 +902,7 @@
     <string name="upload_phase_uploading">uploading</string>
     <string name="upload_phase_done">done</string>
     <string name="upload_phase_failed">failed</string>
+    <string name="upload_probe_failed_for">%1$s · could not read source</string>
     <string name="attachment_unavailable">unavailable</string>
     <string name="start_work_title">Start work</string>
     <string name="start_work_in">In</string>
@@ -861,4 +918,7 @@
     <string name="start_work_existing_work">Existing work</string>
     <string name="start_work_sessions">Sessions</string>
     <string name="start_work_sessions_description">Browse sessions in this exact workspace</string>
+    <string name="start_work_server_workspaces">%1$s, %2$d workspaces</string>
+    <string name="start_work_action_accessibility">%1$s. %2$s</string>
+    <string name="server_close_details">Close server details</string>
 </resources>

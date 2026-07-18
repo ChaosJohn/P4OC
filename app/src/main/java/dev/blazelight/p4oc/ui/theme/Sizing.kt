@@ -23,8 +23,8 @@ object Sizing {
     val iconHero: Dp = 64.dp // Empty state icons
     val iconHeroLg: Dp = 96.dp // Large decorative icons
 
-    // Touch targets - Android minimum is 48dp, we use 44dp for density
-    val minTouchTarget: Dp = 44.dp
+    // Touch targets - Android accessibility minimum is 48dp.
+    val minTouchTarget: Dp = 48.dp
     val touchTargetSm: Dp = 36.dp // Compact buttons (with hit area extension)
 
     // Buttons

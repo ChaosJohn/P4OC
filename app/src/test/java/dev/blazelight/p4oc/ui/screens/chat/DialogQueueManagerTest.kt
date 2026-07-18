@@ -135,6 +135,60 @@ class DialogQueueManagerTest {
     }
 
     @Test
+    fun pendingQuestion_restoresExactly() {
+        val question = questionRequest(id = "restored")
+        val encoded = json.encodeToString(question)
+        val handle = SavedStateHandle(mapOf(KEY_PENDING_QUESTION to encoded))
+
+        val manager = manager(handle)
+
+        assertEquals(question, manager.pendingQuestion.value)
+        assertEquals(encoded, handle.get<String>(KEY_PENDING_QUESTION))
+    }
+
+    @Test
+    fun pendingQuestion_oversizedJsonRemovesPersistenceAndSmallerQuestionRecovers() = runTest {
+        val handle = SavedStateHandle()
+        val manager = manager(handle)
+        val oversized = questionRequest(id = "large", questionText = "x".repeat(70_000))
+
+        manager.setPendingQuestion(oversized)
+        advanceUntilIdle()
+
+        assertEquals(oversized, manager.pendingQuestion.value)
+        assertNull(handle.get<String>(KEY_PENDING_QUESTION))
+
+        val small = questionRequest(id = "small")
+        manager.setPendingQuestion(small)
+        advanceUntilIdle()
+
+        assertEquals(json.encodeToString(small), handle.get<String>(KEY_PENDING_QUESTION))
+    }
+
+    @Test
+    fun queuedQuestions_oversizedJsonRemovesPersistenceAndSmallerQueueRecovers() = runTest {
+        val handle = SavedStateHandle()
+        val manager = manager(handle)
+        val current = questionRequest(id = "current")
+        val oversized = questionRequest(id = "large", questionText = "x".repeat(70_000))
+
+        manager.enqueueQuestion(current)
+        manager.enqueueQuestion(oversized)
+        advanceUntilIdle()
+
+        assertNull(handle.get<String>(KEY_PENDING_QUESTIONS_QUEUE))
+
+        manager.clearQuestion()
+        manager.enqueueQuestion(questionRequest(id = "small"))
+        advanceUntilIdle()
+
+        val persisted = json.decodeFromString<List<QuestionRequest>>(
+            handle.get<String>(KEY_PENDING_QUESTIONS_QUEUE)!!
+        )
+        assertEquals(listOf("small"), persisted.map { it.id })
+    }
+
+    @Test
     fun clearQuestion_advancesToNextInQueue() = runTest {
         val handle = SavedStateHandle()
         val manager = manager(handle)
@@ -181,14 +235,14 @@ class DialogQueueManagerTest {
         assertNull(handle.get<String>(KEY_PENDING_QUESTIONS_QUEUE))
     }
 
-    private fun questionRequest(id: String): QuestionRequest {
+    private fun questionRequest(id: String, questionText: String = "Q?"): QuestionRequest {
         return QuestionRequest(
             id = id,
             sessionID = "session-1",
             questions = listOf(
                 Question(
                     header = "Header",
-                    question = "Q?",
+                    question = questionText,
                     options = listOf(QuestionOption(label = "Yes", description = ""))
                 )
             )

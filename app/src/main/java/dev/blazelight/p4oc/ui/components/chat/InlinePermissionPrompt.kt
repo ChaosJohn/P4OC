@@ -7,6 +7,7 @@ import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.RectangleShape
+import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.font.FontFamily
 import dev.blazelight.p4oc.R
@@ -68,7 +69,9 @@ fun InlinePermissionPrompt(
                 onClick = onReject,
                 modifier = Modifier
                     .weight(1f)
-                    .height(Sizing.buttonHeightSm),
+                    .minimumInteractiveComponentSize()
+                    .heightIn(min = Sizing.minTouchTarget)
+                    .testTag("permission_deny_${permission.id}"),
                 shape = RectangleShape,
                 contentPadding = PaddingValues(horizontal = Spacing.sm, vertical = Spacing.none),
                 colors = ButtonDefaults.outlinedButtonColors(
@@ -85,7 +88,9 @@ fun InlinePermissionPrompt(
                 onClick = onAlways,
                 modifier = Modifier
                     .weight(1f)
-                    .height(Sizing.buttonHeightSm),
+                    .minimumInteractiveComponentSize()
+                    .heightIn(min = Sizing.minTouchTarget)
+                    .testTag("permission_always_allow_${permission.id}"),
                 shape = RectangleShape,
                 contentPadding = PaddingValues(horizontal = Spacing.sm, vertical = Spacing.none)
             ) {
@@ -99,7 +104,9 @@ fun InlinePermissionPrompt(
                 onClick = onAllow,
                 modifier = Modifier
                     .weight(1f)
-                    .height(Sizing.buttonHeightSm),
+                    .minimumInteractiveComponentSize()
+                    .heightIn(min = Sizing.minTouchTarget)
+                    .testTag("permission_allow_once_${permission.id}"),
                 shape = RectangleShape,
                 contentPadding = PaddingValues(horizontal = Spacing.sm, vertical = Spacing.none),
                 colors = ButtonDefaults.buttonColors(

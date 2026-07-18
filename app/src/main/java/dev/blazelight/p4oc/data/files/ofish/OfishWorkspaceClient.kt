@@ -17,7 +17,7 @@ internal interface OfishWorkspaceClient {
 
     suspend fun executeShellCommand(sessionId: String, request: ShellCommandRequest): MessageWrapperDto
 
-    suspend fun listSessionsCurrentWorkspace(limit: Int? = null): List<SessionDto>
+    suspend fun listSessionsCurrentWorkspace(limit: Int?): List<SessionDto>
 
     suspend fun respondToPermission(id: String, request: PermissionResponseRequest): Boolean
 }

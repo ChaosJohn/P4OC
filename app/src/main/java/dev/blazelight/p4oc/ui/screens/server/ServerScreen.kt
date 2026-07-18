@@ -10,9 +10,11 @@ import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.selection.toggleable
 import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.automirrored.filled.Login
 import androidx.compose.material.icons.filled.*
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
@@ -36,6 +38,7 @@ import dev.blazelight.p4oc.core.datastore.SavedServer
 import dev.blazelight.p4oc.core.network.DiscoveredServer
 import dev.blazelight.p4oc.core.network.DiscoveryState
 import dev.blazelight.p4oc.core.network.ServerConnectionRegistry
+import dev.blazelight.p4oc.core.network.ServerUrl
 import dev.blazelight.p4oc.core.network.toServerRef
 import dev.blazelight.p4oc.ui.components.TuiConfirmDialog
 import dev.blazelight.p4oc.ui.components.TuiLoadingIndicator
@@ -66,7 +69,7 @@ fun serverScreen(
         saved.endpointKey to state
     }
     val tabManager: TabManager = koinInject()
-    val tabs by tabManager.tabs.collectAsState()
+    val tabs by tabManager.tabs.collectAsStateWithLifecycle()
     val openTabsByEndpoint = tabs.filterNot { it.isPinnedHome }.groupBy { it.serverEndpointKey }
     val inventory = remember(uiState, registryStates) { buildServerInventory(uiState, registryStates) }
     var showManualForm by rememberSaveable {
@@ -393,9 +396,24 @@ private fun remoteServerSection(
                     onTogglePassword = { passwordVisible = !passwordVisible },
                 ),
             )
+            cleartextCredentialWarning(state)
             connectButton(state = state, onConnect = actions.onConnect)
         }
     }
+}
+
+@Composable
+private fun cleartextCredentialWarning(state: RemoteServerState) {
+    val usesCleartext = state.url.trimStart().startsWith("http://", ignoreCase = true)
+    val hasCredentials = state.username.isNotBlank() || state.password.isNotBlank()
+    val shouldWarn = usesCleartext && hasCredentials && ServerUrl.allowsCleartextCredentials(state.url)
+    if (!shouldWarn) return
+    Text(
+        text = stringResource(R.string.server_cleartext_credentials_warning),
+        color = LocalOpenCodeTheme.current.warning,
+        style = MaterialTheme.typography.bodySmall,
+        fontFamily = FontFamily.Monospace,
+    )
 }
 
 @Composable
@@ -473,9 +491,11 @@ private fun credentialsFields(
         Row(
             modifier = Modifier
                 .fillMaxWidth()
-                .clickable(role = Role.Checkbox) {
-                    actions.onAllowInsecureChange(!state.allowInsecure)
-                }
+                .toggleable(
+                    value = state.allowInsecure,
+                    role = Role.Checkbox,
+                    onValueChange = actions.onAllowInsecureChange,
+                )
                 .padding(vertical = Spacing.xs)
                 .testTag("server_allow_insecure_toggle"),
             verticalAlignment = Alignment.CenterVertically,
@@ -483,7 +503,7 @@ private fun credentialsFields(
         ) {
             Checkbox(
                 checked = state.allowInsecure,
-                onCheckedChange = actions.onAllowInsecureChange,
+                onCheckedChange = null,
                 colors = CheckboxDefaults.colors(checkedColor = theme.accent),
             )
             Column(Modifier.weight(1f)) {
@@ -557,7 +577,7 @@ private fun connectButton(state: RemoteServerState, onConnect: () -> Unit) {
             Spacer(Modifier.width(Spacing.md))
             Text(stringResource(R.string.button_connecting), fontFamily = FontFamily.Monospace)
         } else {
-            Icon(Icons.Default.Login, contentDescription = null)
+            Icon(Icons.AutoMirrored.Filled.Login, contentDescription = null)
             Spacer(Modifier.width(Spacing.sm))
             Text(stringResource(R.string.button_connect), fontFamily = FontFamily.Monospace)
         }
@@ -904,7 +924,9 @@ private fun savedServerEditorForm(presentation: SavedServerEditorPresentation, o
     Column(Modifier.padding(Spacing.md), verticalArrangement = Arrangement.spacedBy(Spacing.sm)) {
         Row(Modifier.fillMaxWidth(), Arrangement.SpaceBetween, Alignment.CenterVertically) {
             Text("[ ${server.displayName} ]", fontFamily = FontFamily.Monospace, color = theme.text)
-            IconButton(onClick = presentation.onDismiss) { Icon(Icons.Default.Close, "Close server details") }
+            IconButton(onClick = presentation.onDismiss) {
+                Icon(Icons.Default.Close, stringResource(R.string.server_close_details))
+            }
         }
         remoteServerSection(
             RemoteServerState(
@@ -930,7 +952,7 @@ private fun savedServerEditorForm(presentation: SavedServerEditorPresentation, o
         ) {
             Icon(Icons.Default.Save, null)
             Spacer(Modifier.width(Spacing.sm))
-            Text("Save", fontFamily = FontFamily.Monospace)
+            Text(stringResource(R.string.file_editor_save), fontFamily = FontFamily.Monospace)
         }
         TextButton(onRemove, Modifier.fillMaxWidth().testTag("saved_server_detail_forget")) {
             Text(stringResource(R.string.server_forget), color = theme.error)

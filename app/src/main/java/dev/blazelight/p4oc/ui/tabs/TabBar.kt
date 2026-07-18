@@ -18,6 +18,7 @@ import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.semantics.Role
 import androidx.compose.ui.semantics.contentDescription
+import androidx.compose.ui.semantics.selected
 import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.text.style.TextOverflow
 import dev.blazelight.p4oc.R
@@ -76,7 +77,7 @@ fun TabBar(
         Row(
             modifier = Modifier
                 .fillMaxWidth()
-                .height(Sizing.chipHeight)
+                .height(Sizing.minTouchTarget)
                 .padding(horizontal = Spacing.xs),
             verticalAlignment = Alignment.CenterVertically
         ) {
@@ -147,7 +148,10 @@ fun TabBar(
             // Add button
             IconButton(
                 onClick = onAddClick,
-                modifier = Modifier.size(Sizing.iconLg).testTag("tab_bar_add_button")
+                modifier = Modifier
+                    .minimumInteractiveComponentSize()
+                    .size(Sizing.iconLg)
+                    .testTag("tab_bar_add_button")
             ) {
                 Icon(
                     imageVector = Icons.Default.Add,
@@ -175,14 +179,23 @@ private fun tabIndicator(
         state.isActive -> theme.backgroundElement
         else -> theme.background
     }
-    Surface(
+    Box(
         modifier = modifier
+            .minimumInteractiveComponentSize()
             .height(Sizing.tabHeight)
-            .semantics { contentDescription = state.accessibilityLabel }
+            .semantics {
+                contentDescription = state.accessibilityLabel
+                selected = state.isActive
+            }
             .clickable(onClick = state.onClick, role = Role.Tab),
-        color = backgroundColor,
+        contentAlignment = Alignment.Center,
     ) {
-        tabIndicatorRow(state = state, needsAttention = needsAttention)
+        Surface(
+            modifier = Modifier.height(Sizing.tabHeight),
+            color = backgroundColor,
+        ) {
+            tabIndicatorRow(state = state, needsAttention = needsAttention)
+        }
     }
 }
 
@@ -212,8 +225,9 @@ private fun tabIndicatorRow(state: TabIndicatorState, needsAttention: Boolean) {
                 imageVector = Icons.Default.Close,
                 contentDescription = stringResource(R.string.cd_close_tab),
                 modifier = Modifier
-                    .size(Sizing.iconXs)
-                    .clickable(onClick = state.onClose, role = Role.Button),
+                    .size(Sizing.minTouchTarget)
+                    .clickable(onClick = state.onClose, role = Role.Button)
+                    .padding((Sizing.minTouchTarget - Sizing.iconXs) / 2),
                 tint = theme.textMuted,
             )
         }

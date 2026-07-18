@@ -3,6 +3,7 @@ package dev.blazelight.p4oc.core.datastore
 import android.content.Context
 import androidx.datastore.core.DataMigration
 import androidx.datastore.core.DataStore
+import androidx.datastore.core.handlers.ReplaceFileCorruptionHandler
 import androidx.datastore.preferences.core.*
 import androidx.datastore.preferences.preferencesDataStore
 import dev.blazelight.p4oc.core.log.AppLog
@@ -23,12 +24,70 @@ import kotlinx.serialization.Serializable
 import kotlinx.serialization.encodeToString
 import kotlinx.serialization.json.Json
 
+internal val settingsCorruptionHandler: ReplaceFileCorruptionHandler<Preferences> =
+    ReplaceFileCorruptionHandler { emptyPreferences() }
+
 private val Context.dataStore: DataStore<Preferences> by preferencesDataStore(
     name = "settings",
+    corruptionHandler = settingsCorruptionHandler,
     produceMigrations = { listOf(removeDeadWorkspacePrefsMigration()) },
 )
 
 private const val TAG = "SettingsDataStore"
+internal const val MAX_SESSION_AGENT_SELECTIONS = 100
+
+private fun parseSessionAgentSelections(stored: String?): LinkedHashMap<String, String> =
+    stored?.let {
+        runCatching {
+            Json.decodeFromString<LinkedHashMap<String, String>>(it)
+        }.getOrNull()
+    } ?: linkedMapOf()
+
+internal fun selectedAgentForSession(stored: String?, sessionId: String): String? =
+    parseSessionAgentSelections(stored)[sessionId]
+
+internal fun updatedSessionAgentSelections(
+    stored: String?,
+    sessionId: String,
+    agentName: String,
+): String {
+    val selections = parseSessionAgentSelections(stored)
+    selections.remove(sessionId)
+    selections[sessionId] = agentName
+    while (selections.size > MAX_SESSION_AGENT_SELECTIONS) {
+        selections.remove(selections.keys.first())
+    }
+    return Json.encodeToString(selections)
+}
+
+internal const val MAX_LAST_UPLOAD_DIRECTORIES = 50
+
+internal fun decodeLastUploadDirectories(encoded: String?): Map<String, String> {
+    if (encoded.isNullOrBlank()) return emptyMap()
+    return runCatching {
+        Json.decodeFromString<LinkedHashMap<String, String>>(encoded).apply {
+            while (size > MAX_LAST_UPLOAD_DIRECTORIES) {
+                remove(keys.first())
+            }
+        }
+    }.getOrDefault(emptyMap())
+}
+
+internal fun updateLastUploadDirectories(
+    current: Map<String, String>,
+    workspaceKey: String,
+    path: String?,
+): Map<String, String> {
+    if (workspaceKey.isBlank()) return current
+
+    val updated = LinkedHashMap(current)
+    updated.remove(workspaceKey)
+    if (!path.isNullOrBlank()) updated[workspaceKey] = path
+    while (updated.size > MAX_LAST_UPLOAD_DIRECTORIES) {
+        updated.remove(updated.keys.first())
+    }
+    return updated
+}
 
 class SettingsDataStore constructor(
     private val context: Context,
@@ -111,7 +170,7 @@ class SettingsDataStore constructor(
                 cachedServerUrl = prefs[KEY_SERVER_URL] ?: DEFAULT_LOCAL_URL
                 cachedUsername = prefs[KEY_USERNAME]
             } catch (e: Exception) {
-                AppLog.e(TAG, "Error during init", e)
+                AppLog.e(TAG, "Error during init (${e::class.simpleName})")
             }
         }
     }
@@ -319,7 +378,7 @@ class SettingsDataStore constructor(
         try {
             parseRecentServersLenient(stored)
         } catch (e: Exception) {
-            AppLog.e(TAG, "Error parsing recent servers", e)
+            AppLog.e(TAG, "Error parsing recent servers (${e::class.simpleName})")
             emptyList()
         }
     }
@@ -413,20 +472,20 @@ class SettingsDataStore constructor(
 
         context.dataStore.edit { prefs ->
             val stored = prefs[KEY_RECENT_SERVERS] ?: ""
-            val existingServers = if (stored.isBlank()) {
+            val servers = if (stored == null) {
                 mutableListOf()
             } else {
                 try {
                     parseRecentServersLenient(stored).toMutableList()
                 } catch (e: Exception) {
-                    AppLog.e(TAG, "Error parsing recent servers in addRecentServer", e)
+                    AppLog.e(TAG, "Error parsing recent servers in addRecentServer (${e::class.simpleName})")
                     mutableListOf()
                 }
             }
 
-            existingServers.removeAll { it.url == url }
-            existingServers.add(0, RecentServer(url, name, username, allowInsecure))
-            val trimmed = existingServers.take(MAX_RECENT_SERVERS)
+            servers.removeAll { it.url == url }
+            servers.add(0, RecentServer(url, name, username, allowInsecure))
+            val trimmed = servers.take(MAX_RECENT_SERVERS)
 
             prefs[KEY_RECENT_SERVERS] = json.encodeToString(trimmed)
         }
@@ -441,7 +500,7 @@ class SettingsDataStore constructor(
             val servers = try {
                 parseRecentServersLenient(stored).filter { it.url != url }
             } catch (e: Exception) {
-                AppLog.e(TAG, "Error parsing recent servers in removeRecentServer", e)
+                AppLog.e(TAG, "Error parsing recent servers in removeRecentServer (${e::class.simpleName})")
                 return@edit
             }
             prefs[KEY_RECENT_SERVERS] = json.encodeToString(servers)
@@ -521,26 +580,14 @@ class SettingsDataStore constructor(
     }
 
     val lastUploadDirectoriesByWorkspace: Flow<Map<String, String>> = context.dataStore.data.map { prefs ->
-        prefs[KEY_CHAT_LAST_UPLOAD_DIR_BY_WORKSPACE]
-            ?.takeIf { it.isNotBlank() }
-            ?.let { encoded ->
-                runCatching { json.decodeFromString<Map<String, String>>(encoded) }.getOrDefault(emptyMap())
-            }
-            ?: emptyMap()
+        decodeLastUploadDirectories(prefs[KEY_CHAT_LAST_UPLOAD_DIR_BY_WORKSPACE])
     }
 
     suspend fun setLastUploadDirectory(workspaceKey: String, path: String?) {
         if (workspaceKey.isBlank()) return
         context.dataStore.edit { prefs ->
-            val current = prefs[KEY_CHAT_LAST_UPLOAD_DIR_BY_WORKSPACE]
-                ?.takeIf { it.isNotBlank() }
-                ?.let { encoded -> runCatching { json.decodeFromString<Map<String, String>>(encoded) }.getOrNull() }
-                .orEmpty()
-            val updated = if (path.isNullOrBlank()) {
-                current - workspaceKey
-            } else {
-                current + (workspaceKey to path)
-            }
+            val current = decodeLastUploadDirectories(prefs[KEY_CHAT_LAST_UPLOAD_DIR_BY_WORKSPACE])
+            val updated = updateLastUploadDirectories(current, workspaceKey, path)
             if (updated.isEmpty()) {
                 prefs.remove(KEY_CHAT_LAST_UPLOAD_DIR_BY_WORKSPACE)
             } else {
@@ -621,17 +668,16 @@ class SettingsDataStore constructor(
 
     suspend fun getSelectedAgentForSession(sessionId: String): String? {
         val stored = context.dataStore.data.first()[KEY_SESSION_AGENTS] ?: return null
-        return runCatching {
-            json.decodeFromString<Map<String, String>>(stored)[sessionId]
-        }.getOrNull()
+        return selectedAgentForSession(stored, sessionId)
     }
 
     suspend fun setSelectedAgentForSession(sessionId: String, agentName: String) {
         context.dataStore.edit { prefs ->
-            val current = prefs[KEY_SESSION_AGENTS]?.let { stored ->
-                runCatching { json.decodeFromString<Map<String, String>>(stored) }.getOrDefault(emptyMap())
-            }.orEmpty()
-            prefs[KEY_SESSION_AGENTS] = json.encodeToString(current + (sessionId to agentName))
+            prefs[KEY_SESSION_AGENTS] = updatedSessionAgentSelections(
+                stored = prefs[KEY_SESSION_AGENTS],
+                sessionId = sessionId,
+                agentName = agentName,
+            )
         }
     }
 
@@ -681,13 +727,16 @@ class SettingsDataStore constructor(
                 }.getOrNull()
             }
 
-        return SavedServerRegistry.merge(saved + listOfNotNull(lastConnection) + recent)
+        // The active connection is the newest explicit configuration. Keep it first so
+        // revocable settings (notably allowInsecure) cannot be resurrected by stale
+        // saved/recent representations of the same endpoint.
+        return SavedServerRegistry.merge(listOfNotNull(lastConnection) + recent + saved)
     }
 
     private fun parsePersistedTabState(stored: String): PersistedTabState? = try {
         migrateLegacyPersistedTabState(stored) ?: json.decodeFromString<PersistedTabState>(stored)
     } catch (e: Exception) {
-        AppLog.w(TAG, "Ignoring invalid persisted tab state: ${e.message}")
+        AppLog.w(TAG, "Ignoring invalid persisted tab state (${e::class.simpleName})")
         null
     }
 
@@ -837,7 +886,7 @@ internal object SavedServerRegistry {
     private fun mergeServer(primary: SavedServer, fallback: SavedServer): SavedServer = primary.copy(
         displayName = primary.displayName.takeIf { it.isNotBlank() } ?: fallback.displayName,
         username = primary.username ?: fallback.username,
-        allowInsecure = primary.allowInsecure || fallback.allowInsecure,
+        allowInsecure = primary.allowInsecure,
         pinned = primary.pinned || fallback.pinned,
         defaultWorkspace = primary.defaultWorkspace ?: fallback.defaultWorkspace,
         lastConnectedAt = listOfNotNull(primary.lastConnectedAt, fallback.lastConnectedAt).maxOrNull(),

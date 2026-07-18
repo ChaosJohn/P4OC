@@ -1,15 +1,16 @@
 package dev.blazelight.p4oc.ui.screens.settings
 
-import dev.blazelight.p4oc.core.network.ConnectionManager
-import dev.blazelight.p4oc.core.network.OpenCodeApi
 import dev.blazelight.p4oc.data.remote.dto.ConfigDto
 import dev.blazelight.p4oc.data.remote.dto.ModelInput
+import dev.blazelight.p4oc.data.remote.dto.OAuthCallbackRequest
+import dev.blazelight.p4oc.data.remote.dto.ProviderAuthAuthorizationDto
+import dev.blazelight.p4oc.data.remote.dto.ProviderAuthAuthorizeRequest
 import dev.blazelight.p4oc.data.remote.dto.ProviderDto
 import dev.blazelight.p4oc.data.remote.dto.ProvidersResponseDto
+import dev.blazelight.p4oc.data.workspace.WorkspaceClient
 import dev.blazelight.p4oc.ui.screens.chat.ModelSelectionCoordinator
 import io.mockk.coEvery
 import io.mockk.coVerify
-import io.mockk.every
 import io.mockk.mockk
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.ExperimentalCoroutinesApi
@@ -29,13 +30,12 @@ import org.junit.Test
 @OptIn(ExperimentalCoroutinesApi::class)
 class ProviderConfigViewModelTest {
     private val dispatcher = StandardTestDispatcher()
-    private val connectionManager: ConnectionManager = mockk()
-    private val api: OpenCodeApi = mockk()
+    private val workspaceClient: WorkspaceClient = mockk()
 
     @Before
     fun setUp() {
         Dispatchers.setMain(dispatcher)
-        every { connectionManager.getApi() } returns api
+        coEvery { workspaceClient.getProviderAuthMethods() } returns emptyMap()
     }
 
     @After
@@ -45,11 +45,11 @@ class ProviderConfigViewModelTest {
 
     @Test
     fun setModel_updatesCurrentModelOnlyAfterUpdateConfigSucceeds() = runTest(dispatcher) {
-        coEvery { api.getProviders() } returns providersResponse()
-        coEvery { api.getConfig() } returns ConfigDto(model = "openai/gpt-4")
-        coEvery { api.updateConfig(ConfigDto(model = "anthropic/claude-3")) } returns
+        coEvery { workspaceClient.getProviders() } returns providersResponse()
+        coEvery { workspaceClient.getConfig() } returns ConfigDto(model = "openai/gpt-4")
+        coEvery { workspaceClient.updateConfig(ConfigDto(model = "anthropic/claude-3")) } returns
             ConfigDto(model = "anthropic/claude-3")
-        val viewModel = ProviderConfigViewModel(connectionManager)
+        val viewModel = ProviderConfigViewModel(workspaceClient)
         advanceUntilIdle()
 
         viewModel.setModel("anthropic", "claude-3")
@@ -58,7 +58,7 @@ class ProviderConfigViewModelTest {
 
         assertEquals("anthropic/claude-3", viewModel.uiState.value.currentModel)
         assertNull(viewModel.uiState.value.error)
-        coVerify { api.updateConfig(ConfigDto(model = "anthropic/claude-3")) }
+        coVerify { workspaceClient.updateConfig(ConfigDto(model = "anthropic/claude-3")) }
     }
 
     @Test
@@ -69,18 +69,18 @@ class ProviderConfigViewModelTest {
             coordinator.activeModelChanges.collect(publishedModels::add)
         }
         runCurrent()
-        coEvery { api.getProviders() } returns providersResponse()
-        coEvery { api.getConfig() } returns ConfigDto(model = "openai/gpt-4")
-        coEvery { api.updateConfig(ConfigDto(model = "anthropic/claude-3")) } throws
+        coEvery { workspaceClient.getProviders() } returns providersResponse()
+        coEvery { workspaceClient.getConfig() } returns ConfigDto(model = "openai/gpt-4")
+        coEvery { workspaceClient.updateConfig(ConfigDto(model = "anthropic/claude-3")) } throws
             IllegalStateException("config write failed")
-        val viewModel = ProviderConfigViewModel(connectionManager, coordinator)
+        val viewModel = ProviderConfigViewModel(workspaceClient, coordinator)
         advanceUntilIdle()
 
         viewModel.setModel("anthropic", "claude-3")
         runCurrent()
         assertEquals(emptyList<ModelInput>(), publishedModels)
 
-        coEvery { api.updateConfig(ConfigDto(model = "anthropic/claude-3")) } returns
+        coEvery { workspaceClient.updateConfig(ConfigDto(model = "anthropic/claude-3")) } returns
             ConfigDto(model = "anthropic/claude-3")
         viewModel.setModel("anthropic", "claude-3")
         runCurrent()
@@ -91,18 +91,70 @@ class ProviderConfigViewModelTest {
 
     @Test
     fun setModel_updateConfigExceptionPreservesPreviousModelAndShowsMessage() = runTest(dispatcher) {
-        coEvery { api.getProviders() } returns providersResponse()
-        coEvery { api.getConfig() } returns ConfigDto(model = "openai/gpt-4")
-        coEvery { api.updateConfig(ConfigDto(model = "anthropic/claude-3")) } throws
+        coEvery { workspaceClient.getProviders() } returns providersResponse()
+        coEvery { workspaceClient.getConfig() } returns ConfigDto(model = "openai/gpt-4")
+        coEvery { workspaceClient.updateConfig(ConfigDto(model = "anthropic/claude-3")) } throws
             IllegalStateException("config write failed")
-        val viewModel = ProviderConfigViewModel(connectionManager)
+        val viewModel = ProviderConfigViewModel(workspaceClient)
         advanceUntilIdle()
 
         viewModel.setModel("anthropic", "claude-3")
         advanceUntilIdle()
 
         assertEquals("openai/gpt-4", viewModel.uiState.value.currentModel)
-        assertEquals("config write failed", viewModel.uiState.value.error)
+        assertEquals("Could not set the model. Try again.", viewModel.uiState.value.error)
+    }
+
+    @Test
+    fun startAndCompleteOAuth_usesSelectedMethodAndRefreshesProviders() = runTest(dispatcher) {
+        coEvery { workspaceClient.getProviders() } returns providersResponse()
+        coEvery { workspaceClient.getConfig() } returns ConfigDto(model = "openai/gpt-4")
+        coEvery {
+            workspaceClient.authorizeProvider("anthropic", ProviderAuthAuthorizeRequest(method = 2))
+        } returns ProviderAuthAuthorizationDto(
+            url = "https://example.test/oauth",
+            method = "code",
+            instructions = "Paste the authorization code"
+        )
+        coEvery {
+            workspaceClient.completeProviderOAuth("anthropic", OAuthCallbackRequest(method = 2, code = "secret-code"))
+        } returns true
+        val viewModel = ProviderConfigViewModel(workspaceClient)
+        advanceUntilIdle()
+
+        viewModel.startOAuth("anthropic", 2)
+        advanceUntilIdle()
+        assertEquals("anthropic", viewModel.uiState.value.pendingAuthorization?.providerId)
+
+        viewModel.completeOAuth("  secret-code  ")
+        advanceUntilIdle()
+
+        assertNull(viewModel.uiState.value.pendingAuthorization)
+        assertNull(viewModel.uiState.value.error)
+        coVerify {
+            workspaceClient.completeProviderOAuth("anthropic", OAuthCallbackRequest(method = 2, code = "secret-code"))
+        }
+        coVerify(exactly = 2) { workspaceClient.getProviders() }
+    }
+
+    @Test
+    fun startOAuth_failureDoesNotExposeBackendError() = runTest(dispatcher) {
+        coEvery { workspaceClient.getProviders() } returns providersResponse()
+        coEvery { workspaceClient.getConfig() } returns ConfigDto(model = "openai/gpt-4")
+        coEvery {
+            workspaceClient.authorizeProvider("anthropic", ProviderAuthAuthorizeRequest(method = 0))
+        } throws IllegalStateException("raw backend secret")
+        val viewModel = ProviderConfigViewModel(workspaceClient)
+        advanceUntilIdle()
+
+        viewModel.startOAuth("anthropic", 0)
+        advanceUntilIdle()
+
+        assertEquals(
+            "Could not start provider authentication. Try again.",
+            viewModel.uiState.value.error
+        )
+        assertNull(viewModel.uiState.value.pendingAuthorization)
     }
 
     private fun providersResponse() = ProvidersResponseDto(

@@ -1,7 +1,8 @@
 package dev.blazelight.p4oc.data.session
 
-import dev.blazelight.p4oc.core.network.ConnectionManager
+import dev.blazelight.p4oc.core.network.ConnectionState
 import dev.blazelight.p4oc.core.network.OpenCodeApi
+import dev.blazelight.p4oc.core.network.ServerConnectionRegistry
 import dev.blazelight.p4oc.data.remote.mapper.MessageMapper
 import dev.blazelight.p4oc.data.server.ActiveServerApiProvider
 import dev.blazelight.p4oc.domain.model.OpenCodeEvent
@@ -14,6 +15,7 @@ import io.mockk.every
 import io.mockk.mockk
 import kotlinx.coroutines.CoroutineDispatcher
 import kotlinx.coroutines.flow.Flow
+import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.emptyFlow
 import kotlinx.coroutines.flow.flowOf
 import kotlinx.coroutines.test.StandardTestDispatcher
@@ -131,8 +133,12 @@ class SessionRepositoryProviderTest {
     ): SessionRepositoryProvider = SessionRepositoryProvider(
         activeServerApiProvider = ActiveServerApiProvider { _, _ -> mockk<OpenCodeApi>(relaxed = true) },
         messageMapper = MessageMapper(Json { ignoreUnknownKeys = true }),
-        connectionManager = mockk<ConnectionManager> {
-            every { this@mockk.scopedEvents } returns scopedEvents
+        serverConnectionRegistry = mockk<ServerConnectionRegistry> {
+            every { events(any()) } returns scopedEvents
+            every { connectionState(any(), ServerGeneration(1)) } returns
+                MutableStateFlow(ConnectionState.Connected)
+            every { connectionState(any(), ServerGeneration(2)) } returns
+                MutableStateFlow(ConnectionState.Connected)
         },
         dispatcher = dispatcher,
     )

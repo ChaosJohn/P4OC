@@ -18,8 +18,8 @@ import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.lifecycle.viewModelScope
 import dev.blazelight.p4oc.R
 import dev.blazelight.p4oc.core.network.ApiResult
-import dev.blazelight.p4oc.core.network.ConnectionManager
 import dev.blazelight.p4oc.core.network.safeApiCall
+import dev.blazelight.p4oc.data.workspace.WorkspaceClient
 import dev.blazelight.p4oc.ui.components.TuiAlertDialog
 import dev.blazelight.p4oc.ui.components.TuiLoadingScreen
 import dev.blazelight.p4oc.ui.components.TuiTextButton
@@ -32,7 +32,6 @@ import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.launch
-import org.koin.androidx.compose.koinViewModel
 
 data class SkillInfo(
     val name: String,
@@ -55,7 +54,6 @@ data class SkillsState(
 
 data class SkillsError(
     val kind: SkillsErrorKind,
-    val detail: String? = null,
 )
 
 enum class SkillsErrorKind {
@@ -75,7 +73,8 @@ internal fun mcpStatusDescriptionRes(status: String): Int = when (status) {
 }
 
 class SkillsViewModel constructor(
-    private val connectionManager: ConnectionManager
+    private val workspaceClient: WorkspaceClient,
+    serverConnectionRegistry: dev.blazelight.p4oc.core.network.ServerConnectionRegistry? = null,
 ) : ViewModel() {
 
     private val _state = MutableStateFlow(SkillsState())
@@ -83,21 +82,19 @@ class SkillsViewModel constructor(
 
     init {
         loadSkills()
+        serverConnectionRegistry?.observeWorkspaceCatalogEvents(
+            workspaceClient,
+            viewModelScope,
+            mcpOnly = true,
+        ) { loadSkills(background = true) }
     }
 
-    fun loadSkills() {
+    fun loadSkills() = loadSkills(background = false)
+
+    private fun loadSkills(background: Boolean) {
         viewModelScope.launch {
-            _state.update { it.copy(isLoading = true) }
-            val api = connectionManager.getApi() ?: run {
-                _state.update {
-                    it.copy(
-                        isLoading = false,
-                        error = SkillsError(SkillsErrorKind.NotConnected),
-                    )
-                }
-                return@launch
-            }
-            val result = safeApiCall { api.getMcpStatus() }
+            if (!background) _state.update { it.copy(isLoading = true) }
+            val result = safeApiCall { workspaceClient.getMcpStatus() }
             when (result) {
                 is ApiResult.Success -> {
                     val skills = result.data.map { (name, status) ->
@@ -114,11 +111,13 @@ class SkillsViewModel constructor(
                     _state.update { it.copy(skills = skills, isLoading = false) }
                 }
                 is ApiResult.Error -> {
-                    _state.update {
-                        it.copy(
-                            isLoading = false,
-                            error = SkillsError(SkillsErrorKind.ApiError, result.message),
-                        )
+                    if (!background) {
+                        _state.update {
+                            it.copy(
+                                isLoading = false,
+                                error = SkillsError(SkillsErrorKind.ApiError),
+                            )
+                        }
                     }
                 }
             }
@@ -135,9 +134,10 @@ class SkillsViewModel constructor(
 }
 
 @OptIn(ExperimentalMaterial3Api::class)
+@Suppress("FunctionNaming", "LongMethod", "NoNameShadowing")
 @Composable
 fun SkillsScreen(
-    viewModel: SkillsViewModel = koinViewModel(),
+    viewModel: SkillsViewModel,
     onNavigateBack: () -> Unit
 ) {
     val state by viewModel.state.collectAsStateWithLifecycle()
@@ -146,7 +146,7 @@ fun SkillsScreen(
     val errorMessage = state.error?.let { error ->
         when (error.kind) {
             SkillsErrorKind.NotConnected -> stringResource(R.string.skills_error_not_connected)
-            SkillsErrorKind.ApiError -> error.detail ?: stringResource(R.string.skills_error_generic)
+            SkillsErrorKind.ApiError -> stringResource(R.string.skills_error_generic)
         }
     }
     // Show error in snackbar
@@ -347,9 +347,9 @@ private fun SkillCard(
                         style = MaterialTheme.typography.bodySmall,
                         color = theme.textMuted
                     )
-                    skill.errorDetail?.let { detail ->
+                    skill.errorDetail?.let {
                         Text(
-                            text = detail,
+                            text = stringResource(R.string.skills_error_generic),
                             style = MaterialTheme.typography.labelSmall,
                             color = theme.error
                         )
@@ -407,8 +407,8 @@ private fun SkillDetailDialog(
         }
     ) {
         Text(stringResource(mcpStatusDescriptionRes(skill.status)))
-        skill.errorDetail?.let { detail ->
-            Text(detail)
+        skill.errorDetail?.let {
+            Text(stringResource(R.string.skills_error_generic))
         }
 
         Row(

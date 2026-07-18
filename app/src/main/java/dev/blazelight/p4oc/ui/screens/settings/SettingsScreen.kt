@@ -39,11 +39,13 @@ import org.koin.androidx.compose.koinViewModel
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
+@Suppress("CyclomaticComplexMethod", "FunctionNaming", "LongMethod", "LongParameterList")
 fun SettingsScreen(
     viewModel: SettingsViewModel = koinViewModel(),
     onNavigateBack: () -> Unit,
     onDisconnect: () -> Unit,
-    onProviderConfig: () -> Unit = {},
+    onProviderConfig: (() -> Unit)? = null,
+    onModelControls: (() -> Unit)? = null,
     onChatSettings: () -> Unit = {},
     onVisualSettings: () -> Unit = {},
     onAgentsConfig: () -> Unit = {},
@@ -86,16 +88,30 @@ fun SettingsScreen(
 
             SettingsItem(
                 icon = Icons.Default.SmartToy,
-                title = stringResource(R.string.settings_provider_model),
-                subtitle = if (isConnected) {
-                    stringResource(R.string.settings_provider_model_desc)
+                title = stringResource(R.string.settings_providers),
+                subtitle = if (isConnected && onProviderConfig != null) {
+                    stringResource(R.string.settings_providers_desc)
                 } else {
                     stringResource(R.string.settings_requires_connection)
                 },
-                onClick = if (isConnected) onProviderConfig else null,
-                showChevron = isConnected,
-                enabled = isConnected,
+                onClick = onProviderConfig?.takeIf { isConnected },
+                showChevron = isConnected && onProviderConfig != null,
+                enabled = isConnected && onProviderConfig != null,
                 testTag = "settings_provider_item"
+            )
+
+            SettingsItem(
+                icon = Icons.Default.Tune,
+                title = stringResource(R.string.settings_model_controls),
+                subtitle = if (isConnected && onModelControls != null) {
+                    stringResource(R.string.settings_model_controls_desc)
+                } else {
+                    stringResource(R.string.settings_requires_connection)
+                },
+                onClick = onModelControls?.takeIf { isConnected },
+                showChevron = isConnected && onModelControls != null,
+                enabled = isConnected && onModelControls != null,
+                testTag = "settings_model_controls_item"
             )
 
             SettingsItem(

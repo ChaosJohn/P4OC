@@ -241,7 +241,7 @@ class HomeSummaryBuilderTest {
             "network unavailable",
             summary.servers.single { it.serverRef.endpointKey == betaRef.endpointKey }.failure,
         )
-        assertEquals(listOf("Beta: network unavailable"), summary.partialFailures)
+        assertEquals(listOf("Beta: session data unavailable"), summary.partialFailures)
         assertEquals(setOf("loading", "cached"), summary.sessions.map { it.sessionId.value }.toSet())
         assertEquals(2, summary.workspaces.size)
     }

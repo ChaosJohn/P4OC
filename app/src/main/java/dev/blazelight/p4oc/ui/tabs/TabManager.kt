@@ -162,6 +162,13 @@ class TabManager {
         return _tabs.value.find { it.sessionId == sessionId }
     }
 
+    fun findTabByNotificationRoute(route: dev.blazelight.p4oc.core.notification.NotificationRoute): TabInstance? =
+        _tabs.value.find {
+            it.sessionId == route.sessionId &&
+                it.serverRef?.endpointKey == route.serverRef.endpointKey &&
+                it.workspaceKey == route.workspaceKey
+        }
+
     /**
      * Update a tab's session binding.
      * Call when navigating to/from a chat screen within a tab.
@@ -213,7 +220,7 @@ class TabManager {
         }
         if (persistedTabs.isEmpty()) return null
         return PersistedTabState(
-            serverEndpointKey = persistedTabs.first().serverEndpointKey!!,
+            serverEndpointKey = requireNotNull(persistedTabs.first().serverEndpointKey),
             activeTabId = _activeTabId.value?.takeIf { activeId -> persistedTabs.any { it.id == activeId } },
             tabs = persistedTabs,
         )
@@ -234,8 +241,16 @@ class TabManager {
         }
 
         val missingServerEndpointKeys = linkedSetOf<String>()
+        val restoredTabIds = mutableSetOf<String>()
         val restoredTabs = state.tabs.mapNotNull { persisted ->
-            if (persisted.id.isBlank()) return@mapNotNull null
+            if (persisted.id.isBlank() || persisted.id == TabInstance.HOME_TAB_ID) return@mapNotNull null
+            val persistedWorkspaceKey = persisted.workspaceKey ?: return@mapNotNull null
+            if (
+                persistedWorkspaceKey.type != PersistedWorkspaceKey.Type.GLOBAL &&
+                persistedWorkspaceKey.value == null
+            ) {
+                return@mapNotNull null
+            }
             val workspaceKey = persisted.resolvedWorkspaceKey() ?: return@mapNotNull null
             val serverEndpointKey = persisted.resolvedServerEndpointKey(state.serverEndpointKey) ?: return@mapNotNull null
             val serverRef = availableServers[serverEndpointKey] ?: fallbackServer?.takeIf {
@@ -244,6 +259,7 @@ class TabManager {
                 missingServerEndpointKeys += serverEndpointKey
                 return@mapNotNull null
             }
+            if (!restoredTabIds.add(persisted.id)) return@mapNotNull null
             val route = persisted.sessionId?.let { TabChatRouteCodec.chatRoute(it) }
                 ?: persisted.startRoute.takeIf { it.isNotBlank() }
                 ?: Screen.Sessions.route

@@ -33,12 +33,14 @@ import dev.blazelight.p4oc.ui.theme.Sizing
 import dev.blazelight.p4oc.ui.theme.Spacing
 
 @Composable
+@Suppress("LongParameterList", "FunctionNaming")
 fun ChatMessage(
     messageWithParts: MessageWithParts,
     onToolApprove: (String) -> Unit,
     onToolDeny: (String) -> Unit,
     onToolAlways: (String) -> Unit,
     onOpenSubSession: ((String) -> Unit)? = null,
+    onProviderAuthRequired: ((String) -> Unit)? = null,
     defaultToolWidgetState: ToolWidgetState = ToolWidgetState.COMPACT,
     pendingPermissionsByCallId: Map<String, Permission> = emptyMap(),
     onRevert: (() -> Unit)? = null,
@@ -60,6 +62,7 @@ fun ChatMessage(
                 onToolDeny = onToolDeny,
                 onToolAlways = onToolAlways,
                 onOpenSubSession = onOpenSubSession,
+                onProviderAuthRequired = onProviderAuthRequired,
                 defaultToolWidgetState = defaultToolWidgetState,
                 pendingPermissionsByCallId = pendingPermissionsByCallId,
             )
@@ -68,12 +71,14 @@ fun ChatMessage(
 }
 
 @Composable
+@Suppress("LongParameterList", "FunctionNaming")
 fun AssistantMessages(
     messagesWithParts: List<MessageWithParts>,
     onToolApprove: (String) -> Unit,
     onToolDeny: (String) -> Unit,
     onToolAlways: (String) -> Unit,
     onOpenSubSession: ((String) -> Unit)? = null,
+    onProviderAuthRequired: ((String) -> Unit)? = null,
     defaultToolWidgetState: ToolWidgetState = ToolWidgetState.COMPACT,
     pendingPermissionsByCallId: Map<String, Permission> = emptyMap(),
     modifier: Modifier = Modifier
@@ -91,6 +96,7 @@ fun AssistantMessages(
                 onToolDeny = onToolDeny,
                 onToolAlways = onToolAlways,
                 onOpenSubSession = onOpenSubSession,
+                onProviderAuthRequired = onProviderAuthRequired,
                 defaultToolWidgetState = defaultToolWidgetState,
                 pendingPermissionsByCallId = pendingPermissionsByCallId,
             )
@@ -191,43 +197,20 @@ private fun UserMessage(
 }
 
 @Composable
+@Suppress("LongParameterList", "FunctionNaming")
 private fun AssistantMessageContent(
     messageWithParts: MessageWithParts,
     onToolApprove: (String) -> Unit,
     onToolDeny: (String) -> Unit,
     onToolAlways: (String) -> Unit,
     onOpenSubSession: ((String) -> Unit)? = null,
+    onProviderAuthRequired: ((String) -> Unit)? = null,
     defaultToolWidgetState: ToolWidgetState = ToolWidgetState.COMPACT,
     pendingPermissionsByCallId: Map<String, Permission> = emptyMap(),
 ) {
     // Build ordered groups: consecutive tools get batched, non-tools rendered individually
     // Invisible parts (StepStart, StepFinish, Snapshot, etc.) don't break tool groups
-    val partGroups = buildList {
-        var currentToolBatch = mutableListOf<Part.Tool>()
-
-        for (part in messageWithParts.parts) {
-            when (part) {
-                is Part.Tool -> currentToolBatch.add(part)
-                // Invisible parts - don't break tool groups, just skip
-                is Part.StepStart, is Part.StepFinish, is Part.Snapshot,
-                is Part.Agent, is Part.Retry, is Part.Compaction, is Part.Subtask -> {
-                    // Skip - truly invisible
-                }
-                // Visible parts - flush tools before rendering
-                else -> {
-                    if (currentToolBatch.isNotEmpty()) {
-                        add(PartGroupItem.Tools(currentToolBatch.toList()))
-                        currentToolBatch = mutableListOf()
-                    }
-                    add(PartGroupItem.Other(part))
-                }
-            }
-        }
-        // Flush any trailing tools
-        if (currentToolBatch.isNotEmpty()) {
-            add(PartGroupItem.Tools(currentToolBatch.toList()))
-        }
-    }
+    val partGroups = buildPartGroups(messageWithParts.parts)
 
     Column(
         modifier = Modifier.fillMaxWidth(),
@@ -244,34 +227,81 @@ private fun AssistantMessageContent(
                         pendingPermissionIdsByCallId = pendingPermissionsByCallId.mapValues { it.value.id },
                         onToolApprove = onToolApprove,
                         onToolDeny = onToolDeny,
+                        onToolAlways = onToolAlways,
                         onOpenSubSession = onOpenSubSession
                     )
                 }
-                is PartGroupItem.Other -> {
-                    when (val part = group.part) {
-                        is Part.Text -> TextPart(part)
-                        is Part.Reasoning -> ReasoningPart(part)
-                        is Part.File -> FilePart(part)
-                        is Part.Patch -> CompactPatchPart(part)
-                        else -> {} // Already handled invisible parts above
-                    }
-                }
+                is PartGroupItem.Other -> renderOtherPart(group.part)
             }
         }
 
         (messageWithParts.message as? Message.Assistant)?.error?.let { error ->
-            AssistantError(error)
+            AssistantError(error, onProviderAuthRequired)
         }
     }
 }
 
+private fun buildPartGroups(parts: List<Part>): List<PartGroupItem> = buildList {
+    var currentToolBatch = mutableListOf<Part.Tool>()
+
+    for (part in parts) {
+        when (part) {
+            is Part.Tool -> currentToolBatch.add(part)
+            // Invisible parts - don't break tool groups, just skip
+            is Part.StepStart, is Part.StepFinish, is Part.Snapshot,
+            is Part.Agent -> {
+                // Skip - truly invisible
+            }
+            // Visible parts - flush tools before rendering
+            else -> {
+                if (currentToolBatch.isNotEmpty()) {
+                    add(PartGroupItem.Tools(currentToolBatch.toList()))
+                    currentToolBatch = mutableListOf()
+                }
+                add(PartGroupItem.Other(part))
+            }
+        }
+    }
+    // Flush any trailing tools
+    if (currentToolBatch.isNotEmpty()) {
+        add(PartGroupItem.Tools(currentToolBatch.toList()))
+    }
+}
+
 @Composable
-private fun AssistantError(error: MessageError) {
+private fun renderOtherPart(part: Part) {
+    when (part) {
+        is Part.Text -> TextPart(part)
+        is Part.Reasoning -> ReasoningPart(part)
+        is Part.File -> FilePart(part)
+        is Part.Patch -> CompactPatchPart(part)
+        is Part.Subtask -> activityMarker(stringResource(R.string.chat_delegated_to, part.agent, part.description))
+        is Part.Retry -> activityMarker(stringResource(R.string.chat_retry_attempt, part.attempt))
+        is Part.Compaction -> activityMarker(stringResource(R.string.chat_context_compacted))
+        else -> Unit
+    }
+}
+
+@Composable
+private fun activityMarker(label: String) {
+    val theme = LocalOpenCodeTheme.current
+    Text(
+        text = label,
+        modifier = Modifier.fillMaxWidth().padding(vertical = Spacing.xs),
+        style = MaterialTheme.typography.labelSmall,
+        color = theme.textMuted,
+    )
+}
+
+@Composable
+@Suppress("FunctionNaming")
+private fun AssistantError(error: MessageError, onProviderAuthRequired: ((String) -> Unit)? = null) {
     val theme = LocalOpenCodeTheme.current
     val message = when {
-        error.name == "MessageAbortedError" -> "Run aborted"
-        !error.message.isNullOrBlank() -> error.message
-        else -> "Run failed"
+        error.name == "MessageAbortedError" -> stringResource(R.string.chat_run_aborted)
+        error.name == "ProviderAuthError" -> stringResource(R.string.chat_provider_auth_required)
+        error.isRetryable -> stringResource(R.string.chat_run_retryable_error)
+        else -> stringResource(R.string.chat_run_failed)
     }
 
     Box(
@@ -280,11 +310,23 @@ private fun AssistantError(error: MessageError) {
             .background(theme.error.copy(alpha = 0.1f))
             .padding(horizontal = Spacing.sm, vertical = Spacing.xs)
     ) {
-        Text(
-            text = message,
-            style = MaterialTheme.typography.bodySmall,
-            color = theme.error
-        )
+        Row(
+            modifier = Modifier.fillMaxWidth(),
+            verticalAlignment = Alignment.CenterVertically,
+            horizontalArrangement = Arrangement.spacedBy(Spacing.sm)
+        ) {
+            Text(
+                text = message,
+                modifier = Modifier.weight(1f),
+                style = MaterialTheme.typography.bodySmall,
+                color = theme.error
+            )
+            if (error.name == "ProviderAuthError" && error.providerID != null && onProviderAuthRequired != null) {
+                TextButton(onClick = { onProviderAuthRequired(error.providerID) }) {
+                    Text(stringResource(R.string.provider_auth_action))
+                }
+            }
+        }
     }
 }
 
@@ -360,7 +402,7 @@ private fun ReasoningPart(part: Part.Reasoning) {
                 }
 
                 Text(
-                    text = "Reasoning",
+                    text = stringResource(R.string.models_reasoning),
                     style = MaterialTheme.typography.labelSmall,
                     color = theme.warning,
                     modifier = Modifier.weight(1f)
@@ -459,7 +501,7 @@ private fun CompactPatchPart(part: Part.Patch) {
                     tint = theme.accent
                 )
                 Text(
-                    text = "Patch: ${part.files.size} file(s)",
+                    text = stringResource(R.string.chat_patch_files, part.files.size),
                     style = MaterialTheme.typography.labelSmall,
                     color = theme.text,
                     modifier = Modifier.weight(1f)

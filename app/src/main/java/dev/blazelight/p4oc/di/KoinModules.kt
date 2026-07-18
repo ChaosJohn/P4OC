@@ -29,6 +29,7 @@ import dev.blazelight.p4oc.ui.screens.settings.ChatSettingsViewModel
 import dev.blazelight.p4oc.ui.screens.settings.ModelControlsViewModel
 import dev.blazelight.p4oc.ui.screens.settings.NotificationSettingsViewModel
 import dev.blazelight.p4oc.ui.screens.settings.ProviderConfigViewModel
+import dev.blazelight.p4oc.ui.screens.settings.SettingsConnectionContext
 import dev.blazelight.p4oc.ui.screens.settings.SettingsViewModel
 import dev.blazelight.p4oc.ui.screens.settings.SkillsViewModel
 import dev.blazelight.p4oc.ui.screens.settings.VisualSettingsViewModel
@@ -40,6 +41,7 @@ import kotlinx.serialization.json.Json
 import org.koin.android.ext.koin.androidContext
 import org.koin.core.module.dsl.viewModel
 import org.koin.core.module.dsl.viewModelOf
+import org.koin.core.parameter.parametersOf
 import org.koin.dsl.module
 
 val appModule = module {
@@ -75,8 +77,7 @@ val networkModule = module {
 
     // Network
     single { MdnsDiscoveryManager(androidContext()) }
-    factory { PtyWebSocketClient(get()) }
-    single { ConnectionManager(get(), get(), get()) }
+    factory { params -> PtyWebSocketClient(get(), params.get(), params.get()) }
     single {
         ServerConnectionRegistry(
             settingsDataStore = get(),
@@ -103,36 +104,64 @@ val networkModule = module {
 
 val viewModelModule = module {
     viewModelOf(::ServerViewModel)
-    viewModel { ModelControlsViewModel(get(), get()) }
-    viewModelOf(::AgentsConfigViewModel)
+    viewModel { (client: dev.blazelight.p4oc.data.workspace.WorkspaceClient) ->
+        ModelControlsViewModel(
+            client,
+            get(),
+            get(),
+        )
+    }
+    viewModel { (client: dev.blazelight.p4oc.data.workspace.WorkspaceClient) -> AgentsConfigViewModel(client, get()) }
     viewModelOf(::VisualSettingsViewModel)
     viewModelOf(::ChatSettingsViewModel)
-    viewModelOf(::SkillsViewModel)
-    viewModelOf(::SettingsViewModel)
+    viewModel { (client: dev.blazelight.p4oc.data.workspace.WorkspaceClient) -> SkillsViewModel(client, get()) }
+    viewModel { params ->
+        SettingsViewModel(
+            settingsDataStore = get(),
+            serverConnectionRegistry = get(),
+            connectionContext = params.get<SettingsConnectionContext>(),
+        )
+    }
     viewModelOf(::NotificationSettingsViewModel)
     viewModelOf(::LicensesViewModel)
-    viewModel { ProviderConfigViewModel(get(), get()) }
-    viewModelOf(::ProjectsViewModel)
+    viewModel { params ->
+        ProviderConfigViewModel(
+            params.get<WorkspaceRepositoryOwner>().workspaceClient,
+            get(),
+            get(),
+        )
+    }
+    viewModel { params -> ProjectsViewModel(params.get(), get()) }
     viewModel { params ->
         WorkspaceViewModel(params.get<WorkspaceRepositoryOwner>())
     }
     viewModel { params ->
+        val owner = params.get<WorkspaceRepositoryOwner>()
         ChatViewModel(
-            params.get(),
-            params.get(),
-            params.get(),
-            params.get(),
+            get(),
+            owner.workspaceClient,
+            owner.sessionRepository,
+            owner.uploadCoordinator,
             get(),
             get(),
+            get<ModelSelectionCoordinator>(),
             get(),
-            get<ModelSelectionCoordinator>()
         )
     }
     viewModel { params ->
         SessionListViewModel(params.get<SessionRepositoryImpl>(), get<SavedStateHandle>())
     }
     viewModel { params -> FilesViewModel(params.get<FileRepository>(), params.get(), get<SavedStateHandle>()) }
-    viewModel { params -> TerminalViewModel(params.get(), androidContext(), get(), get()) }
+    viewModel { params ->
+        val owner = params.get<WorkspaceRepositoryOwner>()
+        TerminalViewModel(
+            savedStateHandle = get(),
+            context = androidContext(),
+            ptyWebSocket = get { parametersOf(owner.workspace.server, owner.generation) },
+            workspaceOwner = owner,
+            serverConnectionRegistry = get(),
+        )
+    }
 }
 
 val allModules = listOf(

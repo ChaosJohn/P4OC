@@ -14,7 +14,9 @@ data class PtyDto(
     val args: List<String>,
     val cwd: String,
     val status: String,
-    val pid: Int? = null // Server may return null for pid
+    // Some deployed servers return null while the process is starting despite the upstream schema.
+    val pid: Int? = null,
+    val exitCode: Int? = null,
 )
 
 @Serializable

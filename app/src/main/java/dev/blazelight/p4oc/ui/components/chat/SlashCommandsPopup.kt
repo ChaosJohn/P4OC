@@ -214,8 +214,9 @@ private fun SlashCommandError(
             contentDescription = stringResource(R.string.slash_commands_retry_loading),
             tint = theme.accent,
             modifier = Modifier
-                .size(Sizing.iconSm)
+                .size(Sizing.minTouchTarget)
                 .clickable(role = Role.Button, onClick = onRetry)
+                .padding((Sizing.minTouchTarget - Sizing.iconSm) / 2)
         )
     }
 }

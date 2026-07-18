@@ -50,6 +50,7 @@ class FilePathValidatorTest {
     @Test
     fun `mutation accepts safe relative paths`() {
         assertEquals("src/Main.kt", FilePathValidator.normalizeForMutation("src//./Main.kt").getOrThrow())
+        assertEquals("report:v2.txt", FilePathValidator.normalizeForMutation("report:v2.txt").getOrThrow())
     }
 
     @Test

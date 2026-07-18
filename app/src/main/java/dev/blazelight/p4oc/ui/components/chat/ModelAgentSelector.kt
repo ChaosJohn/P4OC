@@ -5,6 +5,8 @@ import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.selection.selectable
+import androidx.compose.foundation.selection.selectableGroup
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.*
 import androidx.compose.material3.*
@@ -15,6 +17,9 @@ import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.RectangleShape
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.res.stringResource
+import androidx.compose.ui.semantics.Role
+import androidx.compose.ui.semantics.contentDescription
+import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.window.Dialog
 import dev.blazelight.p4oc.R
@@ -34,7 +39,9 @@ private fun getAgentColor(agent: AgentDto?): Color {
     agent.color?.let { hex ->
         try {
             return Color(android.graphics.Color.parseColor(hex))
-        } catch (_: Exception) {}
+        } catch (_: IllegalArgumentException) {
+            // Server-provided colors are optional; fall back to the stable name-derived color.
+        }
     }
 
     return SemanticColors.AgentSelector.forName(agent.name)
@@ -53,7 +60,7 @@ data class EnhancedModelInfo(
 )
 
 @Composable
-@Suppress("LongParameterList", "LongMethod", "FunctionNaming")
+@Suppress("CyclomaticComplexMethod", "LongParameterList", "LongMethod", "FunctionNaming")
 fun ModelAgentSelectorBar(
     availableAgents: List<AgentDto>,
     selectedAgent: String?,
@@ -70,6 +77,7 @@ fun ModelAgentSelectorBar(
 ) {
     val theme = LocalOpenCodeTheme.current
     var showModelPicker by remember { mutableStateOf(false) }
+    var showAgentPicker by remember { mutableStateOf(false) }
 
     val selectModelText = stringResource(R.string.select_model)
     val selectedModelDto = remember(selectedModel, availableModels) {
@@ -102,28 +110,78 @@ fun ModelAgentSelectorBar(
             if (availableAgents.isNotEmpty()) {
                 val currentAgent = availableAgents.find { it.name == selectedAgent }
                 val agentColor = getAgentColor(currentAgent)
+                val currentAgentName = (selectedAgent ?: availableAgents.first().name).lowercase()
+                val agentSelectorDescription = stringResource(
+                    R.string.agent_selector_current,
+                    currentAgentName
+                )
 
-                Surface(
-                    onClick = {
-                        val currentIndex = availableAgents.indexOfFirst { it.name == selectedAgent }
-                        val nextIndex = (currentIndex + 1) % availableAgents.size
-                        onAgentSelected(availableAgents[nextIndex].name)
-                    },
-                    shape = androidx.compose.ui.graphics.RectangleShape,
-                    color = agentColor.copy(alpha = 0.1f),
-                    border = androidx.compose.foundation.BorderStroke(Sizing.strokeMd, agentColor.copy(alpha = 0.4f)),
-                    modifier = Modifier.height(Sizing.buttonHeightMd)
-                ) {
-                    Box(
-                        modifier = Modifier.padding(horizontal = Spacing.lg),
-                        contentAlignment = Alignment.Center
+                Box {
+                    Surface(
+                        onClick = { showAgentPicker = true },
+                        shape = RectangleShape,
+                        color = agentColor.copy(alpha = 0.1f),
+                        border = androidx.compose.foundation.BorderStroke(
+                            Sizing.strokeMd,
+                            agentColor.copy(alpha = 0.4f)
+                        ),
+                        modifier = Modifier
+                            .height(Sizing.buttonHeightMd)
+                            .semantics { contentDescription = agentSelectorDescription }
                     ) {
-                        Text(
-                            text = "@${(selectedAgent ?: "build").lowercase()}",
-                            style = MaterialTheme.typography.labelMedium,
-                            fontFamily = androidx.compose.ui.text.font.FontFamily.Monospace,
-                            color = agentColor
-                        )
+                        Row(
+                            modifier = Modifier.padding(horizontal = Spacing.lg),
+                            verticalAlignment = Alignment.CenterVertically,
+                            horizontalArrangement = Arrangement.spacedBy(Spacing.sm)
+                        ) {
+                            Text(
+                                text = "@$currentAgentName",
+                                style = MaterialTheme.typography.labelMedium,
+                                fontFamily = androidx.compose.ui.text.font.FontFamily.Monospace,
+                                color = agentColor
+                            )
+                            Text(
+                                text = "▾",
+                                color = agentColor,
+                                fontFamily = androidx.compose.ui.text.font.FontFamily.Monospace
+                            )
+                        }
+                    }
+                    DropdownMenu(
+                        expanded = showAgentPicker,
+                        onDismissRequest = { showAgentPicker = false }
+                    ) {
+                        availableAgents.forEach { agent ->
+                            DropdownMenuItem(
+                                text = {
+                                    Column(modifier = Modifier.widthIn(max = Sizing.panelWidthLg)) {
+                                        Text(
+                                            text = "@${agent.name.lowercase()}",
+                                            fontFamily = androidx.compose.ui.text.font.FontFamily.Monospace,
+                                            style = MaterialTheme.typography.labelLarge
+                                        )
+                                        agent.description?.takeIf { it.isNotBlank() }?.let { description ->
+                                            Text(
+                                                text = description,
+                                                style = MaterialTheme.typography.bodySmall,
+                                                color = theme.textMuted,
+                                                maxLines = 2,
+                                                overflow = TextOverflow.Ellipsis
+                                            )
+                                        }
+                                    }
+                                },
+                                onClick = {
+                                    onAgentSelected(agent.name)
+                                    showAgentPicker = false
+                                },
+                                leadingIcon = if (agent.name == selectedAgent) {
+                                    { Text("✓", color = getAgentColor(agent)) }
+                                } else {
+                                    null
+                                }
+                            )
+                        }
                     }
                 }
             }
@@ -343,11 +401,12 @@ fun ModelPickerDialog(
                 Row(
                     modifier = Modifier
                         .horizontalScroll(rememberScrollState())
-                        .padding(horizontal = Spacing.md, vertical = Spacing.xs),
+                        .padding(horizontal = Spacing.md, vertical = Spacing.xs)
+                        .selectableGroup(),
                     horizontalArrangement = Arrangement.spacedBy(Spacing.xs)
                 ) {
                     TuiFilterTab(
-                        text = "all",
+                        text = stringResource(R.string.all),
                         selected = selectedCategory == null,
                         onClick = { selectedCategory = null }
                     )
@@ -366,7 +425,9 @@ fun ModelPickerDialog(
 
                 // Model list
                 LazyColumn(
-                    modifier = Modifier.weight(1f),
+                    modifier = Modifier
+                        .weight(1f)
+                        .selectableGroup(),
                     contentPadding = PaddingValues(vertical = Spacing.xs)
                 ) {
                     if (favorites.isNotEmpty()) {
@@ -518,14 +579,18 @@ private fun TuiFilterTab(
 ) {
     val theme = LocalOpenCodeTheme.current
     Surface(
-        onClick = onClick,
         color = if (selected) theme.accent.copy(alpha = 0.15f) else Color.Transparent,
         shape = RectangleShape,
         border = if (selected) {
             androidx.compose.foundation.BorderStroke(Sizing.strokeMd, theme.accent.copy(alpha = 0.5f))
         } else {
             null
-        }
+        },
+        modifier = Modifier.selectable(
+            selected = selected,
+            onClick = onClick,
+            role = Role.Tab,
+        ),
     ) {
         Text(
             text = text,
@@ -557,11 +622,18 @@ private fun TuiModelListItem(
     onToggleFavorite: () -> Unit
 ) {
     val theme = LocalOpenCodeTheme.current
+    val addFavoriteDescription = stringResource(R.string.cd_add_to_favorites)
+    val removeFavoriteDescription = stringResource(R.string.cd_remove_from_favorites)
 
     Surface(
-        onClick = onSelect,
         color = if (isSelected) theme.accent.copy(alpha = 0.1f) else Color.Transparent,
-        modifier = Modifier.fillMaxWidth()
+        modifier = Modifier
+            .fillMaxWidth()
+            .selectable(
+                selected = isSelected,
+                onClick = onSelect,
+                role = Role.RadioButton,
+            )
     ) {
         Row(
             modifier = Modifier
@@ -642,7 +714,15 @@ private fun TuiModelListItem(
             // Favorite button
             IconButton(
                 onClick = onToggleFavorite,
-                modifier = Modifier.size(Sizing.iconButtonSm)
+                modifier = Modifier
+                    .size(Sizing.iconButtonSm)
+                    .semantics {
+                        contentDescription = if (model.isFavorite) {
+                            removeFavoriteDescription
+                        } else {
+                            addFavoriteDescription
+                        }
+                    }
             ) {
                 Text(
                     text = if (model.isFavorite) "★" else "☆",
