@@ -185,7 +185,6 @@ class OpenCodeEventSource(
 
         val connectStrategy = ConnectStrategy.http(URI(eventUrl))
             .httpClient(okHttpClient)
-            .readTimeout(0, TimeUnit.SECONDS)
 
         val eventSourceBuilder = EventSource.Builder(connectStrategy)
             .errorStrategy(ErrorStrategy.alwaysContinue())

@@ -92,6 +92,21 @@ class SessionRepositoryImpl(
     private val recentlyResolvedQuestionIds = mutableMapOf<String, Long>()
     private var projectRefreshJob: Job? = null
 
+    // Per-session message-state revision for reconnect recovery. Every message-state mutation bumps
+    // it; recovery commits a fetched authoritative window only while the revision it captured is
+    // unchanged, so a newer SSE mutation can never be overwritten by a stale REST snapshot.
+    private val sessionRevisions = mutableMapOf<String, Long>()
+    // Largest history window successfully loaded for a session. Recovery re-fetches this bound
+    // (defaulting to [DEFAULT_MESSAGE_HISTORY_LIMIT]) rather than an unbounded window.
+    private val sessionLoadedLimits = mutableMapOf<String, Int>()
+
+    // Shared boundary guarding per-session message state, consumer counts, revisions and loaded
+    // limits. Held across capture, mutation+revision-bump, active-count checks, and replacement so
+    // a lease release or SSE mutation cannot interleave and let a fetched window commit stale data.
+    private val messageStateLock = Any()
+
+    private enum class CommitOutcome { Committed, Inactive, Raced }
+
     fun peek(): CachedSnapshot? {
         val cached = lastSuccess ?: return null
         return if (cached.workspaceKey == client.workspace.key.toString() && nowMs() - cached.fetchedAtMs <= FRESHNESS_MS) {
@@ -216,10 +231,17 @@ class SessionRepositoryImpl(
                     hydration.await()
                     reconcilePendingQuestionsForOwnedSessions()
                     reconcileObservedPendingPermissions()
+                } catch (e: CancellationException) {
+                    throw e
                 } catch (e: Exception) {
                     AppLog.w(TAG, "Error during post-reconnect reconciliation: ${e.javaClass.simpleName}")
                 }
             }
+            // Message recovery runs on EVERY reconnect, independent of the snapshot-hydrate
+            // inFlight guard (which only fires once). Messages are a separate concern from the
+            // session-list snapshot, so recover only actively leased sessions from their own
+            // bounded authoritative REST windows (issue #14: had to leave and re-enter to see updates).
+            reconcileMessagesForActiveSessions()
             return
         }
 
@@ -238,8 +260,10 @@ class SessionRepositoryImpl(
             is OpenCodeEvent.SessionDeleted -> {
                 removeSessionOwnership(event.session.id)
                 synchronized(sessionUiStates) { sessionUiStates.remove(event.session.id) }
-                synchronized(messageStates) {
+                synchronized(messageStateLock) {
                     messageStates.remove(event.session.id)?.value = emptyList()
+                    sessionRevisions.remove(event.session.id)
+                    sessionLoadedLimits.remove(event.session.id)
                 }
             }
             is OpenCodeEvent.SessionUpdated -> {
@@ -379,6 +403,95 @@ class SessionRepositoryImpl(
         }
     }
 
+    /**
+     * Recover messages for every actively-leased session after an SSE reconnect.
+     * Called directly from the [OpenCodeEvent.Connected] path (NOT gated by the snapshot-hydrate
+     * inFlight guard, which only permits one hydration) so an open conversation self-heals on every
+     * reconnect (issue #14: had to leave and re-enter to see updates). Only sessions with a positive
+     * active consumer count are fetched; each is recovered from its own bounded authoritative REST
+     * window, committed only when its per-session revision is unchanged and it remains active, with a
+     * bounded number of retries if an SSE mutation races the fetch.
+     */
+    private fun reconcileMessagesForActiveSessions() {
+        scope.launch {
+            val active = synchronized(messageStateLock) { sessionConsumerCounts.keys.toList() }
+            for (sessionId in active) {
+                try {
+                    recoverMessagesForSession(sessionId)
+                } catch (ce: CancellationException) {
+                    throw ce
+                } catch (e: Exception) {
+                    AppLog.w(TAG, "Post-reconnect message recovery failed for $sessionId: ${e.javaClass.simpleName}")
+                }
+            }
+        }
+    }
+
+    private suspend fun recoverMessagesForSession(sessionId: String) {
+        val workspaceClient = client as? WorkspaceClient
+            ?: error("Message recovery requires WorkspaceClient")
+        val mapper = messageMapper ?: error("Message recovery requires MessageMapper")
+
+        repeat(MESSAGE_RECOVERY_MAX_ATTEMPTS) {
+            val attempt = synchronized(messageStateLock) {
+                if ((sessionConsumerCounts[sessionId] ?: 0) <= 0) return
+                RecoveryAttempt(
+                    revision = sessionRevisions[sessionId] ?: 0L,
+                    limit = sessionLoadedLimits[sessionId] ?: DEFAULT_MESSAGE_HISTORY_LIMIT,
+                )
+            }
+            val loaded = workspaceClient.getMessages(sessionId, attempt.limit)
+                .map { dto -> mapper.mapWrapperToDomain(dto) }
+            val outcome = synchronized(messageStateLock) {
+                if ((sessionConsumerCounts[sessionId] ?: 0) <= 0) return@synchronized CommitOutcome.Inactive
+                if ((sessionRevisions[sessionId] ?: 0L) != attempt.revision) {
+                    return@synchronized CommitOutcome.Raced
+                }
+                replaceMessagesAuthoritatively(sessionId, loaded)
+                CommitOutcome.Committed
+            }
+            when (outcome) {
+                CommitOutcome.Committed -> {
+                    // A fetched window only becomes the new "largest loaded" bound after it is
+                    // actually committed, so an aborted race never inflates the recovery window.
+                    synchronized(messageStateLock) {
+                        sessionLoadedLimits[sessionId] = maxOf(sessionLoadedLimits[sessionId] ?: 0, attempt.limit)
+                    }
+                    reconcileLoadedPendingState(sessionId, loaded)
+                    return
+                }
+                CommitOutcome.Inactive -> return
+                CommitOutcome.Raced -> delay(MESSAGE_RECOVERY_RETRY_DELAY_MS)
+            }
+        }
+    }
+
+    /**
+     * Replace the session's message state authoritatively with [loaded]. Unlike the merge-based
+     * pagination path, this repairs missed deletions and stale part content: the REST window is the
+     * source of truth once the caller has confirmed the revision is unchanged and the session is
+     * still active. Mutations that were concurrently applied for the same message/part are not
+     * distinguishable here because a committed replacement implies no revision changed.
+     */
+    private fun replaceMessagesAuthoritatively(sessionId: String, loaded: List<MessageWithParts>) {
+        messageState(sessionId).value = loaded
+    }
+
+    private suspend fun reconcileLoadedPendingState(sessionId: String, loaded: List<MessageWithParts>) {
+        val hasRunningQuestion = loaded.any { mwp ->
+            mwp.parts.any { it is Part.Tool && it.isQuestionTool() && it.state is ToolState.Running }
+        }
+        if (hasRunningQuestion) {
+            reconcilePendingQuestions(sessionId)
+        }
+        reconcilePendingPermissions(sessionId)
+    }
+
+    private data class RecoveryAttempt(
+        val revision: Long,
+        val limit: Int,
+    )
+
     override fun messages(sessionId: SessionId): StateFlow<List<MessageWithParts>> = messageState(
         sessionId.value
     ).asStateFlow()
@@ -388,7 +501,7 @@ class SessionRepositoryImpl(
     ).asStateFlow()
 
     override fun acquireSession(sessionId: SessionId): AutoCloseable {
-        synchronized(sessionConsumerCounts) {
+        synchronized(messageStateLock) {
             sessionConsumerCounts[sessionId.value] = sessionConsumerCounts.getOrDefault(sessionId.value, 0) + 1
         }
         val released = AtomicBoolean(false)
@@ -398,7 +511,7 @@ class SessionRepositoryImpl(
     }
 
     private fun releaseSession(sessionId: String) {
-        synchronized(sessionConsumerCounts) {
+        synchronized(messageStateLock) {
             val remaining = (sessionConsumerCounts[sessionId] ?: return) - 1
             if (remaining > 0) {
                 sessionConsumerCounts[sessionId] = remaining
@@ -407,9 +520,9 @@ class SessionRepositoryImpl(
                 sessionConsumerCounts.remove(sessionId)
             }
 
-            synchronized(messageStates) {
-                messageStates.remove(sessionId)?.value = emptyList()
-            }
+            messageStates.remove(sessionId)?.value = emptyList()
+            sessionRevisions.remove(sessionId)
+            sessionLoadedLimits.remove(sessionId)
             synchronized(sessionUiStates) {
                 sessionUiStates.remove(sessionId)?.value = SessionUiState()
             }
@@ -495,7 +608,14 @@ class SessionRepositoryImpl(
             ?: error("Message loading requires WorkspaceClient")
         val mapper = messageMapper ?: error("Message loading requires MessageMapper")
         val messages = workspaceClient.getMessages(sessionId.value, limit).map { dto -> mapper.mapWrapperToDomain(dto) }
-        mergeLoadedMessages(sessionId.value, messages)
+        synchronized(messageStateLock) {
+            mergeLoadedMessages(sessionId.value, messages)
+            // Record the requested bound, not the count returned: the server may supply fewer
+            // messages than requested, and recovery should re-fetch the same bounded window that
+            // was actually loaded (largest successfully loaded history limit).
+            sessionLoadedLimits[sessionId.value] = maxOf(sessionLoadedLimits[sessionId.value] ?: 0, limit)
+            sessionRevisions[sessionId.value] = (sessionRevisions[sessionId.value] ?: 0L) + 1
+        }
         // A question tool part loaded via REST (state=running) means a question is
         // pending that the live question.asked SSE event was missed for. Reconcile so
         // the interactive card renders. (upsertPart only fires for live SSE updates,
@@ -519,7 +639,7 @@ class SessionRepositoryImpl(
     }
 
     override fun clearStreamingFlags(sessionId: SessionId) {
-        messageState(sessionId.value).update { messages ->
+        updateMessageState(sessionId.value) { messages ->
             messages.map { msgWithParts ->
                 msgWithParts.copy(
                     parts = msgWithParts.parts.map { part ->
@@ -534,9 +654,13 @@ class SessionRepositoryImpl(
         projectRefreshJob?.cancel()
         invalidate()
         job.cancel("SessionRepository closed")
-        synchronized(messageStates) { messageStates.clear() }
+        synchronized(messageStateLock) {
+            messageStates.clear()
+            sessionRevisions.clear()
+            sessionLoadedLimits.clear()
+            sessionConsumerCounts.clear()
+        }
         synchronized(sessionUiStates) { sessionUiStates.clear() }
-        synchronized(sessionConsumerCounts) { sessionConsumerCounts.clear() }
         synchronized(childToParentSessionIds) { childToParentSessionIds.clear() }
         synchronized(detectedQuestionToolCallIds) { detectedQuestionToolCallIds.clear() }
         synchronized(recentlyResolvedQuestionIds) { recentlyResolvedQuestionIds.clear() }
@@ -777,10 +901,20 @@ class SessionRepositoryImpl(
         _state.value = RepoState.Live(snapshot.copy(sessions = snapshot.sessions + (session.id.value to session)))
     }
 
-    private fun messageState(sessionId: String): MutableStateFlow<List<MessageWithParts>> = synchronized(
-        messageStates
-    ) {
+    private fun messageState(sessionId: String): MutableStateFlow<List<MessageWithParts>> = synchronized(messageStateLock) {
         messageStates.getOrPut(sessionId) { MutableStateFlow(emptyList()) }
+    }
+
+    /**
+     * Apply [transform] to the session's message state and bump its revision so any in-flight
+     * reconnect recovery that captured the prior revision will detect the race and refuse to
+     * overwrite this newer mutation.
+     */
+    private fun updateMessageState(sessionId: String, transform: (List<MessageWithParts>) -> List<MessageWithParts>) {
+        synchronized(messageStateLock) {
+            messageState(sessionId).update(transform)
+            sessionRevisions[sessionId] = (sessionRevisions[sessionId] ?: 0L) + 1
+        }
     }
 
     private fun sessionUiStateFor(sessionId: String): MutableStateFlow<SessionUiState> = synchronized(sessionUiStates) {
@@ -903,8 +1037,7 @@ class SessionRepositoryImpl(
     }
 
     private fun upsertMessage(message: Message) {
-        val state = messageState(message.sessionID)
-        state.update { messages ->
+        updateMessageState(message.sessionID) { messages ->
             val existing = messages.firstOrNull { it.message.id == message.id }
             val updated = if (existing != null) {
                 messages.map { if (it.message.id == message.id) it.copy(message = message) else it }
@@ -947,8 +1080,7 @@ class SessionRepositoryImpl(
             }
         }
 
-        val state = messageState(part.sessionID)
-        state.update { messages ->
+        updateMessageState(part.sessionID) { messages ->
             val existingMessage = messages.firstOrNull { it.message.id == part.messageID }
                 ?: createPlaceholderMessage(part.sessionID, part.messageID)
             val partIndex = existingMessage.parts.indexOfFirst { it.id == part.id }
@@ -967,7 +1099,7 @@ class SessionRepositoryImpl(
 
     private fun applyPartDelta(event: OpenCodeEvent.MessagePartDelta) {
         val sessionId = event.sessionID ?: findSessionIdForPart(event.messageID, event.partID) ?: return
-        messageState(sessionId).update { messages ->
+        updateMessageState(sessionId) { messages ->
             messages.map { message ->
                 if (message.message.id != event.messageID) return@map message
                 message.copy(
@@ -979,7 +1111,7 @@ class SessionRepositoryImpl(
         }
     }
 
-    private fun findSessionIdForPart(messageId: String, partId: String): String? = synchronized(messageStates) {
+    private fun findSessionIdForPart(messageId: String, partId: String): String? = synchronized(messageStateLock) {
         messageStates.entries.firstOrNull { (_, flow) ->
             flow.value.any { message -> message.message.id == messageId && message.parts.any { it.id == partId } }
         }?.key
@@ -992,11 +1124,11 @@ class SessionRepositoryImpl(
     }
 
     private fun removeMessage(sessionId: String, messageId: String) {
-        messageState(sessionId).update { messages -> messages.filterNot { it.message.id == messageId } }
+        updateMessageState(sessionId) { messages -> messages.filterNot { it.message.id == messageId } }
     }
 
     private fun removePart(sessionId: String, messageId: String, partId: String) {
-        messageState(sessionId).update { messages ->
+        updateMessageState(sessionId) { messages ->
             messages.map { msgWithParts ->
                 if (msgWithParts.message.id == messageId) {
                     msgWithParts.copy(parts = msgWithParts.parts.filterNot { it.id == partId })
@@ -1077,5 +1209,8 @@ class SessionRepositoryImpl(
         const val SESSION_HISTORY_LIMIT = Int.MAX_VALUE
         const val TAG = "SessionRepository"
         const val RESOLVED_QUESTION_TTL_MS = 30_000L
+        const val DEFAULT_MESSAGE_HISTORY_LIMIT = 100
+        const val MESSAGE_RECOVERY_MAX_ATTEMPTS = 3
+        const val MESSAGE_RECOVERY_RETRY_DELAY_MS = 200L
     }
 }
