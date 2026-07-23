@@ -22,6 +22,7 @@ import androidx.compose.ui.semantics.contentDescription
 import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.window.Dialog
+import androidx.compose.ui.window.DialogProperties
 import dev.blazelight.p4oc.R
 import dev.blazelight.p4oc.data.remote.dto.AgentDto
 import dev.blazelight.p4oc.data.remote.dto.ModelDto
@@ -343,9 +344,14 @@ fun ModelPickerDialog(
     val recents = filteredModels.filter { it.isRecent && !it.isFavorite }
     val others = filteredModels.filter { !it.isFavorite && !it.isRecent }
 
-    Dialog(onDismissRequest = onDismiss) {
+    Dialog(
+        onDismissRequest = onDismiss,
+        properties = DialogProperties(usePlatformDefaultWidth = false)
+    ) {
+      Box(modifier = Modifier.fillMaxSize()) {
         Surface(
             modifier = Modifier
+                .align(Alignment.BottomCenter)
                 .fillMaxWidth()
                 .fillMaxHeight(0.85f),
             shape = RectangleShape,
@@ -366,9 +372,11 @@ fun ModelPickerDialog(
                         verticalAlignment = Alignment.CenterVertically
                     ) {
                         Text(
-                            text = "[ ${stringResource(R.string.select_model)} ]",
-                            style = MaterialTheme.typography.titleSmall,
-                            color = theme.text
+                            text = stringResource(R.string.select_model),
+                            style = MaterialTheme.typography.titleSmall.copy(
+                                fontFamily = androidx.compose.ui.text.font.FontFamily.Monospace
+                            ),
+                            color = theme.primary
                         )
                         IconButton(
                             onClick = onDismiss,
@@ -546,6 +554,7 @@ fun ModelPickerDialog(
                 }
             }
         }
+      }
     }
 }
 
