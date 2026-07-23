@@ -332,20 +332,11 @@ private fun ThemeModeSelector(
         "dark" to "Dark"
     )
 
-    Row(
-        modifier = Modifier.fillMaxWidth(),
-        horizontalArrangement = Arrangement.spacedBy(Spacing.md)
-    ) {
-        modes.forEach { (id, label) ->
-            FilterChip(
-                selected = selected == id,
-                onClick = { onSelect(id) },
-                label = { Text(label) },
-                modifier = Modifier.weight(1f),
-                shape = RectangleShape
-            )
-        }
-    }
+    dev.blazelight.p4oc.ui.components.TuiSegmentedControl(
+        options = modes,
+        selectedId = selected,
+        onSelect = onSelect,
+    )
 }
 
 @OptIn(ExperimentalMaterial3Api::class)

@@ -20,6 +20,7 @@ import androidx.compose.ui.graphics.RectangleShape
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.semantics.Role
 import androidx.compose.ui.text.font.FontFamily
+import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.input.VisualTransformation
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.sp
@@ -546,6 +547,54 @@ fun TuiSectionHeader(
             modifier = Modifier.weight(1f),
         )
         trailing?.invoke(this)
+    }
+}
+
+/**
+ * Design segmented control: a bordered row of connected cells. The active cell
+ * is filled (#1e1e1e element) with semibold primary text; others are muted.
+ * Matches the mode / tool-display / effort selectors.
+ */
+@Composable
+fun TuiSegmentedControl(
+    options: List<Pair<String, String>>,
+    selectedId: String,
+    onSelect: (String) -> Unit,
+    modifier: Modifier = Modifier,
+) {
+    val theme = LocalOpenCodeTheme.current
+    Row(
+        modifier = modifier
+            .fillMaxWidth()
+            .height(Sizing.buttonHeightMd)
+            .border(Sizing.strokeMd, theme.border, RectangleShape),
+    ) {
+        options.forEachIndexed { index, (id, label) ->
+            if (index > 0) {
+                Box(
+                    modifier = Modifier
+                        .width(Sizing.strokeThin)
+                        .fillMaxHeight()
+                        .background(theme.border)
+                )
+            }
+            val active = id == selectedId
+            Box(
+                modifier = Modifier
+                    .weight(1f)
+                    .fillMaxHeight()
+                    .background(if (active) theme.backgroundElement else Color.Transparent)
+                    .clickable(role = Role.RadioButton) { onSelect(id) },
+                contentAlignment = Alignment.Center,
+            ) {
+                Text(
+                    text = label,
+                    style = MaterialTheme.typography.labelMedium.copy(fontFamily = FontFamily.Monospace),
+                    fontWeight = if (active) FontWeight.SemiBold else FontWeight.Normal,
+                    color = if (active) theme.primary else theme.textMuted,
+                )
+            }
+        }
     }
 }
 
