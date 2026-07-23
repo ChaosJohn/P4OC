@@ -1,5 +1,6 @@
 package dev.blazelight.p4oc.ui.components.chat
 
+import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.ExperimentalFoundationApi
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
@@ -295,33 +296,66 @@ private fun activityMarker(label: String) {
 @Suppress("FunctionNaming")
 private fun AssistantError(error: MessageError, onProviderAuthRequired: ((String) -> Unit)? = null) {
     val theme = LocalOpenCodeTheme.current
+    val isAuth = error.name == "ProviderAuthError"
+    val isAborted = error.name == "MessageAbortedError"
     val message = when {
-        error.name == "MessageAbortedError" -> stringResource(R.string.chat_run_aborted)
-        error.name == "ProviderAuthError" -> stringResource(R.string.chat_provider_auth_required)
+        isAborted -> stringResource(R.string.chat_run_aborted)
+        isAuth -> stringResource(R.string.chat_provider_auth_required)
         error.isRetryable -> stringResource(R.string.chat_run_retryable_error)
         else -> stringResource(R.string.chat_run_failed)
     }
+    val accent = if (isAborted) theme.warning else theme.error
+    val header = buildString {
+        append(
+            when {
+                isAuth -> "provider auth error"
+                isAborted -> "run aborted"
+                error.isRetryable -> "run error · retryable"
+                else -> "run failed"
+            }
+        )
+        error.statusCode?.let { append(" · "); append(it) }
+    }
 
-    Box(
+    // Left-border error card, matching design 20's provider-auth banner.
+    Row(
         modifier = Modifier
             .fillMaxWidth()
-            .background(theme.error.copy(alpha = 0.1f))
-            .padding(horizontal = Spacing.sm, vertical = Spacing.xs)
+            .height(IntrinsicSize.Min)
+            .background(theme.backgroundElement)
     ) {
-        Row(
-            modifier = Modifier.fillMaxWidth(),
-            verticalAlignment = Alignment.CenterVertically,
-            horizontalArrangement = Arrangement.spacedBy(Spacing.sm)
+        Box(
+            modifier = Modifier
+                .width(Sizing.strokeThick)
+                .fillMaxHeight()
+                .background(accent)
+        )
+        Column(
+            modifier = Modifier.padding(Spacing.md),
+            verticalArrangement = Arrangement.spacedBy(Spacing.sm)
         ) {
             Text(
-                text = message,
-                modifier = Modifier.weight(1f),
-                style = MaterialTheme.typography.bodySmall,
-                color = theme.error
+                text = header,
+                style = MaterialTheme.typography.labelMedium.copy(fontFamily = FontFamily.Monospace),
+                color = accent
             )
-            if (error.name == "ProviderAuthError" && error.providerID != null && onProviderAuthRequired != null) {
-                TextButton(onClick = { onProviderAuthRequired(error.providerID) }) {
-                    Text(stringResource(R.string.provider_auth_action))
+            Text(
+                text = message,
+                style = MaterialTheme.typography.bodySmall,
+                color = theme.text
+            )
+            if (isAuth && error.providerID != null && onProviderAuthRequired != null) {
+                OutlinedButton(
+                    onClick = { onProviderAuthRequired(error.providerID) },
+                    shape = RectangleShape,
+                    contentPadding = PaddingValues(horizontal = Spacing.md, vertical = Spacing.none),
+                    border = BorderStroke(Sizing.strokeMd, theme.primary),
+                    colors = ButtonDefaults.outlinedButtonColors(contentColor = theme.primary)
+                ) {
+                    Text(
+                        stringResource(R.string.provider_auth_action),
+                        style = MaterialTheme.typography.labelSmall
+                    )
                 }
             }
         }
