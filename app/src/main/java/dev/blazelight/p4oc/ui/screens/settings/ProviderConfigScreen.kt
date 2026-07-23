@@ -443,10 +443,18 @@ private fun ModelItem(
             ) {
                 model.capabilities?.let { caps ->
                     if (caps.reasoning) {
-                        CapabilityChip("Reasoning")
+                        Text(
+                            text = "[R]",
+                            style = MaterialTheme.typography.labelSmall.copy(fontFamily = FontFamily.Monospace),
+                            color = theme.info,
+                        )
                     }
                     if (caps.toolcall) {
-                        CapabilityChip("Tools")
+                        Text(
+                            text = "[T]",
+                            style = MaterialTheme.typography.labelSmall.copy(fontFamily = FontFamily.Monospace),
+                            color = theme.accent,
+                        )
                     }
                 }
 
