@@ -282,6 +282,7 @@ private fun SettingsSection(
             modifier = Modifier
                 .fillMaxWidth()
                 .padding(horizontal = Spacing.md),
+            shape = RectangleShape,
             colors = CardDefaults.cardColors(
                 containerColor = theme.backgroundElement
             )
@@ -436,6 +437,7 @@ private fun PreviewCard(settings: VisualSettings) {
         modifier = Modifier
             .fillMaxWidth()
             .padding(Spacing.md),
+        shape = RectangleShape,
         colors = CardDefaults.cardColors(
             containerColor = theme.backgroundElement
         )

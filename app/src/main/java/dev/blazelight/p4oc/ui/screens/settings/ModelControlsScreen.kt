@@ -459,6 +459,7 @@ internal fun ModelCard(
             .semantics {
                 if (isSelected) stateDescription = currentModelDescription
             },
+        shape = RectangleShape,
         colors = CardDefaults.cardColors(
             containerColor = if (isSelected) {
                 theme.accent.copy(alpha = 0.2f)
