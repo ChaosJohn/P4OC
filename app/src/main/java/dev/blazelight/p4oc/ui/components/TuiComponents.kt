@@ -802,7 +802,7 @@ fun TuiStatusDot(
     Surface(
         modifier = modifier.size(size),
         color = color,
-        shape = androidx.compose.foundation.shape.CircleShape
+        shape = RectangleShape
     ) {}
 }
 
@@ -882,88 +882,38 @@ fun TuiSwitch(
     val theme = LocalOpenCodeTheme.current
     val contentAlpha = if (enabled) 1f else 0.38f
 
-    // Active cell: solid accent background with inverted text
-    val activeBg = theme.accent.copy(alpha = contentAlpha)
-    val activeText = theme.background.copy(alpha = contentAlpha)
+    // Knob-slider (design): 36x20 track, square knob slides right (on, success) / left (off, muted).
+    val knobColor = (if (checked) theme.success else theme.textMuted).copy(alpha = contentAlpha)
+    val trackBg = theme.backgroundPanel.copy(alpha = contentAlpha)
+    val trackBorder = theme.border.copy(alpha = contentAlpha)
 
-    // Inactive cell: panel background with muted text
-    val inactiveBg = theme.backgroundPanel.copy(alpha = contentAlpha)
-    val inactiveText = theme.textMuted.copy(alpha = contentAlpha)
-
-    val outerBorder = theme.border.copy(alpha = contentAlpha)
-    val dividerColor = theme.borderSubtle.copy(alpha = contentAlpha)
-
-    val monoLabel = MaterialTheme.typography.labelSmall.copy(
-        fontFamily = FontFamily.Monospace,
-        letterSpacing = 0.5.sp
-    )
-
-    Row(
+    Box(
         modifier = modifier
-            .height(Sizing.buttonHeightSm)
-            .border(
-                width = Sizing.strokeMd,
-                color = outerBorder,
-                shape = RectangleShape
-            )
+            .width(Sizing.switchTrackWidth)
+            .height(Sizing.switchTrackHeight)
+            .background(trackBg, RectangleShape)
+            .border(Sizing.strokeMd, trackBorder, RectangleShape)
             .then(
                 if (onCheckedChange != null && enabled) {
                     Modifier.toggleable(
                         value = checked,
                         interactionSource = remember { MutableInteractionSource() },
-                        indication = ripple(),
+                        indication = null,
                         role = Role.Switch,
                         onValueChange = onCheckedChange
                     )
                 } else {
                     Modifier
                 }
-            ),
-        verticalAlignment = Alignment.CenterVertically
+            )
+            .padding(Sizing.switchKnobInset),
+        contentAlignment = if (checked) Alignment.CenterEnd else Alignment.CenterStart
     ) {
-        // OFF cell (left)
         Box(
             modifier = Modifier
-                .width(Sizing.switchCellWidth)
-                .fillMaxHeight()
-                .background(
-                    color = if (!checked) activeBg else inactiveBg,
-                    shape = RectangleShape
-                ),
-            contentAlignment = Alignment.Center
-        ) {
-            Text(
-                text = "OFF",
-                style = monoLabel,
-                color = if (!checked) activeText else inactiveText
-            )
-        }
-
-        // Vertical divider
-        Box(
-            modifier = Modifier
-                .width(Sizing.strokeMd)
-                .fillMaxHeight()
-                .background(dividerColor)
+                .size(Sizing.switchKnobSize)
+                .background(knobColor, RectangleShape)
         )
-
-        // ON cell (right)
-        Box(
-            modifier = Modifier
-                .width(Sizing.switchCellWidth)
-                .fillMaxHeight()
-                .background(
-                    color = if (checked) activeBg else inactiveBg,
-                    shape = RectangleShape
-                ),
-            contentAlignment = Alignment.Center
-        ) {
-            Text(
-                text = "ON",
-                style = monoLabel,
-                color = if (checked) activeText else inactiveText
-            )
-        }
     }
 }
 

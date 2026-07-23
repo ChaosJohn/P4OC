@@ -6,6 +6,7 @@ import androidx.compose.animation.core.animateFloat
 import androidx.compose.animation.core.infiniteRepeatable
 import androidx.compose.animation.core.rememberInfiniteTransition
 import androidx.compose.animation.core.tween
+import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Row
@@ -26,6 +27,8 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.alpha
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.vector.ImageVector
+import androidx.compose.ui.semantics.contentDescription
+import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.unit.Dp
@@ -118,11 +121,12 @@ fun SessionStatusDot(
                 strokeWidth = Sizing.strokeThin,
             )
         } else {
-            Icon(
-                imageVector = visual.icon ?: Icons.Default.Circle,
-                contentDescription = visual.contentDescription,
-                modifier = Modifier.size(size),
-                tint = visual.color,
+            // Design uses flat square status dots everywhere (no rounded circles).
+            Box(
+                modifier = Modifier
+                    .size(size)
+                    .background(visual.color, androidx.compose.ui.graphics.RectangleShape)
+                    .semantics { contentDescription = visual.contentDescription },
             )
         }
 

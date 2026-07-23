@@ -74,6 +74,12 @@ object Sizing {
 
     // Component-specific
     val switchCellWidth: Dp = 40.dp // TuiSwitch ON/OFF cell width
+    // Knob-slider switch (design): 36x20 track, 14x14 sliding knob, 2dp inset
+    val switchTrackWidth: Dp = 36.dp
+    val switchTrackHeight: Dp = 20.dp
+    val switchKnobSize: Dp = 14.dp
+    val switchKnobInset: Dp = 2.dp
+    val tabBarHeight: Dp = 30.dp // Tab bar strip height (design)
     val treeIndent: Dp = 24.dp // Session tree indentation per level
     val chipMaxWidth: Dp = 150.dp // Project chip max width
     val tabHeight: Dp = 22.dp // Tab bar item height

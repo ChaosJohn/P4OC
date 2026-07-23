@@ -1,5 +1,6 @@
 package dev.blazelight.p4oc.ui.tabs
 
+import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyRow
@@ -13,7 +14,10 @@ import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.RectangleShape
 import androidx.compose.ui.graphics.vector.ImageVector
+import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.semantics.Role
@@ -60,6 +64,7 @@ fun TabBar(
 ) {
     val theme = LocalOpenCodeTheme.current
     val listState = rememberLazyListState()
+    val newWorkLabel = stringResource(R.string.cd_new_work)
 
     // Home is pinned outside the scrolling work-tab list.
     LaunchedEffect(activeTabId, tabs) {
@@ -71,14 +76,14 @@ fun TabBar(
 
     Surface(
         modifier = modifier.fillMaxWidth().testTag("tab_bar"),
-        color = theme.background,
+        color = theme.backgroundPanel,
         tonalElevation = Spacing.none
     ) {
+      Column {
         Row(
             modifier = Modifier
                 .fillMaxWidth()
-                .height(Sizing.minTouchTarget)
-                .padding(horizontal = Spacing.xs),
+                .height(Sizing.tabBarHeight),
             verticalAlignment = Alignment.CenterVertically
         ) {
             tabs.firstOrNull { it.isPinnedHome }?.let { home ->
@@ -145,22 +150,31 @@ fun TabBar(
                 }
             }
 
-            // Add button
-            IconButton(
-                onClick = onAddClick,
+            // Add button — mono glyph with a left divider (design)
+            VerticalDivider(
+                modifier = Modifier.height(Sizing.tabBarHeight),
+                color = theme.border,
+                thickness = Sizing.strokeThin,
+            )
+            Box(
                 modifier = Modifier
-                    .minimumInteractiveComponentSize()
-                    .size(Sizing.iconLg)
-                    .testTag("tab_bar_add_button")
+                    .fillMaxHeight()
+                    .clickable(onClick = onAddClick, role = Role.Button)
+                    .padding(horizontal = Spacing.lg)
+                    .semantics { contentDescription = newWorkLabel }
+                    .testTag("tab_bar_add_button"),
+                contentAlignment = Alignment.Center
             ) {
-                Icon(
-                    imageVector = Icons.Default.Add,
-                    contentDescription = stringResource(R.string.cd_new_work),
-                    modifier = Modifier.size(Sizing.iconSm),
-                    tint = theme.textMuted
+                Text(
+                    text = "+",
+                    style = MaterialTheme.typography.titleMedium,
+                    fontFamily = FontFamily.Monospace,
+                    color = theme.textMuted
                 )
             }
         }
+        HorizontalDivider(color = theme.border, thickness = Sizing.strokeThin)
+      }
     }
 }
 
@@ -177,23 +191,27 @@ private fun tabIndicator(
     val backgroundColor = when {
         needsAttention && !state.isActive -> theme.warning.copy(alpha = 0.15f)
         state.isActive -> theme.backgroundElement
-        else -> theme.background
+        else -> Color.Transparent
     }
-    Box(
+    // Active tab gets a 2px primary top-border strip — the design's key tab signature.
+    val topStripColor = if (state.isActive) theme.primary else Color.Transparent
+    Column(
         modifier = modifier
-            .minimumInteractiveComponentSize()
-            .height(Sizing.tabHeight)
+            .height(Sizing.tabBarHeight)
+            .background(backgroundColor)
             .semantics {
                 contentDescription = state.accessibilityLabel
                 selected = state.isActive
             }
             .clickable(onClick = state.onClick, role = Role.Tab),
-        contentAlignment = Alignment.Center,
     ) {
-        Surface(
-            modifier = Modifier.height(Sizing.tabHeight),
-            color = backgroundColor,
-        ) {
+        Box(
+            modifier = Modifier
+                .fillMaxWidth()
+                .height(Sizing.strokeThick)
+                .background(topStripColor)
+        )
+        Box(modifier = Modifier.weight(1f), contentAlignment = Alignment.Center) {
             tabIndicatorRow(state = state, needsAttention = needsAttention)
         }
     }
@@ -202,15 +220,16 @@ private fun tabIndicator(
 @Composable
 private fun tabIndicatorRow(state: TabIndicatorState, needsAttention: Boolean) {
     val theme = LocalOpenCodeTheme.current
+    val closeLabel = stringResource(R.string.cd_close_tab)
     Row(
-        modifier = Modifier.padding(horizontal = Spacing.xs),
+        modifier = Modifier.padding(horizontal = Spacing.md),
         verticalAlignment = Alignment.CenterVertically,
-        horizontalArrangement = Arrangement.spacedBy(Spacing.xxs),
+        horizontalArrangement = Arrangement.spacedBy(Spacing.sm),
     ) {
         tabIndicatorIcon(state)
         Text(
             text = state.title,
-            style = MaterialTheme.typography.labelSmall,
+            style = MaterialTheme.typography.labelSmall.copy(fontFamily = FontFamily.Monospace),
             color = when {
                 needsAttention -> theme.warning
                 state.isActive -> theme.text
@@ -220,15 +239,15 @@ private fun tabIndicatorRow(state: TabIndicatorState, needsAttention: Boolean) {
             overflow = TextOverflow.Ellipsis,
             modifier = Modifier.widthIn(max = Sizing.panelWidthSm),
         )
-        if (state.isActive && state.closeable) {
-            Icon(
-                imageVector = Icons.Default.Close,
-                contentDescription = stringResource(R.string.cd_close_tab),
+        if (state.closeable) {
+            Text(
+                text = "×",
+                style = MaterialTheme.typography.labelMedium,
+                fontFamily = FontFamily.Monospace,
+                color = theme.textMuted,
                 modifier = Modifier
-                    .size(Sizing.minTouchTarget)
                     .clickable(onClick = state.onClose, role = Role.Button)
-                    .padding((Sizing.minTouchTarget - Sizing.iconXs) / 2),
-                tint = theme.textMuted,
+                    .semantics { contentDescription = closeLabel },
             )
         }
     }
