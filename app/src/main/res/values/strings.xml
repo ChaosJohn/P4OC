@@ -129,6 +129,8 @@
     
     <!-- Settings Screen -->
     <string name="settings_title">Settings</string>
+    <string name="settings_group_workspace">Workspace</string>
+    <string name="settings_group_app">App</string>
     <string name="settings_providers">Providers</string>
     <string name="settings_providers_desc">Connect and authenticate AI providers</string>
     <string name="settings_model_controls">Model Controls</string>
