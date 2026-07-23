@@ -194,6 +194,13 @@ fun ChatScreen(
         saver = ChatScrollRestorationState.Saver
     ) { ChatScrollRestorationState() }
     val messageBlocks = remember(messages, uiState.isBusy) { groupMessagesIntoBlocks(messages, uiState.isBusy) }
+    // Context-window usage for the composer meter — from the newest assistant reply's token totals.
+    val usedContextTokens = remember(messages) {
+        (
+            messages.lastOrNull { it.message is dev.blazelight.p4oc.domain.model.Message.Assistant }
+                ?.message as? dev.blazelight.p4oc.domain.model.Message.Assistant
+            )?.tokens?.let { it.input + it.output + it.reasoning + it.cacheRead + it.cacheWrite }
+    }
     val searchMatches = remember(messageBlocks, scrollRestorationState.searchQuery) {
         findChatMatches(messageBlocks, scrollRestorationState.searchQuery)
     }
@@ -361,7 +368,8 @@ fun ChatScreen(
                         onReasoningEffortSelected = viewModel.modelAgentManager::selectReasoningEffort,
                         favoriteModels = favoriteModels,
                         recentModels = recentModels,
-                        onToggleFavorite = viewModel.modelAgentManager::toggleFavoriteModel
+                        onToggleFavorite = viewModel.modelAgentManager::toggleFavoriteModel,
+                        usedContextTokens = usedContextTokens,
                     )
                     ChatInputBar(
                         value = uiState.inputText,

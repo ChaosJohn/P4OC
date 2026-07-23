@@ -73,6 +73,7 @@ fun ModelAgentSelectorBar(
     favoriteModels: Set<ModelInput> = emptySet(),
     recentModels: List<ModelInput> = emptyList(),
     onToggleFavorite: (ModelInput) -> Unit = {},
+    usedContextTokens: Int? = null,
     modifier: Modifier = Modifier
 ) {
     val theme = LocalOpenCodeTheme.current
@@ -101,9 +102,13 @@ fun ModelAgentSelectorBar(
         color = theme.backgroundElement
     ) {
         Row(
+            modifier = Modifier.padding(horizontal = Spacing.md, vertical = Spacing.xs),
+            verticalAlignment = Alignment.CenterVertically
+        ) {
+          Row(
             modifier = Modifier
-                .horizontalScroll(rememberScrollState())
-                .padding(horizontal = Spacing.md, vertical = Spacing.xs),
+                .weight(1f)
+                .horizontalScroll(rememberScrollState()),
             horizontalArrangement = Arrangement.spacedBy(Spacing.md),
             verticalAlignment = Alignment.CenterVertically
         ) {
@@ -231,6 +236,14 @@ fun ModelAgentSelectorBar(
                     onEffortSelected = onReasoningEffortSelected,
                 )
             }
+          }
+          val ctxWindow = selectedModelDto?.limit?.context
+          if (usedContextTokens != null && ctxWindow != null && ctxWindow > 0) {
+              Spacer(Modifier.width(Spacing.sm))
+              ContextUsageMeter(
+                  percent = (usedContextTokens.toLong() * 100 / ctxWindow).toInt().coerceIn(0, 100)
+              )
+          }
         }
     }
 
@@ -248,6 +261,32 @@ fun ModelAgentSelectorBar(
             onDismiss = { showModelPicker = false }
         )
     }
+}
+
+/**
+ * Compact context-window usage meter for the composer control row — `▓▓▓░ 62%`.
+ * Matches design 05; four cells, warning/error tint as usage climbs.
+ */
+@Composable
+private fun ContextUsageMeter(percent: Int) {
+    val theme = LocalOpenCodeTheme.current
+    val filled = (percent * 4 + 99) / 100 // ceil to nearest of 4 cells
+    val bar = buildString { repeat(4) { append(if (it < filled) '▓' else '░') } }
+    val color = when {
+        percent >= 90 -> theme.error
+        percent >= 60 -> theme.warning
+        else -> theme.textMuted
+    }
+    Text(
+        text = "$bar $percent%",
+        style = MaterialTheme.typography.labelSmall,
+        fontFamily = androidx.compose.ui.text.font.FontFamily.Monospace,
+        color = color,
+        maxLines = 1,
+        modifier = Modifier.semantics {
+            contentDescription = "Context usage $percent percent"
+        }
+    )
 }
 
 @OptIn(ExperimentalMaterial3Api::class)
