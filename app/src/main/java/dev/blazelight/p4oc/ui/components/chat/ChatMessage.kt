@@ -125,25 +125,16 @@ private fun UserMessage(
     // Don't render anything if there's no visible text
     if (text.isBlank()) return
 
-    // TUI style: Distinct background with accent left border for user messages
-    Row(
+    // TUI style: flat panel surface with a "you" label — matches the design's user block.
+    Box(
         modifier = Modifier
             .fillMaxWidth()
             .padding(vertical = Spacing.xs)
     ) {
-        // Accent left border (thicker for user messages)
-        Box(
-            modifier = Modifier
-                .width(Spacing.xs)
-                .fillMaxHeight()
-                .background(theme.primary)
-        )
-
-        // Content with distinct background - use primary tint for better contrast
         Box(
             modifier = Modifier
                 .fillMaxWidth()
-                .background(theme.primary.copy(alpha = 0.12f))
+                .background(theme.backgroundPanel)
                 .combinedClickable(
                     onClick = {},
                     onLongClick = {
@@ -165,6 +156,13 @@ private fun UserMessage(
                     .fillMaxWidth()
                     .padding(end = revertEndInset)
             ) {
+                Text(
+                    text = "you",
+                    style = MaterialTheme.typography.labelSmall,
+                    fontFamily = FontFamily.Monospace,
+                    color = theme.textMuted,
+                    modifier = Modifier.padding(bottom = Spacing.xxs)
+                )
                 StreamingMarkdown(text = text, modifier = Modifier.fillMaxWidth())
 
                 if (isQueued) {

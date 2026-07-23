@@ -248,12 +248,13 @@ fun ChatInputBar(
                             onClick = onAttachClick,
                             modifier = Modifier
                                 .size(Sizing.iconButtonMd)
+                                .border(Sizing.strokeMd, theme.border, RectangleShape)
                                 .semantics { contentDescription = attachDescription }
                                 .testTag("chat_attach_button")
                         ) {
                             Text(
                                 text = "+",
-                                color = theme.accent,
+                                color = theme.textMuted,
                                 fontFamily = FontFamily.Monospace,
                                 style = MaterialTheme.typography.titleMedium
                             )
@@ -277,12 +278,20 @@ fun ChatInputBar(
                         contentAlignment = Alignment.CenterStart
                     ) {
                         if (currentText.isEmpty()) {
-                            Text(
-                                "> Message...",
-                                style = MaterialTheme.typography.bodyMedium,
-                                fontFamily = FontFamily.Monospace,
-                                color = theme.textMuted
-                            )
+                            Row(verticalAlignment = Alignment.CenterVertically) {
+                                Text(
+                                    "▷ ",
+                                    style = MaterialTheme.typography.bodyMedium,
+                                    fontFamily = FontFamily.Monospace,
+                                    color = theme.primary
+                                )
+                                Text(
+                                    "Message OpenCode…",
+                                    style = MaterialTheme.typography.bodyMedium,
+                                    fontFamily = FontFamily.Monospace,
+                                    color = theme.textMuted
+                                )
+                            }
                         }
                         BasicTextField(
                             state = textState,
@@ -364,6 +373,7 @@ fun ChatInputBar(
                         }
                     }
 
+                    val sendFilled = canSubmit && !isLoading
                     IconButton(
                         onClick = {
                             if (!canSubmit) return@IconButton
@@ -374,6 +384,15 @@ fun ChatInputBar(
                         enabled = canSubmit,
                         modifier = Modifier
                             .size(Sizing.iconButtonMd)
+                            .background(
+                                if (sendFilled) theme.primary else theme.backgroundElement,
+                                RectangleShape
+                            )
+                            .border(
+                                Sizing.strokeMd,
+                                if (sendFilled) theme.primary else theme.border,
+                                RectangleShape
+                            )
                             .semantics { contentDescription = sendContentDescription }
                             .testTag("send_button")
                     ) {
@@ -382,7 +401,7 @@ fun ChatInputBar(
                         } else {
                             Text(
                                 text = "↑",
-                                color = if (canSubmit) theme.accent else theme.textMuted,
+                                color = if (sendFilled) theme.background else theme.textMuted,
                                 fontFamily = FontFamily.Monospace,
                                 style = MaterialTheme.typography.titleMedium
                             )
