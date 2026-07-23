@@ -2,7 +2,6 @@ package dev.blazelight.p4oc.ui.components.chat
 
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
-import androidx.compose.foundation.clickable
 import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.rememberScrollState
@@ -27,7 +26,6 @@ import androidx.compose.ui.input.key.onPreviewKeyEvent
 import androidx.compose.ui.input.key.type
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.res.stringResource
-import androidx.compose.ui.semantics.Role
 import androidx.compose.ui.semantics.contentDescription
 import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.text.TextStyle
@@ -35,9 +33,11 @@ import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.input.ImeAction
 import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.text.style.TextOverflow
+import androidx.compose.ui.unit.dp
 import dev.blazelight.p4oc.R
 import dev.blazelight.p4oc.domain.model.Command
 import dev.blazelight.p4oc.ui.components.TuiLoadingIndicator
+import dev.blazelight.p4oc.ui.components.command.rememberResolvedCommandMetadata
 import dev.blazelight.p4oc.ui.theme.LocalOpenCodeTheme
 import dev.blazelight.p4oc.ui.theme.Sizing
 import dev.blazelight.p4oc.ui.theme.Spacing
@@ -63,8 +63,6 @@ fun ChatInputBar(
     enabled: Boolean,
     modifier: Modifier = Modifier,
     isBusy: Boolean = false,
-    queuedCount: Int = 0,
-    onQueueMessage: () -> Unit = {},
     onAbort: () -> Unit = {},
     attachedFiles: List<SelectedFile> = emptyList(),
     onAttachClick: () -> Unit = {},
@@ -108,34 +106,29 @@ fun ChatInputBar(
     // Determine button state
     val currentText = textState.text.toString()
     val hasContent = currentText.isNotBlank() || attachedFiles.isNotEmpty()
-    val queueIsFull = queuedCount >= 10
-    val canSend = hasContent && enabled && !isLoading && !isBusy
-    val canQueue = hasContent && enabled && isBusy && !queueIsFull
+    val canSubmit = hasContent && enabled && !isLoading
     val loadingDescription = stringResource(R.string.cd_loading)
     val sendDescription = stringResource(R.string.chat_action_send)
-    val queueDescription = stringResource(R.string.chat_action_queue)
-    val queueFullDescription = stringResource(R.string.chat_action_queue_full)
     val disconnectedDescription = stringResource(R.string.chat_disabled_disconnected)
     val emptyDescription = stringResource(R.string.chat_disabled_empty)
     val attachDescription = stringResource(R.string.chat_action_attach)
     val stopDescription = stringResource(R.string.chat_action_stop)
     val sendContentDescription = when {
         isLoading -> loadingDescription
-        canSend -> sendDescription
-        canQueue -> queueDescription
-        queueIsFull -> queueFullDescription
+        canSubmit -> sendDescription
         !enabled -> disconnectedDescription
         else -> emptyDescription
     }
+    val resolvedCommands = rememberResolvedCommandMetadata(commands)
 
     // Show slash commands popup when input starts with "/"
     val showSlashCommands = currentText.startsWith("/") && !currentText.contains(" ")
-    val filteredCommands = remember(commands, currentText) {
+    val filteredCommands = remember(resolvedCommands, currentText) {
         val searchTerm = currentText.removePrefix("/").lowercase()
         val matches = if (searchTerm.isEmpty()) {
-            commands
+            resolvedCommands
         } else {
-            commands.filter { cmd ->
+            resolvedCommands.filter { cmd ->
                 cmd.name.lowercase().contains(searchTerm) ||
                     cmd.description?.lowercase()?.contains(searchTerm) == true
             }
@@ -162,13 +155,8 @@ fun ChatInputBar(
 
     fun submitFromEnter(): Boolean = when {
         showSlashCommands -> selectActiveCommand()
-        canSend -> {
+        canSubmit -> {
             onSend()
-            clearInput()
-            true
-        }
-        canQueue -> {
-            onQueueMessage()
             clearInput()
             true
         }
@@ -190,34 +178,57 @@ fun ChatInputBar(
                         horizontalArrangement = Arrangement.spacedBy(Spacing.md)
                     ) {
                         attachedFiles.forEach { file ->
-                            Surface(
-                                shape = RectangleShape,
-                                color = theme.accent.copy(alpha = 0.1f),
-                                modifier = Modifier
-                                    .height(Sizing.buttonHeightSm)
-                                    .border(Sizing.strokeMd, theme.border, RectangleShape)
-                            ) {
-                                Row(
-                                    modifier = Modifier.padding(horizontal = Spacing.mdLg),
-                                    verticalAlignment = Alignment.CenterVertically,
-                                    horizontalArrangement = Arrangement.spacedBy(Spacing.sm)
+                            val chipColor = if (file.available) theme.accent else theme.warning
+                            val chipLabelColor = if (file.available) theme.text else theme.warning
+                            val removeDescription = stringResource(
+                                R.string.chat_action_remove_attachment,
+                                file.name,
+                            )
+                            Box(modifier = Modifier.height(48.dp)) {
+                                Surface(
+                                    shape = RectangleShape,
+                                    color = chipColor.copy(alpha = 0.1f),
+                                    modifier = Modifier
+                                        .align(Alignment.Center)
+                                        .height(Sizing.buttonHeightSm)
+                                        .border(Sizing.strokeMd, chipColor, RectangleShape)
                                 ) {
-                                    Text(
-                                        file.name,
-                                        style = MaterialTheme.typography.bodySmall,
-                                        fontFamily = FontFamily.Monospace,
-                                        color = theme.text,
-                                        maxLines = 1,
-                                        overflow = TextOverflow.Ellipsis,
-                                        modifier = Modifier.widthIn(max = Sizing.panelWidthMd)
-                                    )
+                                    Row(
+                                        modifier = Modifier.padding(start = Spacing.mdLg),
+                                        verticalAlignment = Alignment.CenterVertically,
+                                        horizontalArrangement = Arrangement.spacedBy(Spacing.sm)
+                                    ) {
+                                        Text(
+                                            file.name,
+                                            style = MaterialTheme.typography.bodySmall,
+                                            fontFamily = FontFamily.Monospace,
+                                            color = chipLabelColor,
+                                            maxLines = 1,
+                                            overflow = TextOverflow.Ellipsis,
+                                            modifier = Modifier.widthIn(max = Sizing.panelWidthMd)
+                                        )
+                                        if (!file.available) {
+                                            Text(
+                                                text = stringResource(R.string.attachment_unavailable),
+                                                style = MaterialTheme.typography.labelSmall,
+                                                fontFamily = FontFamily.Monospace,
+                                                color = theme.warning,
+                                            )
+                                        }
+                                        Spacer(modifier = Modifier.width(Sizing.iconButtonMd))
+                                    }
+                                }
+                                IconButton(
+                                    onClick = { onRemoveAttachment(file.path) },
+                                    modifier = Modifier
+                                        .align(Alignment.CenterEnd)
+                                        .size(48.dp)
+                                        .semantics { contentDescription = removeDescription }
+                                ) {
                                     Text(
                                         text = "×",
                                         color = theme.textMuted,
                                         fontFamily = FontFamily.Monospace,
-                                        modifier = Modifier.clickable(
-                                            role = Role.Button
-                                        ) { onRemoveAttachment(file.path) }
                                     )
                                 }
                             }
@@ -355,15 +366,12 @@ fun ChatInputBar(
 
                     IconButton(
                         onClick = {
-                            when {
-                                canSend -> onSend()
-                                canQueue -> onQueueMessage()
-                                else -> return@IconButton
-                            }
+                            if (!canSubmit) return@IconButton
+                            onSend()
                             clearInput()
                             focusRequester.requestFocus()
                         },
-                        enabled = canSend || canQueue,
+                        enabled = canSubmit,
                         modifier = Modifier
                             .size(Sizing.iconButtonMd)
                             .semantics { contentDescription = sendContentDescription }
@@ -374,7 +382,7 @@ fun ChatInputBar(
                         } else {
                             Text(
                                 text = "↑",
-                                color = if (canSend || canQueue) theme.accent else theme.textMuted,
+                                color = if (canSubmit) theme.accent else theme.textMuted,
                                 fontFamily = FontFamily.Monospace,
                                 style = MaterialTheme.typography.titleMedium
                             )
@@ -388,7 +396,7 @@ fun ChatInputBar(
         if (showSlashCommands) {
             SlashCommandsPopup(
                 state = SlashCommandsPopupState(
-                    commands = commands,
+                    commands = resolvedCommands,
                     filter = currentText,
                     isLoading = isLoadingCommands,
                     error = commandLoadError,

@@ -57,7 +57,7 @@ class FilePickerManager(
             val effectivePath = path ?: rememberedPath?.ifBlank { null } ?: "."
             val result = loadPickerFilesForPath(workspaceKey, effectivePath)
             if (result is ApiResult.Error && path == null && effectivePath != ".") {
-                AppLog.w(TAG, "Remembered upload folder '$effectivePath' unavailable; falling back to root")
+                AppLog.w(TAG, "Remembered upload folder unavailable; falling back to root")
                 settingsDataStore.setLastUploadDirectory(workspaceKey, null)
                 loadPickerFilesForPath(workspaceKey, ".")
             }
@@ -86,8 +86,8 @@ class FilePickerManager(
                 return ApiResult.Success(Unit)
             }
             is ApiResult.Error -> {
-                AppLog.w(TAG, "Failed to load files for path=$path: ${result.message}")
-                _pickerError.value = result.message
+                AppLog.w(TAG, "Failed to load files")
+                _pickerError.value = "Could not load files. Check the connection and try again."
                 _isPickerLoading.value = false
                 return result
             }
@@ -119,6 +119,25 @@ class FilePickerManager(
 
     fun clearAttachedFiles() {
         _attachedFiles.value = emptyList()
+    }
+
+    suspend fun validateAttachedFiles(): List<SelectedFile> {
+        val current = _attachedFiles.value
+        if (current.isEmpty()) return current
+
+        val validated = current.map { file ->
+            file.copy(available = isWorkspaceFileAvailable(file.path))
+        }
+        _attachedFiles.value = validated
+        return validated
+    }
+
+    private suspend fun isWorkspaceFileAvailable(path: String): Boolean {
+        val parentPath = path.substringBeforeLast('/', missingDelimiterValue = "")
+        return safeApiCall { workspaceClient.listFiles(parentPath) }
+            .getOrNull()
+            ?.any { it.path == path && it.type == "file" }
+            ?: false
     }
 
     fun uploadAndAttach(source: UploadSource, sourceIds: List<String>) {

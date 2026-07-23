@@ -1,6 +1,6 @@
 package dev.blazelight.p4oc.data.session
 
-import dev.blazelight.p4oc.core.network.ConnectionManager
+import dev.blazelight.p4oc.core.network.ServerConnectionRegistry
 import dev.blazelight.p4oc.data.remote.mapper.MessageMapper
 import dev.blazelight.p4oc.data.server.ActiveServerApiProvider
 import dev.blazelight.p4oc.data.workspace.WorkspaceClient
@@ -17,7 +17,7 @@ import kotlinx.coroutines.launch
 class SessionRepositoryProvider(
     private val activeServerApiProvider: ActiveServerApiProvider,
     private val messageMapper: MessageMapper,
-    private val connectionManager: ConnectionManager,
+    private val serverConnectionRegistry: ServerConnectionRegistry,
     dispatcher: CoroutineDispatcher = Dispatchers.Default,
 ) {
     data class Lease(
@@ -44,7 +44,12 @@ class SessionRepositoryProvider(
     fun acquire(workspace: Workspace, generation: ServerGeneration): Lease = synchronized(this) {
         val key = workspace.toProviderKey(generation)
         val entry = entries.getOrPut(key) {
-            val workspaceClient = WorkspaceClient(workspace, generation, activeServerApiProvider)
+            val workspaceClient = WorkspaceClient(
+                workspace = workspace,
+                generation = generation,
+                apiProvider = activeServerApiProvider,
+                connectionState = serverConnectionRegistry.connectionState(workspace.server, generation),
+            )
             val repository = SessionRepositoryImpl(workspaceClient, messageMapper)
             Entry(
                 workspaceClient = workspaceClient,
@@ -75,9 +80,8 @@ class SessionRepositoryProvider(
         generation: ServerGeneration,
         repository: SessionRepositoryImpl,
     ): Job = scope.launch {
-        connectionManager.scopedEvents.collect { scopedEvent ->
-            if (scopedEvent.serverRef == workspace.server &&
-                scopedEvent.generation == generation &&
+        serverConnectionRegistry.events(workspace.server).collect { scopedEvent ->
+            if (scopedEvent.generation == generation &&
                 scopedEvent.workspaceKey == workspace.key
             ) {
                 repository.acceptEvent(scopedEvent.event)

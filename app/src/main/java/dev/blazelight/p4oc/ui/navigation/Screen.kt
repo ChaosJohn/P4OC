@@ -1,10 +1,14 @@
 package dev.blazelight.p4oc.ui.navigation
 
 import android.net.Uri
+import java.net.URLEncoder
+import java.nio.charset.StandardCharsets
 
 sealed class Screen(val route: String) {
     data object Setup : Screen("setup")
     data object Server : Screen("server")
+    data object ServerManagement : Screen("server/manage")
+    data object Home : Screen("home")
     data object Sessions : Screen("sessions")
 
     data object Chat : Screen("chat/{sessionId}") {
@@ -13,7 +17,7 @@ sealed class Screen(val route: String) {
     }
 
     data object Terminal : Screen("terminal/{ptyId}") {
-        fun createRoute(ptyId: String) = "terminal/$ptyId"
+        fun createRoute(ptyId: String) = "terminal/${ptyId.routeEncode()}"
         const val ARG_PTY_ID = "ptyId"
     }
 
@@ -33,13 +37,14 @@ sealed class Screen(val route: String) {
 
     data object SessionDiff : Screen("session_diff/{sessionId}") {
         const val ARG_SESSION_ID = "sessionId"
-        fun createRoute(sessionId: String) = "session_diff/$sessionId"
+        fun createRoute(sessionId: String) = "session_diff/${sessionId.routeEncode()}"
     }
 
     data object ProviderConfig : Screen("settings/providers")
 
     data object Git : Screen("git?projectId={projectId}") {
-        fun createRoute(projectId: String? = null) = if (projectId != null) "git?projectId=$projectId" else "git"
+        fun createRoute(projectId: String? = null) =
+            if (projectId != null) "git?projectId=${projectId.routeEncode()}" else "git"
         const val ARG_PROJECT_ID = "projectId"
     }
 
@@ -68,3 +73,7 @@ sealed class Screen(val route: String) {
 
     data object Projects : Screen("projects")
 }
+
+private fun String.routeEncode(): String = URLEncoder
+    .encode(this, StandardCharsets.UTF_8.name())
+    .replace("+", "%20")

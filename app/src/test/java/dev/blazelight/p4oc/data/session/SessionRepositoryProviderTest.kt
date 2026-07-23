@@ -1,7 +1,8 @@
 package dev.blazelight.p4oc.data.session
 
-import dev.blazelight.p4oc.core.network.ConnectionManager
+import dev.blazelight.p4oc.core.network.ConnectionState
 import dev.blazelight.p4oc.core.network.OpenCodeApi
+import dev.blazelight.p4oc.core.network.ServerConnectionRegistry
 import dev.blazelight.p4oc.data.remote.mapper.MessageMapper
 import dev.blazelight.p4oc.data.server.ActiveServerApiProvider
 import dev.blazelight.p4oc.domain.model.OpenCodeEvent
@@ -14,6 +15,7 @@ import io.mockk.every
 import io.mockk.mockk
 import kotlinx.coroutines.CoroutineDispatcher
 import kotlinx.coroutines.flow.Flow
+import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.emptyFlow
 import kotlinx.coroutines.flow.flowOf
 import kotlinx.coroutines.test.StandardTestDispatcher
@@ -76,6 +78,35 @@ class SessionRepositoryProviderTest {
     }
 
     @Test
+    fun `same directory on different servers gets separate repositories`() {
+        val provider = provider()
+        val otherServer = ServerRef.fromEndpointKey("http://other.test:4096")
+        val otherWorkspace = Workspace(server = otherServer, directory = workspace.directory.orEmpty())
+
+        val first = provider.acquire(workspace, generation)
+        val second = provider.acquire(otherWorkspace, generation)
+
+        assertNotSame(first.repository, second.repository)
+        assertNotSame(first.workspaceClient, second.workspaceClient)
+    }
+
+    @Test
+    fun `reconnect generation recreates only affected server workspace owner`() {
+        val provider = provider()
+        val otherServer = ServerRef.fromEndpointKey("http://other.test:4096")
+        val otherWorkspace = Workspace(server = otherServer, directory = workspace.directory.orEmpty())
+        val first = provider.acquire(workspace, generation)
+        val other = provider.acquire(otherWorkspace, generation)
+
+        provider.release(workspace, generation)
+        val afterReconnect = provider.acquire(workspace, ServerGeneration(2))
+        val otherAgain = provider.acquire(otherWorkspace, generation)
+
+        assertNotSame(first.repository, afterReconnect.repository)
+        assertSame(other.repository, otherAgain.repository)
+    }
+
+    @Test
     fun `provider routes scoped events to shared repository`() = runTest {
         val event = sessionCreatedEvent("s1")
         val provider = provider(
@@ -102,8 +133,12 @@ class SessionRepositoryProviderTest {
     ): SessionRepositoryProvider = SessionRepositoryProvider(
         activeServerApiProvider = ActiveServerApiProvider { _, _ -> mockk<OpenCodeApi>(relaxed = true) },
         messageMapper = MessageMapper(Json { ignoreUnknownKeys = true }),
-        connectionManager = mockk<ConnectionManager> {
-            every { this@mockk.scopedEvents } returns scopedEvents
+        serverConnectionRegistry = mockk<ServerConnectionRegistry> {
+            every { events(any()) } returns scopedEvents
+            every { connectionState(any(), ServerGeneration(1)) } returns
+                MutableStateFlow(ConnectionState.Connected)
+            every { connectionState(any(), ServerGeneration(2)) } returns
+                MutableStateFlow(ConnectionState.Connected)
         },
         dispatcher = dispatcher,
     )

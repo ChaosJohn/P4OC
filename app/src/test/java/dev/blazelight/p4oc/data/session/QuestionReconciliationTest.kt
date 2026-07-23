@@ -303,6 +303,7 @@ class QuestionReconciliationTest {
     }
 
     @Test
+    @Suppress("LongMethod")
     fun `clearQuestion with requestId records dedup id`() = runTest {
         val sessionId = "sess_001"
         val questionId = "que_001"
@@ -347,10 +348,21 @@ class QuestionReconciliationTest {
                 )
             )
         )
+        repository.acceptEvent(
+            OpenCodeEvent.QuestionAsked(
+                QuestionRequest(
+                    id = questionId,
+                    sessionID = sessionId,
+                    questions = emptyList(),
+                    tool = null,
+                )
+            )
+        )
         advanceUntilIdle()
 
         var sessionState = repository.sessionUiState(SessionId(sessionId))
         assertNotNull("pendingQuestion should be set", sessionState.value.pendingQuestion)
+        assertEquals(emptyList<QuestionRequest>(), sessionState.value.queuedQuestions)
 
         // Clear with requestId (dismissQuestion path)
         repository.clearQuestion(SessionId(sessionId), questionId)

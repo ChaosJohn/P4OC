@@ -23,8 +23,8 @@ object Sizing {
     val iconHero: Dp = 64.dp // Empty state icons
     val iconHeroLg: Dp = 96.dp // Large decorative icons
 
-    // Touch targets - Android minimum is 48dp, we use 44dp for density
-    val minTouchTarget: Dp = 44.dp
+    // Touch targets - Android accessibility minimum is 48dp.
+    val minTouchTarget: Dp = 48.dp
     val touchTargetSm: Dp = 36.dp // Compact buttons (with hit area extension)
 
     // Buttons
@@ -67,6 +67,7 @@ object Sizing {
     val panelWidthSm: Dp = 80.dp
     val panelWidthMd: Dp = 120.dp
     val panelWidthLg: Dp = 180.dp
+    val serverFilterCardWidth: Dp = 104.dp
 
     // Scrollable embedded content (e.g. inline full-text blocks)
     val embeddedScrollMaxHeight: Dp = 360.dp

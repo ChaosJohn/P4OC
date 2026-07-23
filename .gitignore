@@ -73,5 +73,9 @@ detekt-*.html
 detekt-*.txt
 repomix-*.xml
 temp_research/
+BUG_FIXING.md
+msg.txt
+local-adb-screenshots/
+.opencode/package-lock.json
 *.png
 !screenshots/*.png

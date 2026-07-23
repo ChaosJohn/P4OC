@@ -7,16 +7,21 @@ import dev.blazelight.p4oc.core.datastore.SettingsDataStore
 import dev.blazelight.p4oc.core.datastore.VisualSettings
 import dev.blazelight.p4oc.core.haptic.HapticFeedback
 import dev.blazelight.p4oc.core.log.AppLog
-import dev.blazelight.p4oc.core.network.Connection
-import dev.blazelight.p4oc.core.network.ConnectionManager
 import dev.blazelight.p4oc.core.network.ConnectionState
 import dev.blazelight.p4oc.core.network.OpenCodeApi
-import dev.blazelight.p4oc.core.network.OpenCodeEventSource
-import dev.blazelight.p4oc.core.network.ServerConfig
 import dev.blazelight.p4oc.data.files.FileRepository
 import dev.blazelight.p4oc.data.files.FileRepositoryFactory
 import dev.blazelight.p4oc.data.remote.dto.CommandDto
+import dev.blazelight.p4oc.data.remote.dto.FileNodeDto
+import dev.blazelight.p4oc.data.remote.dto.MessageInfoDto
+import dev.blazelight.p4oc.data.remote.dto.MessageTimeDto
+import dev.blazelight.p4oc.data.remote.dto.MessageWrapperDto
+import dev.blazelight.p4oc.data.remote.dto.ModelRefDto
+import dev.blazelight.p4oc.data.remote.dto.RevertSessionRequest
 import dev.blazelight.p4oc.data.remote.dto.SendMessageRequest
+import dev.blazelight.p4oc.data.remote.dto.SessionDto
+import dev.blazelight.p4oc.data.remote.dto.SessionRevertDto
+import dev.blazelight.p4oc.data.remote.dto.TimeDto
 import dev.blazelight.p4oc.data.remote.mapper.MessageMapper
 import dev.blazelight.p4oc.data.server.ActiveServerApiProvider
 import dev.blazelight.p4oc.data.session.SessionRepositoryImpl
@@ -59,6 +64,7 @@ import kotlinx.coroutines.test.advanceUntilIdle
 import kotlinx.coroutines.test.resetMain
 import kotlinx.coroutines.test.runTest
 import kotlinx.coroutines.test.setMain
+import kotlinx.serialization.json.Json
 import kotlinx.serialization.json.buildJsonObject
 import okhttp3.ResponseBody.Companion.toResponseBody
 import org.junit.After
@@ -80,10 +86,8 @@ class ChatViewModelTest {
     @get:Rule
     val mainDispatcherRule = ChatViewModelMainDispatcherRule()
 
-    private lateinit var connectionManager: ConnectionManager
     private lateinit var messageMapper: MessageMapper
     private lateinit var settingsDataStore: SettingsDataStore
-    private lateinit var eventSource: OpenCodeEventSource
     private lateinit var events: MutableSharedFlow<ScopedEvent>
     private lateinit var api: OpenCodeApi
     private lateinit var workspaceClient: WorkspaceClient
@@ -104,10 +108,8 @@ class ChatViewModelTest {
         every { AppLog.e(any(), any<String>()) } returns Unit
         every { AppLog.e(any(), any<String>(), any()) } returns Unit
 
-        connectionManager = mockk()
-        messageMapper = mockk(relaxed = true)
+        messageMapper = MessageMapper(Json { ignoreUnknownKeys = true })
         settingsDataStore = mockk()
-        eventSource = mockk()
         events = MutableSharedFlow(extraBufferCapacity = 32)
         api = mockk(relaxed = true)
         workspaceClient = WorkspaceClient(
@@ -117,23 +119,8 @@ class ChatViewModelTest {
             ),
             generation = ServerGeneration(0L),
             apiProvider = ActiveServerApiProvider { _, _ -> api },
+            connectionState = MutableStateFlow(ConnectionState.Disconnected),
         )
-        every { connectionManager.connectionState } returns MutableStateFlow(ConnectionState.Disconnected)
-        every { connectionManager.getApi() } returns api
-        every { connectionManager.getEventSource() } returns eventSource
-        every { eventSource.events } returns MutableSharedFlow(extraBufferCapacity = 32)
-
-        // Mock connectionManager.connection with a Connection wrapping the test eventSource
-        // so that observeEvents() can flatMapLatest into the events flow
-        val testConnection = Connection(
-            config = ServerConfig.LOCAL_DEFAULT,
-            generation = ServerGeneration(0L),
-            api = api,
-            eventSource = eventSource
-        )
-        every { connectionManager.connection } returns MutableStateFlow(testConnection)
-        every { connectionManager.scopedEvents } returns events
-
         every { settingsDataStore.favoriteModels } returns flowOf(emptySet())
         every { settingsDataStore.recentModels } returns flowOf(emptyList())
         every { settingsDataStore.chatSettings } returns flowOf(ChatSettings())
@@ -159,6 +146,52 @@ class ChatViewModelTest {
         flushMessages()
 
         assertEquals(listOf("m1"), vm.currentMessages().map { it.message.id })
+    }
+
+    @Test
+    fun initialHistoryLoad_isBounded() = runTest {
+        coEvery { api.getMessages("session-1", 100, null, "/test", null) } returns emptyList()
+
+        createViewModel()
+
+        coVerify(exactly = 1) { api.getMessages("session-1", 100, null, "/test", null) }
+        coVerify(exactly = 0) { api.getMessages("session-1", null, null, any(), null) }
+    }
+
+    @Test
+    fun loadOlderMessages_increasesBoundAndPreservesChronologicalHistory() = runTest {
+        val newest = (101L..200L).map { assistantMessageDto("m$it", createdAt = it) }
+        val expanded = (1L..200L).map { assistantMessageDto("m$it", createdAt = it) }
+        coEvery { api.getMessages("session-1", 100, null, "/test", null) } returns newest
+        coEvery { api.getMessages("session-1", 200, null, "/test", null) } returns expanded
+        val vm = createViewModel()
+
+        assertTrue(vm.uiState.value.hasOlderMessages)
+        vm.loadOlderMessages()
+        advanceUntilIdle()
+
+        coVerify(exactly = 1) { api.getMessages("session-1", 200, null, "/test", null) }
+        assertEquals((1L..200L).map { "m$it" }, vm.currentMessages().map { it.message.id })
+        assertTrue(vm.uiState.value.hasOlderMessages)
+    }
+
+    @Test
+    fun loadOlderMessages_doesNotOverwriteMessageDeliveredDuringHistoryWindow() = runTest {
+        val newest = (101L..200L).map { assistantMessageDto("m$it", createdAt = it) }
+        val expanded = (1L..200L).map { assistantMessageDto("m$it", createdAt = it) }
+        coEvery { api.getMessages("session-1", 100, null, "/test", null) } returns newest
+        coEvery { api.getMessages("session-1", 200, null, "/test", null) } returns expanded
+        val vm = createViewModel()
+        sessionRepository.acceptEvent(
+            OpenCodeEvent.MessageUpdated(assistantMessage("m200", "session-1", createdAt = 999))
+        )
+
+        vm.loadOlderMessages()
+        advanceUntilIdle()
+
+        val raced = vm.currentMessages().filter { it.message.id == "m200" }
+        assertEquals(1, raced.size)
+        assertEquals(999, raced.single().message.createdAt)
     }
 
     @Test
@@ -309,15 +342,68 @@ class ChatViewModelTest {
     }
 
     @Test
+    fun sendMessage_undoSlashCommand_revertsToPreviousUserMessageBoundaryWithoutExecutingCommand() =
+        runTest {
+            coEvery { api.getSession("session-1", any(), null) } returns sessionDto(revertMessageId = "user-2")
+            coEvery { api.getMessages("session-1", any(), null, any(), null) } returns listOf(
+                userMessageDto("user-1", createdAt = 1),
+                assistantMessageDto("assistant-1", createdAt = 2),
+                userMessageDto("user-2", createdAt = 3),
+                assistantMessageDto("assistant-2", createdAt = 4),
+            )
+            coEvery { api.revertSession(any(), any(), any(), null) } returns sessionDto(revertMessageId = "user-1")
+            coEvery { api.executeCommand(any(), any(), any(), null) } returns assistantMessageDto(
+                "command-response",
+                createdAt = 5
+            )
+            val vm = createViewModel()
+
+            vm.updateInput("/undo")
+            vm.sendMessage()
+            advanceUntilIdle()
+
+            coVerify(exactly = 0) { api.executeCommand(any(), any(), any(), null) }
+            coVerify(exactly = 1) {
+                api.revertSession("session-1", RevertSessionRequest(messageID = "user-1"), "/test", null)
+            }
+        }
+
+    @Test
+    fun sendMessage_redoSlashCommandWithActiveRevert_revertsToNextUserMessageBoundaryWithoutExecutingCommand() =
+        runTest {
+            coEvery { api.getSession("session-1", any(), null) } returns sessionDto(revertMessageId = "user-1")
+            coEvery { api.getMessages("session-1", any(), null, any(), null) } returns listOf(
+                userMessageDto("user-1", createdAt = 1),
+                assistantMessageDto("assistant-1", createdAt = 2),
+                userMessageDto("user-2", createdAt = 3),
+                assistantMessageDto("assistant-2", createdAt = 4),
+            )
+            coEvery { api.revertSession(any(), any(), any(), null) } returns sessionDto(revertMessageId = "user-2")
+            coEvery { api.unrevertSession(any(), any(), null) } returns sessionDto(revertMessageId = null)
+            coEvery { api.executeCommand(any(), any(), any(), null) } returns assistantMessageDto(
+                "command-response",
+                createdAt = 5
+            )
+            val vm = createViewModel()
+
+            vm.updateInput("/redo")
+            vm.sendMessage()
+            advanceUntilIdle()
+
+            coVerify(exactly = 0) { api.executeCommand(any(), any(), any(), null) }
+            coVerify(exactly = 1) {
+                api.revertSession("session-1", RevertSessionRequest(messageID = "user-2"), "/test", null)
+            }
+            coVerify(exactly = 0) { api.unrevertSession(any(), any(), null) }
+        }
+
+    @Test
     fun sendMessage_clearsInput_andMarksBusyUntilSseStatus() = runTest {
         val vm = createViewModel()
-        coEvery { api.sendMessageAsync(any(), any(), any()) } returns Unit
+        coEvery { api.sendMessageAsync(any(), any(), any(), null) } returns Unit
         vm.updateInput("hello")
 
         vm.sendMessage()
-
-        assertEquals("", vm.uiState.value.inputText)
-        // isSending is set to true synchronously before the coroutine launches
         assertTrue(vm.uiState.value.isSending)
 
         advanceUntilIdle()
@@ -330,7 +416,7 @@ class ChatViewModelTest {
     fun sendMessage_restoresInput_onApiError() = runTest {
         val vm = createViewModel()
 
-        coEvery { api.sendMessageAsync(any(), any(), any()) } throws RuntimeException("boom")
+        coEvery { api.sendMessageAsync(any(), any(), any(), null) } throws RuntimeException("boom")
 
         vm.updateInput("hello")
         vm.sendMessage()
@@ -338,14 +424,25 @@ class ChatViewModelTest {
 
         assertEquals("hello", vm.uiState.value.inputText)
         assertFalse(vm.uiState.value.isSending)
-        assertTrue(vm.uiState.value.error?.contains("boom") == true)
+        assertEquals(
+            "Could not send the message. Check the connection and try again.",
+            vm.uiState.value.error,
+        )
     }
 
     @Test
     fun sendMessage_sendsBackendFileUrls_forWorkspaceAttachmentsWithSpecialCharacters() = runTest {
         val vm = createViewModel()
         val request = slot<SendMessageRequest>()
-        coEvery { api.sendMessageAsync(any(), capture(request), any()) } returns Unit
+        coEvery { api.sendMessageAsync(any(), capture(request), any(), null) } returns Unit
+        coEvery { api.listFiles("src/My File %/ümlaut/こんにちは", "/test", null) } returns listOf(
+            FileNodeDto(
+                name = "hash#query?.kt",
+                path = "src/My File %/ümlaut/こんにちは/hash#query?.kt",
+                absolute = "/test/src/My File %/ümlaut/こんにちは/hash#query?.kt",
+                type = "file",
+            )
+        )
         vm.filePickerManager.restoreAttachedFiles(
             listOf(
                 SelectedFile(
@@ -359,7 +456,7 @@ class ChatViewModelTest {
         vm.sendMessage()
         advanceUntilIdle()
 
-        coVerify { api.sendMessageAsync("session-1", any(), "/test") }
+        coVerify { api.sendMessageAsync("session-1", any(), "/test", null) }
         assertEquals(
             "file:/test/src/My%20File%20%25/%C3%BCmlaut/%E3%81%93%E3%82%93%E3%81%AB%E3%81%A1%E3%81%AF/hash%23query%3F.kt",
             request.captured.parts.single().url,
@@ -367,65 +464,10 @@ class ChatViewModelTest {
     }
 
     @Test
-    fun queueMessage_appendsToQueue_andClearsInput() = runTest {
-        val vm = createViewModel()
-        vm.updateInput("queued text")
-
-        vm.queueMessage()
-
-        assertEquals("", vm.uiState.value.inputText)
-        assertEquals(listOf("queued text"), vm.uiState.value.queuedMessages.map { it.text })
-    }
-
-    @Test
-    fun queueMessage_preservesFifoOrder() = runTest {
-        val vm = createViewModel()
-
-        vm.updateInput("first")
-        vm.queueMessage()
-        vm.updateInput("second")
-        vm.queueMessage()
-        vm.updateInput("third")
-        vm.queueMessage()
-
-        assertEquals(listOf("first", "second", "third"), vm.uiState.value.queuedMessages.map { it.text })
-    }
-
-    @Test
-    fun queueMessage_capsAtTenEntries() = runTest {
-        val vm = createViewModel()
-
-        repeat(10) { index ->
-            vm.updateInput("queued-$index")
-            vm.queueMessage()
-        }
-        vm.updateInput("overflow")
-        vm.queueMessage()
-
-        assertEquals(10, vm.uiState.value.queuedMessages.size)
-        assertFalse(vm.uiState.value.queuedMessages.any { it.text == "overflow" })
-    }
-
-    @Test
-    fun cancelQueuedMessage_removesMatchingEntry() = runTest {
-        val vm = createViewModel()
-
-        vm.updateInput("first")
-        vm.queueMessage()
-        vm.updateInput("second")
-        vm.queueMessage()
-        val cancelId = vm.uiState.value.queuedMessages.first().id
-
-        vm.cancelQueuedMessage(cancelId)
-
-        assertEquals(listOf("second"), vm.uiState.value.queuedMessages.map { it.text })
-    }
-
-    @Test
     fun abortSession_clearsStreamingFlags_andBusyState() = runTest {
         val vm = createViewModel()
 
-        coEvery { api.abortSession(any(), any()) } returns Response.success(Unit)
+        coEvery { api.abortSession(any(), any(), null) } returns Response.success(Unit)
         emitEvent(OpenCodeEvent.MessageUpdated(assistantMessage(id = "m1", sessionId = "session-1", createdAt = 1)))
         emitEvent(
             OpenCodeEvent.MessagePartUpdated(
@@ -455,12 +497,12 @@ class ChatViewModelTest {
     fun abortSession_sanitizesUnexpectedJsonErrors() = runTest {
         val vm = createViewModel()
 
-        coEvery { api.abortSession(any(), any()) } throws RuntimeException("{\"error\":\"boom\"}")
+        coEvery { api.abortSession(any(), any(), null) } throws RuntimeException("{\"error\":\"boom\"}")
 
         vm.abortSession()
         flushMessages()
 
-        assertEquals("Failed to stop run: Unable to stop run", vm.uiState.value.error)
+        assertEquals("Could not stop the run. Try again.", vm.uiState.value.error)
     }
 
     @Test
@@ -483,7 +525,7 @@ class ChatViewModelTest {
 
     @Test
     fun loadSession_notFound_emitsSessionMissing() = runTest {
-        coEvery { api.getSession("session-1", any()) } throws httpNotFound()
+        coEvery { api.getSession("session-1", any(), null) } throws httpNotFound()
 
         val vm = createViewModel()
         advanceUntilIdle()
@@ -495,16 +537,16 @@ class ChatViewModelTest {
     @Test
     fun loadCommands_failureKeepsBuiltIns_andAllowsRetryForWorkspaceCommands() = runTest {
         val vm = createViewModel()
-        coEvery { api.listCommands(any()) } throws RuntimeException("network down")
+        coEvery { api.listCommands(any(), null) } throws RuntimeException("network down")
 
         vm.loadCommands()
         advanceUntilIdle()
 
         assertTrue(vm.uiState.value.commands.any { it.name == "help" })
         assertFalse(vm.uiState.value.hasLoadedWorkspaceCommands)
-        assertEquals("network down", vm.uiState.value.commandLoadError)
+        assertEquals("Could not load workspace commands. Try again.", vm.uiState.value.commandLoadError)
 
-        coEvery { api.listCommands(any()) } returns listOf(
+        coEvery { api.listCommands(any(), null) } returns listOf(
             CommandDto(name = "workspace", description = "Workspace command")
         )
 
@@ -516,7 +558,63 @@ class ChatViewModelTest {
         assertNull(vm.uiState.value.commandLoadError)
     }
 
-    private fun TestScope.createViewModel(): ChatViewModel {
+    @Test
+    fun executeCommand_undoPaletteSelection_revertsToPreviousUserMessageBoundaryWithoutExecutingCommandEndpoint() =
+        runTest {
+            coEvery { api.getSession("session-1", any(), null) } returns sessionDto(revertMessageId = "user-2")
+            coEvery { api.getMessages("session-1", any(), null, any(), null) } returns listOf(
+                userMessageDto("user-1", createdAt = 1),
+                assistantMessageDto("assistant-1", createdAt = 2),
+                userMessageDto("user-2", createdAt = 3),
+                assistantMessageDto("assistant-2", createdAt = 4),
+            )
+            coEvery { api.revertSession(any(), any(), any(), null) } returns sessionDto(revertMessageId = "user-1")
+            coEvery { api.executeCommand(any(), any(), any(), null) } returns assistantMessageDto(
+                "command-response",
+                createdAt = 5
+            )
+            val vm = createViewModel()
+
+            vm.executeCommand("undo", "")
+            advanceUntilIdle()
+
+            coVerify(exactly = 0) { api.executeCommand(any(), any(), any(), null) }
+            coVerify(exactly = 1) {
+                api.revertSession("session-1", RevertSessionRequest(messageID = "user-1"), "/test", null)
+            }
+        }
+
+    @Test
+    fun executeCommand_redoPaletteSelectionWithActiveRevert_usesRevertBoundaryNotCommandEndpoint() =
+        runTest {
+            coEvery { api.getSession("session-1", any(), null) } returns sessionDto(revertMessageId = "user-1")
+            coEvery { api.getMessages("session-1", any(), null, any(), null) } returns listOf(
+                userMessageDto("user-1", createdAt = 1),
+                assistantMessageDto("assistant-1", createdAt = 2),
+                userMessageDto("user-2", createdAt = 3),
+                assistantMessageDto("assistant-2", createdAt = 4),
+            )
+            coEvery { api.revertSession(any(), any(), any(), null) } returns sessionDto(revertMessageId = "user-2")
+            coEvery { api.unrevertSession(any(), any(), null) } returns sessionDto(revertMessageId = null)
+            coEvery { api.executeCommand(any(), any(), any(), null) } returns assistantMessageDto(
+                "command-response",
+                createdAt = 5
+            )
+            val vm = createViewModel()
+
+            vm.executeCommand("redo", "")
+            advanceUntilIdle()
+
+            coVerify(exactly = 0) { api.executeCommand(any(), any(), any(), null) }
+            coVerify(exactly = 1) {
+                api.revertSession("session-1", RevertSessionRequest(messageID = "user-2"), "/test", null)
+            }
+            coVerify(exactly = 0) { api.unrevertSession(any(), any(), null) }
+        }
+
+    private fun TestScope.createViewModel(
+        savedStateHandle: SavedStateHandle = SavedStateHandle(mapOf(Screen.Chat.ARG_SESSION_ID to "session-1"))
+    ): ChatViewModel {
         sessionRepository = SessionRepositoryImpl(
             workspaceClient,
             messageMapper,
@@ -524,11 +622,10 @@ class ChatViewModelTest {
         )
         val fileRepository = testFileRepository()
         val vm = ChatViewModel(
-            savedStateHandle = SavedStateHandle(mapOf(Screen.Chat.ARG_SESSION_ID to "session-1")),
+            savedStateHandle = savedStateHandle,
             workspaceClient = workspaceClient,
             sessionRepository = sessionRepository,
             uploadCoordinator = testUploadCoordinator(fileRepository),
-            connectionManager = connectionManager,
             settingsDataStore = settingsDataStore,
             hapticFeedback = hapticFeedback,
         )
@@ -562,6 +659,49 @@ class ChatViewModelTest {
 
     private fun ChatViewModel.currentMessages(): List<MessageWithParts> =
         messages.value
+
+    private fun sessionDto(revertMessageId: String? = null): SessionDto {
+        return SessionDto(
+            id = "session-1",
+            projectID = "project-1",
+            directory = "/test",
+            title = "Test Session",
+            version = "1.0",
+            time = TimeDto(created = 1, updated = 2),
+            revert = revertMessageId?.let { SessionRevertDto(messageID = it) },
+        )
+    }
+
+    private fun userMessageDto(id: String, createdAt: Long): MessageWrapperDto {
+        return MessageWrapperDto(
+            info = MessageInfoDto(
+                id = id,
+                sessionID = "session-1",
+                time = MessageTimeDto(created = createdAt),
+                role = "user",
+                agent = "build",
+                model = ModelRefDto(providerID = "provider", modelID = "model"),
+            ),
+            parts = emptyList(),
+        )
+    }
+
+    private fun assistantMessageDto(id: String, createdAt: Long): MessageWrapperDto {
+        return MessageWrapperDto(
+            info = MessageInfoDto(
+                id = id,
+                sessionID = "session-1",
+                time = MessageTimeDto(created = createdAt),
+                role = "assistant",
+                parentID = "",
+                providerID = "provider",
+                modelID = "model",
+                agent = "assistant",
+                mode = "chat",
+            ),
+            parts = emptyList(),
+        )
+    }
 
     private fun assistantMessage(id: String, sessionId: String, createdAt: Long): Message.Assistant {
         return Message.Assistant(

@@ -47,4 +47,18 @@ internal object OfishShellOutputExtractor {
             part.state?.error?.takeIf { it.isNotBlank() }?.let { appendLine(it) }
         }
     }
+
+    fun extractMutationSegment(message: MessageWrapperDto, expectedMarker: String): String? {
+        fun String.containsMarker(): Boolean = lineSequence().any { it == expectedMarker }
+
+        // Shell tool state is authoritative. Text parts are only a compatibility fallback for
+        // servers that return command output as assistant text rather than structured tool state.
+        val stateSegments = message.parts.flatMap { part ->
+            listOfNotNull(part.state?.output, part.state?.raw, part.state?.error)
+        }
+        return stateSegments.lastOrNull { it.containsMarker() }
+            ?: message.parts.asReversed().firstNotNullOfOrNull { part ->
+                part.text?.takeIf { it.containsMarker() }
+            }
+    }
 }

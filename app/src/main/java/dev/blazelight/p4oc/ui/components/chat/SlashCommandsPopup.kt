@@ -15,19 +15,21 @@ import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.RectangleShape
-import androidx.compose.ui.unit.IntOffset
-import androidx.compose.ui.unit.IntRect
-import androidx.compose.ui.unit.IntSize
-import androidx.compose.ui.unit.LayoutDirection
 import androidx.compose.ui.platform.testTag
+import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.semantics.Role
 import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
+import androidx.compose.ui.unit.IntOffset
+import androidx.compose.ui.unit.IntRect
+import androidx.compose.ui.unit.IntSize
+import androidx.compose.ui.unit.LayoutDirection
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.window.Popup
 import androidx.compose.ui.window.PopupPositionProvider
 import androidx.compose.ui.window.PopupProperties
+import dev.blazelight.p4oc.R
 import dev.blazelight.p4oc.domain.model.Command
 import dev.blazelight.p4oc.domain.model.CommandSource
 import dev.blazelight.p4oc.ui.theme.LocalOpenCodeTheme
@@ -81,7 +83,7 @@ fun SlashCommandsPopup(
             ) {
                 when {
                     state.isLoading && filteredCommands.isEmpty() -> {
-                        item { SlashCommandMessage(text = "Loading workspace commands...") }
+                        item { SlashCommandMessage(text = stringResource(R.string.slash_commands_loading)) }
                     }
                     state.error != null -> {
                         item { SlashCommandError(text = state.error, onRetry = callbacks.onRetry) }
@@ -89,7 +91,10 @@ fun SlashCommandsPopup(
                     }
                     filteredCommands.isEmpty() -> item {
                         SlashCommandMessage(
-                            text = "No commands match ${state.filter}",
+                            text = stringResource(
+                                R.string.slash_commands_no_match,
+                                state.filter,
+                            ),
                             modifier = Modifier.testTag("slash_commands_empty")
                         )
                     }
@@ -102,7 +107,7 @@ fun SlashCommandsPopup(
     }
 }
 
-private class AboveAnchorPopupPositionProvider : PopupPositionProvider {
+internal class AboveAnchorPopupPositionProvider : PopupPositionProvider {
     override fun calculatePosition(
         anchorBounds: IntRect,
         windowSize: IntSize,
@@ -136,8 +141,12 @@ private fun rememberFilteredCommands(
     commands: List<Command>,
     filter: String
 ): List<Command> = remember(commands, filter) {
+    filterSlashCommands(commands, filter)
+}
+
+internal fun filterSlashCommands(commands: List<Command>, filter: String): List<Command> {
     val searchTerm = filter.removePrefix("/").lowercase()
-    if (searchTerm.isEmpty()) {
+    return if (searchTerm.isEmpty()) {
         commands
     } else {
         commands.filter { command ->
@@ -202,11 +211,12 @@ private fun SlashCommandError(
         )
         Icon(
             imageVector = Icons.Default.Refresh,
-            contentDescription = "Retry loading commands",
+            contentDescription = stringResource(R.string.slash_commands_retry_loading),
             tint = theme.accent,
             modifier = Modifier
-                .size(Sizing.iconSm)
+                .size(Sizing.minTouchTarget)
                 .clickable(role = Role.Button, onClick = onRetry)
+                .padding((Sizing.minTouchTarget - Sizing.iconSm) / 2)
         )
     }
 }
@@ -229,18 +239,28 @@ private fun SlashCommandItem(
         verticalAlignment = Alignment.CenterVertically,
         horizontalArrangement = Arrangement.spacedBy(Spacing.sm)
     ) {
+        Column(modifier = Modifier.weight(1f)) {
+            Text(
+                text = "/${command.name}",
+                color = theme.accent,
+                style = MaterialTheme.typography.bodySmall,
+                fontFamily = FontFamily.Monospace,
+                fontWeight = FontWeight.Medium,
+                maxLines = 1,
+                overflow = TextOverflow.Ellipsis,
+            )
+            command.description?.let { description ->
+                Text(
+                    text = description,
+                    style = MaterialTheme.typography.labelSmall,
+                    color = theme.textMuted,
+                    maxLines = 1,
+                    overflow = TextOverflow.Ellipsis,
+                )
+            }
+        }
         Text(
-            text = "/${command.name}",
-            color = theme.accent,
-            style = MaterialTheme.typography.bodySmall,
-            fontFamily = FontFamily.Monospace,
-            fontWeight = FontWeight.Medium,
-            maxLines = 1,
-            overflow = TextOverflow.Ellipsis,
-            modifier = Modifier.weight(1f)
-        )
-        Text(
-            text = command.source.compactLabel(),
+            text = slashCommandSourceCompactLabel(command.source),
             style = MaterialTheme.typography.labelSmall,
             fontFamily = FontFamily.Monospace,
             color = command.source.badgeColor(),
@@ -258,7 +278,7 @@ private fun CommandSource.badgeColor() = when (this) {
     CommandSource.Subtask -> LocalOpenCodeTheme.current.info
 }
 
-private fun CommandSource.compactLabel(): String = when (this) {
+internal fun slashCommandSourceCompactLabel(source: CommandSource): String = when (source) {
     CommandSource.BuiltIn -> "[bi]"
     CommandSource.Skill -> "[skill]"
     CommandSource.Mcp -> "[mcp]"

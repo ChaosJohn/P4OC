@@ -9,6 +9,7 @@ import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.selection.selectable
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.*
@@ -414,7 +415,10 @@ private fun VibrationPatternDialog(
             Row(
                 modifier = Modifier
                     .fillMaxWidth()
-                    .clickable(role = Role.Button) {
+                    .selectable(
+                        selected = selectedPattern == pattern,
+                        role = Role.RadioButton,
+                    ) {
                         selectedPattern = pattern
                         onPreview(pattern)
                     }
@@ -425,10 +429,7 @@ private fun VibrationPatternDialog(
             ) {
                 RadioButton(
                     selected = selectedPattern == pattern,
-                    onClick = {
-                        selectedPattern = pattern
-                        onPreview(pattern)
-                    }
+                    onClick = null,
                 )
                 Text(
                     text = stringResource(pattern.labelRes()),

@@ -109,7 +109,7 @@ fun TuiOutlinedCard(
 // =============================================================================
 
 /**
- * TUI-style filled button with compact height.
+ * TUI-style filled button with compact chrome and an accessible touch target.
  */
 @Composable
 fun TuiButton(
@@ -122,7 +122,9 @@ fun TuiButton(
 ) {
     Button(
         onClick = onClick,
-        modifier = modifier.height(Sizing.buttonHeightMd),
+        modifier = modifier
+            .minimumInteractiveComponentSize()
+            .heightIn(min = Sizing.minTouchTarget),
         enabled = enabled,
         colors = colors,
         shape = RectangleShape,
@@ -145,7 +147,9 @@ fun TuiOutlinedButton(
 ) {
     OutlinedButton(
         onClick = onClick,
-        modifier = modifier.height(Sizing.buttonHeightMd),
+        modifier = modifier
+            .minimumInteractiveComponentSize()
+            .heightIn(min = Sizing.minTouchTarget),
         enabled = enabled,
         colors = colors,
         shape = RectangleShape,
@@ -168,7 +172,9 @@ fun TuiTextButton(
 ) {
     TextButton(
         onClick = onClick,
-        modifier = modifier.height(Sizing.buttonHeightMd),
+        modifier = modifier
+            .minimumInteractiveComponentSize()
+            .heightIn(min = Sizing.minTouchTarget),
         enabled = enabled,
         colors = colors,
         shape = RectangleShape,
@@ -190,7 +196,12 @@ fun TuiIconButton(
 ) {
     IconButton(
         onClick = onClick,
-        modifier = modifier.size(Sizing.iconButtonMd),
+        modifier = modifier
+            .minimumInteractiveComponentSize()
+            .sizeIn(
+                minWidth = Sizing.minTouchTarget,
+                minHeight = Sizing.minTouchTarget,
+            ),
         enabled = enabled,
         colors = colors,
         content = content

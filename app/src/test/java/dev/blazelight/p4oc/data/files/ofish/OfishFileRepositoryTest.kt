@@ -36,6 +36,8 @@ class OfishFileRepositoryTest {
         hasRm = true,
         hasAwk = true,
         hasMktemp = true,
+        hasChmod = true,
+        modeCommand = ModeCommand.STAT_GNU,
     )
 
     @Test
@@ -220,7 +222,11 @@ class OfishFileRepositoryTest {
             val script = encoded?.let { String(java.util.Base64.getDecoder().decode(it), Charsets.UTF_8) }.orEmpty()
             val responseText = if (script.contains("#OFISH_HASH")) {
                 val path = hashFor.keys.firstOrNull { script.contains(it) }
-                if (path != null) "### 200 ok hash=${hashFor.getValue(path)}" else "### 200 ok"
+                if (path != null) {
+                    "#OFISH_HASH\n### 200 ok hash=${hashFor.getValue(path)}"
+                } else {
+                    "#OFISH_HASH\n### 200 ok"
+                }
             } else {
                 "### 200 ok"
             }

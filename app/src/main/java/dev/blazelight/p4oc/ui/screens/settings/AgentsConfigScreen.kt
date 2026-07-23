@@ -18,9 +18,10 @@ import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.lifecycle.viewModelScope
 import dev.blazelight.p4oc.R
 import dev.blazelight.p4oc.core.network.ApiResult
-import dev.blazelight.p4oc.core.network.ConnectionManager
 import dev.blazelight.p4oc.core.network.safeApiCall
+import dev.blazelight.p4oc.data.workspace.WorkspaceClient
 import dev.blazelight.p4oc.ui.components.TuiAlertDialog
+import dev.blazelight.p4oc.ui.components.TuiBadge
 import dev.blazelight.p4oc.ui.components.TuiButton
 import dev.blazelight.p4oc.ui.components.TuiLoadingScreen
 import dev.blazelight.p4oc.ui.components.TuiTextButton
@@ -34,7 +35,6 @@ import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.launch
-import org.koin.androidx.compose.koinViewModel
 
 data class AgentInfo(
     val name: String,
@@ -53,7 +53,8 @@ data class AgentsConfigState(
 )
 
 class AgentsConfigViewModel constructor(
-    private val connectionManager: ConnectionManager
+    private val workspaceClient: WorkspaceClient,
+    serverConnectionRegistry: dev.blazelight.p4oc.core.network.ServerConnectionRegistry? = null,
 ) : ViewModel() {
 
     private val _state = MutableStateFlow(AgentsConfigState())
@@ -61,16 +62,21 @@ class AgentsConfigViewModel constructor(
 
     init {
         loadAgents()
+        serverConnectionRegistry?.observeWorkspaceCatalogEvents(
+            workspaceClient,
+            viewModelScope,
+            includeMcp = true,
+        ) {
+            loadAgents(background = true)
+        }
     }
 
-    fun loadAgents() {
+    fun loadAgents() = loadAgents(background = false)
+
+    private fun loadAgents(background: Boolean) {
         viewModelScope.launch {
-            _state.update { it.copy(isLoading = true) }
-            val api = connectionManager.getApi() ?: run {
-                _state.update { it.copy(isLoading = false, error = "Not connected") }
-                return@launch
-            }
-            val result = safeApiCall { api.getAgents() }
+            if (!background) _state.update { it.copy(isLoading = true) }
+            val result = safeApiCall { workspaceClient.getAgents() }
             when (result) {
                 is ApiResult.Success -> {
                     val agents = result.data.map { dto ->
@@ -83,10 +89,17 @@ class AgentsConfigViewModel constructor(
                             isBuiltIn = dto.isBuiltIn ?: dto.builtIn
                         )
                     }
-                    _state.update { it.copy(agents = agents, isLoading = false) }
+                    _state.update { it.copy(agents = agents, isLoading = false, error = null) }
                 }
                 is ApiResult.Error -> {
-                    _state.update { it.copy(isLoading = false, error = result.message) }
+                    if (!background) {
+                        _state.update {
+                            it.copy(
+                                isLoading = false,
+                                error = "Could not load agents. Check the connection and try again.",
+                            )
+                        }
+                    }
                 }
             }
         }
@@ -95,33 +108,16 @@ class AgentsConfigViewModel constructor(
     fun selectAgent(agent: AgentInfo?) {
         _state.update { it.copy(selectedAgent = agent) }
     }
-
-    fun clearError() {
-        _state.update { it.copy(error = null) }
-    }
 }
 
 @OptIn(ExperimentalMaterial3Api::class)
+@Suppress("FunctionNaming", "LongMethod", "NoNameShadowing")
 @Composable
 fun AgentsConfigScreen(
-    viewModel: AgentsConfigViewModel = koinViewModel(),
+    viewModel: AgentsConfigViewModel,
     onNavigateBack: () -> Unit
 ) {
     val state by viewModel.state.collectAsStateWithLifecycle()
-    val snackbarHostState = remember { SnackbarHostState() }
-    val dismissLabel = stringResource(R.string.dismiss)
-
-    LaunchedEffect(state.error) {
-        state.error?.let { error ->
-            snackbarHostState.showSnackbar(
-                message = error,
-                actionLabel = dismissLabel,
-                duration = SnackbarDuration.Long
-            )
-            viewModel.clearError()
-        }
-    }
-
     val theme = LocalOpenCodeTheme.current
     Scaffold(
         containerColor = theme.background,
@@ -142,8 +138,7 @@ fun AgentsConfigScreen(
                     }
                 }
             )
-        },
-        snackbarHost = { SnackbarHost(snackbarHostState) }
+        }
     ) { padding ->
         if (state.isLoading) {
             TuiLoadingScreen(
@@ -251,6 +246,12 @@ fun AgentsConfigScreen(
     }
 }
 
+@Suppress("FunctionNaming")
+@Composable
+internal fun AgentToolLabel(tool: String) {
+    TuiBadge(text = tool)
+}
+
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
 private fun AgentCard(
@@ -303,17 +304,7 @@ private fun AgentCard(
                         Spacer(Modifier.height(Spacing.xs))
                         Row(horizontalArrangement = Arrangement.spacedBy(Spacing.xs)) {
                             agent.tools.take(3).forEach { tool ->
-                                SuggestionChip(
-                                    onClick = {},
-                                    label = {
-                                        Text(
-                                            tool,
-                                            style = MaterialTheme.typography.labelSmall
-                                        )
-                                    },
-                                    shape = RectangleShape,
-                                    modifier = Modifier.height(Sizing.iconLg)
-                                )
+                                AgentToolLabel(tool)
                             }
                             if (agent.tools.size > 3) {
                                 Text(

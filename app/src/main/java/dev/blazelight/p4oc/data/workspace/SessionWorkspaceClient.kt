@@ -4,6 +4,7 @@ import dev.blazelight.p4oc.data.remote.dto.CreateSessionRequest
 import dev.blazelight.p4oc.data.remote.dto.PermissionDto
 import dev.blazelight.p4oc.data.remote.dto.PermissionV2RequestDto
 import dev.blazelight.p4oc.data.remote.dto.ProjectDto
+import dev.blazelight.p4oc.data.remote.dto.QuestionRequestDto
 import dev.blazelight.p4oc.data.remote.dto.SendMessageRequest
 import dev.blazelight.p4oc.data.remote.dto.SessionDto
 import dev.blazelight.p4oc.data.remote.dto.SessionStatusDto
@@ -45,6 +46,8 @@ interface SessionWorkspaceClient {
     suspend fun listSessionPermissionsV2(sessionId: String): List<PermissionV2RequestDto> = emptyList()
 
     suspend fun listPermissions(): List<PermissionDto> = emptyList()
+
+    suspend fun listSessionQuestions(sessionId: String): List<QuestionRequestDto> = emptyList()
 
     suspend fun abortSession(id: String): Boolean
 }

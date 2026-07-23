@@ -10,23 +10,36 @@ interface OpenCodeApi {
     suspend fun health(): HealthResponse
 
     @GET("project")
-    suspend fun listProjects(): List<ProjectDto>
+    suspend fun listProjects(
+        @Query("directory") directory: String?,
+        @Query("workspace") workspace: String?
+    ): List<ProjectDto>
 
     @GET("project/current")
-    suspend fun getCurrentProject(): ProjectDto
+    suspend fun getCurrentProject(
+        @Query("directory") directory: String?,
+        @Query("workspace") workspace: String?
+    ): ProjectDto
 
     @GET("path")
-    suspend fun getPath(): PathInfoDto
+    suspend fun getPath(
+        @Query("directory") directory: String?,
+        @Query("workspace") workspace: String?
+    ): PathInfoDto
 
     @GET("vcs")
     suspend fun getVcsInfo(
-        @Query("directory") directory: String?
+        @Query("directory") directory: String?,
+        @Query("workspace") workspace: String?
     ): VcsInfoDto
 
     @GET("session")
+    @Suppress("LongParameterList")
     suspend fun listSessions(
         @Query("directory") directory: String?,
+        @Query("workspace") workspace: String?,
         @Query("scope") scope: String? = null,
+        @Query("path") path: String? = null,
         @Query("roots") roots: Boolean? = null,
         @Query("start") start: Long? = null,
         @Query("search") search: String? = null,
@@ -36,115 +49,134 @@ interface OpenCodeApi {
     @POST("session")
     suspend fun createSession(
         @Query("directory") directory: String?,
+        @Query("workspace") workspace: String?,
         @Body request: CreateSessionRequest
     ): SessionDto
 
     @GET("session/{id}")
     suspend fun getSession(
         @Path("id") id: String,
-        @Query("directory") directory: String?
+        @Query("directory") directory: String?,
+        @Query("workspace") workspace: String?
     ): SessionDto
 
     @DELETE("session/{id}")
     suspend fun deleteSession(
         @Path("id") id: String,
-        @Query("directory") directory: String?
+        @Query("directory") directory: String?,
+        @Query("workspace") workspace: String?
     ): Boolean
 
     @PATCH("session/{id}")
     suspend fun updateSession(
         @Path("id") id: String,
         @Body request: UpdateSessionRequest,
-        @Query("directory") directory: String?
+        @Query("directory") directory: String?,
+        @Query("workspace") workspace: String?
     ): SessionDto
 
     @GET("session/status")
     suspend fun getSessionStatuses(
-        @Query("directory") directory: String?
+        @Query("directory") directory: String?,
+        @Query("workspace") workspace: String?
     ): Map<String, SessionStatusDto>
 
     @POST("session/{id}/abort")
     suspend fun abortSession(
         @Path("id") id: String,
-        @Query("directory") directory: String?
+        @Query("directory") directory: String?,
+        @Query("workspace") workspace: String?
     ): Response<Unit>
 
     @POST("session/{id}/fork")
     suspend fun forkSession(
         @Path("id") id: String,
         @Body request: ForkSessionRequest,
-        @Query("directory") directory: String?
+        @Query("directory") directory: String?,
+        @Query("workspace") workspace: String?
     ): SessionDto
 
     @GET("session/{id}/children")
     suspend fun getSessionChildren(
         @Path("id") id: String,
-        @Query("directory") directory: String?
+        @Query("directory") directory: String?,
+        @Query("workspace") workspace: String?
     ): List<SessionDto>
 
     @GET("session/{id}/todo")
     suspend fun getSessionTodos(
         @Path("id") id: String,
-        @Query("directory") directory: String?
+        @Query("directory") directory: String?,
+        @Query("workspace") workspace: String?
     ): List<TodoDto>
 
     @POST("session/{id}/init")
     suspend fun initSession(
         @Path("id") id: String,
         @Body request: InitSessionRequest,
-        @Query("directory") directory: String?
+        @Query("directory") directory: String?,
+        @Query("workspace") workspace: String?
     ): Boolean
 
     @POST("session/{id}/share")
     suspend fun shareSession(
         @Path("id") id: String,
-        @Query("directory") directory: String?
+        @Query("directory") directory: String?,
+        @Query("workspace") workspace: String?
     ): SessionDto
 
     @DELETE("session/{id}/share")
     suspend fun unshareSession(
         @Path("id") id: String,
-        @Query("directory") directory: String?
+        @Query("directory") directory: String?,
+        @Query("workspace") workspace: String?
     ): SessionDto
 
     @GET("session/{id}/diff")
     suspend fun getSessionDiff(
         @Path("id") id: String,
         @Query("messageID") messageID: String? = null,
-        @Query("directory") directory: String?
-    ): List<FileDiffDto>
+        @Query("directory") directory: String?,
+        @Query("workspace") workspace: String?
+    ): List<SnapshotFileDiffDto>
 
     @POST("session/{id}/summarize")
     suspend fun summarizeSession(
         @Path("id") id: String,
-        @Query("directory") directory: String?
+        @Query("directory") directory: String?,
+        @Query("workspace") workspace: String?
     ): Boolean
 
     @POST("session/{id}/revert")
     suspend fun revertSession(
         @Path("id") id: String,
         @Body request: RevertSessionRequest,
-        @Query("directory") directory: String?
+        @Query("directory") directory: String?,
+        @Query("workspace") workspace: String?
     ): SessionDto
 
     @POST("session/{id}/unrevert")
     suspend fun unrevertSession(
         @Path("id") id: String,
-        @Query("directory") directory: String?
+        @Query("directory") directory: String?,
+        @Query("workspace") workspace: String?
     ): SessionDto
 
     @GET("session/{sessionId}/message")
     suspend fun getMessages(
         @Path("sessionId") sessionId: String,
-        @Query("limit") limit: Int? = null,
-        @Query("directory") directory: String?
+        @Query("limit") limit: Int?,
+        @Query("before") before: String?,
+        @Query("directory") directory: String?,
+        @Query("workspace") workspace: String?
     ): List<MessageWrapperDto>
 
     @GET("session/{sessionId}/message/{messageId}")
     suspend fun getMessage(
         @Path("sessionId") sessionId: String,
         @Path("messageId") messageId: String,
-        @Query("directory") directory: String?
+        @Query("directory") directory: String?,
+        @Query("workspace") workspace: String?
     ): MessageWrapperDto
 
     /**
@@ -156,39 +188,62 @@ interface OpenCodeApi {
     suspend fun sendMessageAsync(
         @Path("sessionId") sessionId: String,
         @Body request: SendMessageRequest,
-        @Query("directory") directory: String?
+        @Query("directory") directory: String?,
+        @Query("workspace") workspace: String?
     )
 
     @POST("session/{sessionId}/command")
     suspend fun executeCommand(
         @Path("sessionId") sessionId: String,
         @Body request: ExecuteCommandRequest,
-        @Query("directory") directory: String?
+        @Query("directory") directory: String?,
+        @Query("workspace") workspace: String?
     ): MessageWrapperDto
 
     @POST("session/{sessionId}/shell")
     suspend fun executeShellCommand(
         @Path("sessionId") sessionId: String,
         @Body request: ShellCommandRequest,
-        @Query("directory") directory: String?
+        @Query("directory") directory: String?,
+        @Query("workspace") workspace: String?
     ): MessageWrapperDto
 
     @GET("permission")
     suspend fun listPermissions(
-        @Query("directory") directory: String?
+        @Query("directory") directory: String?,
+        @Query("workspace") workspace: String?
     ): List<PermissionDto>
 
     @POST("permission/{requestId}/reply")
     suspend fun respondToPermission(
         @Path("requestId") requestId: String,
         @Body request: PermissionResponseRequest,
-        @Query("directory") directory: String?
+        @Query("directory") directory: String?,
+        @Query("workspace") workspace: String?
     ): Boolean
 
     @GET("api/session/{sessionId}/permission")
     suspend fun listSessionPermissionsV2(
         @Path("sessionId") sessionId: String
     ): PermissionV2RequestListResponseDto
+
+    @GET("api/session/{sessionId}/question")
+    suspend fun listSessionQuestionsV2(
+        @Path("sessionId") sessionId: String
+    ): Response<QuestionV2RequestListResponseDto>
+
+    @POST("api/session/{sessionId}/question/{requestId}/reply")
+    suspend fun respondToQuestionV2(
+        @Path("sessionId") sessionId: String,
+        @Path("requestId") requestId: String,
+        @Body request: QuestionV2Reply
+    ): Response<Unit>
+
+    @POST("api/session/{sessionId}/question/{requestId}/reject")
+    suspend fun rejectQuestionV2(
+        @Path("sessionId") sessionId: String,
+        @Path("requestId") requestId: String
+    ): Response<Unit>
 
     @POST("api/session/{sessionId}/permission/{requestId}/reply")
     suspend fun respondToPermissionV2(
@@ -201,48 +256,56 @@ interface OpenCodeApi {
     suspend fun respondToQuestion(
         @Path("requestId") requestId: String,
         @Body request: QuestionReplyRequest,
-        @Query("directory") directory: String?
-    ): Boolean
+        @Query("directory") directory: String?,
+        @Query("workspace") workspace: String?
+    ): Response<Boolean>
 
     @POST("question/{requestId}/reject")
     suspend fun rejectQuestion(
         @Path("requestId") requestId: String,
-        @Query("directory") directory: String?
-    ): Boolean
+        @Query("directory") directory: String?,
+        @Query("workspace") workspace: String?
+    ): Response<Boolean>
 
     @GET("question")
     suspend fun listPendingQuestions(
-        @Query("directory") directory: String?
-    ): List<QuestionRequestDto>
+        @Query("directory") directory: String?,
+        @Query("workspace") workspace: String?
+    ): Response<List<QuestionRequestDto>>
 
     @GET("command")
     suspend fun listCommands(
-        @Query("directory") directory: String?
+        @Query("directory") directory: String?,
+        @Query("workspace") workspace: String?
     ): List<CommandDto>
 
     @GET("file")
     suspend fun listFiles(
         @Query("path") path: String,
-        @Query("directory") directory: String?
+        @Query("directory") directory: String?,
+        @Query("workspace") workspace: String?
     ): List<FileNodeDto>
 
     @GET("file/content")
     suspend fun readFile(
         @Query("path") path: String,
-        @Query("directory") directory: String?
+        @Query("directory") directory: String?,
+        @Query("workspace") workspace: String?
     ): FileContentDto
 
     @GET("file/status")
     suspend fun getFileStatus(
-        @Query("directory") directory: String?
+        @Query("directory") directory: String?,
+        @Query("workspace") workspace: String?
     ): List<FileStatusDto>
 
-    @GET("find")
-    suspend fun searchText(@Query("pattern") pattern: String): List<SearchResultDto>
-
     @GET("find/file")
+    @Suppress("LongParameterList")
     suspend fun searchFiles(
         @Query("query") query: String,
+        @Query("directory") directory: String?,
+        @Query("workspace") workspace: String?,
+        @Query("dirs") dirs: String? = null,
         @Query("type") type: String? = null,
         @Query("limit") limit: Int? = null
     ): List<String>
@@ -250,47 +313,77 @@ interface OpenCodeApi {
     @GET("find/symbol")
     suspend fun searchSymbols(
         @Query("query") query: String,
-        @Query("directory") directory: String?
+        @Query("directory") directory: String?,
+        @Query("workspace") workspace: String?
     ): List<SymbolDto>
 
     @GET("config")
-    suspend fun getConfig(): ConfigDto
+    suspend fun getConfig(
+        @Query("directory") directory: String?,
+        @Query("workspace") workspace: String?
+    ): ConfigDto
 
     @PATCH("config")
-    suspend fun updateConfig(@Body config: ConfigDto): ConfigDto
+    suspend fun updateConfig(
+        @Body config: ConfigDto,
+        @Query("directory") directory: String?,
+        @Query("workspace") workspace: String?
+    ): ConfigDto
 
     @GET("provider")
-    suspend fun getProviders(): ProvidersResponseDto
+    suspend fun getProviders(
+        @Query("directory") directory: String?,
+        @Query("workspace") workspace: String?
+    ): ProvidersResponseDto
 
     @GET("provider/auth")
-    suspend fun getProviderAuthMethods(): Map<String, List<ProviderAuthMethodDto>>
+    suspend fun getProviderAuthMethods(
+        @Query("directory") directory: String?,
+        @Query("workspace") workspace: String?
+    ): Map<String, List<ProviderAuthMethodDto>>
 
     @GET("agent")
-    suspend fun getAgents(): List<AgentDto>
-
-    @POST("model/active")
-    suspend fun setActiveModel(@Body request: SetActiveModelRequest): Boolean
+    suspend fun getAgents(
+        @Query("directory") directory: String?,
+        @Query("workspace") workspace: String?
+    ): List<AgentDto>
 
     @GET("lsp")
-    suspend fun getLspStatus(): List<LspStatusDto>
+    suspend fun getLspStatus(
+        @Query("directory") directory: String?,
+        @Query("workspace") workspace: String?
+    ): List<LspStatusDto>
 
     @GET("formatter")
-    suspend fun getFormatterStatus(): List<FormatterStatusDto>
+    suspend fun getFormatterStatus(
+        @Query("directory") directory: String?,
+        @Query("workspace") workspace: String?
+    ): List<FormatterStatusDto>
 
     @GET("mcp")
-    suspend fun getMcpStatus(): Map<String, McpStatusDto>
+    suspend fun getMcpStatus(
+        @Query("directory") directory: String?,
+        @Query("workspace") workspace: String?
+    ): Map<String, McpStatusDto>
 
     // ============================================================================
     // OAuth & Auth Endpoints (aligned with SDK)
     // ============================================================================
 
     @POST("provider/{id}/oauth/authorize")
-    suspend fun authorizeProvider(@Path("id") id: String): ProviderAuthAuthorizationDto
+    suspend fun authorizeProvider(
+        @Path("id") id: String,
+        @Body request: ProviderAuthAuthorizeRequest,
+        @Query("directory") directory: String?,
+        @Query("workspace") workspace: String?
+    ): ProviderAuthAuthorizationDto
 
     @POST("provider/{id}/oauth/callback")
     suspend fun oauthCallback(
         @Path("id") id: String,
-        @Body request: OAuthCallbackRequest
+        @Body request: OAuthCallbackRequest,
+        @Query("directory") directory: String?,
+        @Query("workspace") workspace: String?
     ): Boolean
 
     @PUT("auth/{id}")
@@ -304,42 +397,70 @@ interface OpenCodeApi {
     // ============================================================================
 
     @POST("instance/dispose")
-    suspend fun disposeInstance(): Boolean
+    suspend fun disposeInstance(
+        @Query("directory") directory: String?,
+        @Query("workspace") workspace: String?
+    ): Boolean
 
     // ============================================================================
     // MCP Management
     // ============================================================================
 
     @POST("mcp")
-    suspend fun addMcpServer(@Body request: AddMcpServerRequest): McpStatusDto
+    suspend fun addMcpServer(
+        @Body request: AddMcpServerRequest,
+        @Query("directory") directory: String?,
+        @Query("workspace") workspace: String?,
+    ): Map<String, McpStatusDto>
 
     // ============================================================================
     // Logging
     // ============================================================================
 
     @POST("log")
-    suspend fun log(@Body request: LogRequest): Boolean
+    suspend fun log(
+        @Body request: LogRequest,
+        @Query("directory") directory: String?,
+        @Query("workspace") workspace: String?
+    ): Boolean
 
     // ============================================================================
     // PTY (Terminal) Endpoints
     // ============================================================================
 
     @GET("pty")
-    suspend fun listPtySessions(): List<PtyDto>
+    suspend fun listPtySessions(
+        @Query("directory") directory: String?,
+        @Query("workspace") workspace: String?,
+    ): List<PtyDto>
 
     @POST("pty")
-    suspend fun createPtySession(@Body request: CreatePtyRequest): PtyDto
+    suspend fun createPtySession(
+        @Query("directory") directory: String?,
+        @Query("workspace") workspace: String?,
+        @Body request: CreatePtyRequest,
+    ): PtyDto
 
     @GET("pty/{id}")
-    suspend fun getPtySession(@Path("id") id: String): PtyDto
+    suspend fun getPtySession(
+        @Path("id") id: String,
+        @Query("directory") directory: String?,
+        @Query("workspace") workspace: String?,
+    ): PtyDto
 
     @DELETE("pty/{id}")
-    suspend fun deletePtySession(@Path("id") id: String): Boolean
+    suspend fun deletePtySession(
+        @Path("id") id: String,
+        @Query("directory") directory: String?,
+        @Query("workspace") workspace: String?,
+    ): Boolean
 
-    @PATCH("pty/{id}")
+    @PUT("pty/{id}")
     suspend fun updatePtySession(
         @Path("id") id: String,
-        @Body request: UpdatePtyRequest
+        @Query("directory") directory: String?,
+        @Query("workspace") workspace: String?,
+        @Body request: UpdatePtyRequest,
     ): PtyDto
 
     // ============================================================================
@@ -347,10 +468,15 @@ interface OpenCodeApi {
     // ============================================================================
 
     @GET("experimental/tool/ids")
-    suspend fun getToolIds(): List<String>
+    suspend fun getToolIds(
+        @Query("directory") directory: String?,
+        @Query("workspace") workspace: String?
+    ): List<String>
 
     @GET("experimental/tool")
     suspend fun getTools(
+        @Query("directory") directory: String?,
+        @Query("workspace") workspace: String?,
         @Query("provider") provider: String,
         @Query("model") model: String
     ): ToolListDto
@@ -360,5 +486,8 @@ interface OpenCodeApi {
     // ============================================================================
 
     @GET("config/providers")
-    suspend fun getConfigProviders(): ConfigProvidersDto
+    suspend fun getConfigProviders(
+        @Query("directory") directory: String?,
+        @Query("workspace") workspace: String?
+    ): ConfigProvidersDto
 }
