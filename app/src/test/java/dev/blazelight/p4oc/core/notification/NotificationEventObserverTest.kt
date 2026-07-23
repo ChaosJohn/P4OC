@@ -1,5 +1,6 @@
 package dev.blazelight.p4oc.core.notification
 
+import dev.blazelight.p4oc.core.datastore.NotificationRoutingMode
 import dev.blazelight.p4oc.core.datastore.NotificationSettings
 import dev.blazelight.p4oc.domain.server.ServerRef
 import dev.blazelight.p4oc.domain.server.WorkspaceKey
@@ -21,6 +22,24 @@ class NotificationEventObserverTest {
         assertFalse(shouldEmitCompletionFeedback(disabled, isInForeground = false))
         assertFalse(shouldEmitCompletionFeedback(enabled, isInForeground = true))
         assertTrue(shouldEmitCompletionFeedback(enabled, isInForeground = false))
+    }
+
+    @Test
+    fun `routing All delivers awaiting-input and completion`() {
+        assertTrue(shouldDeliverAwaitingInput(NotificationRoutingMode.All))
+        assertTrue(shouldDeliverCompletion(NotificationRoutingMode.All))
+    }
+
+    @Test
+    fun `routing Mentions delivers awaiting-input but suppresses completion`() {
+        assertTrue(shouldDeliverAwaitingInput(NotificationRoutingMode.Mentions))
+        assertFalse(shouldDeliverCompletion(NotificationRoutingMode.Mentions))
+    }
+
+    @Test
+    fun `routing Off suppresses everything`() {
+        assertFalse(shouldDeliverAwaitingInput(NotificationRoutingMode.Off))
+        assertFalse(shouldDeliverCompletion(NotificationRoutingMode.Off))
     }
 
     @Test

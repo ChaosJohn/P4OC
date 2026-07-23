@@ -130,6 +130,11 @@
     <!-- Settings Screen -->
     <string name="settings_title">Settings</string>
     <string name="settings_group_workspace">Workspace</string>
+    <string name="notification_routing_section">Routing · per server</string>
+    <string name="notification_routing_all">All</string>
+    <string name="notification_routing_mentions">Mentions</string>
+    <string name="notification_routing_off">Off</string>
+    <string name="notification_routing_empty">Add a server to route its notifications.</string>
     <string name="settings_group_app">App</string>
     <string name="settings_providers">Providers</string>
     <string name="settings_providers_desc">Connect and authenticate AI providers</string>
