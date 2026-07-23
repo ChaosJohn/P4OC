@@ -152,7 +152,7 @@ private fun serverScaffold(
             TopAppBar(
                 title = {
                     Text(
-                        "[ ${stringResource(R.string.server_connect_title)} ]",
+                        stringResource(R.string.server_connect_title),
                         fontFamily = FontFamily.Monospace,
                         color = theme.text,
                     )
@@ -433,6 +433,14 @@ private fun remoteUrlField(
             )
         },
         singleLine = true,
+        leadingIcon = {
+            Text(
+                "/",
+                color = theme.primary,
+                fontFamily = FontFamily.Monospace,
+                style = MaterialTheme.typography.bodyLarge,
+            )
+        },
         modifier = Modifier.fillMaxWidth().testTag("server_url_input"),
         shape = RectangleShape,
         colors = OutlinedTextFieldDefaults.colors(

@@ -45,9 +45,9 @@ private fun WelcomeStep(onNext: () -> Unit) {
         verticalArrangement = Arrangement.spacedBy(Spacing.md)
     ) {
         Text(
-            text = "◇",
+            text = ">_",
             style = MaterialTheme.typography.displayLarge,
-            color = theme.accent,
+            color = theme.primary,
             fontFamily = FontFamily.Monospace
         )
 
@@ -65,6 +65,14 @@ private fun WelcomeStep(onNext: () -> Unit) {
             fontFamily = FontFamily.Monospace,
             textAlign = TextAlign.Center,
             color = theme.textMuted
+        )
+
+        Text(
+            text = stringResource(R.string.server_connect_hint),
+            style = MaterialTheme.typography.bodyMedium,
+            fontFamily = FontFamily.Monospace,
+            textAlign = TextAlign.Center,
+            color = theme.secondary
         )
 
         Spacer(Modifier.height(Spacing.lg))

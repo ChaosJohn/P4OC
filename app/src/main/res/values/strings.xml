@@ -31,6 +31,7 @@
     <string name="server_local_description">Run OpenCode directly on your device using Termux.</string>
     <string name="server_remote_title">Network Server</string>
     <string name="server_remote_description">Connect to an OpenCode server running on your network.</string>
+    <string name="server_connect_hint">connect to a running opencode server</string>
     <string name="server_recent_servers">Recent Servers</string>
     <string name="server_saved_servers">Your servers</string>
     <string name="server_saved_servers_desc">Tap a server to connect. More actions are available from its menu.</string>
