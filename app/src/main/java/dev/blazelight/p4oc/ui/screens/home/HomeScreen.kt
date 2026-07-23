@@ -55,7 +55,9 @@ import androidx.compose.ui.semantics.Role
 import androidx.compose.ui.semantics.contentDescription
 import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.semantics.stateDescription
+import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.style.TextOverflow
+import androidx.compose.ui.unit.sp
 import dev.blazelight.p4oc.R
 import dev.blazelight.p4oc.core.network.ConnectionState
 import dev.blazelight.p4oc.domain.model.SessionPresence
@@ -453,7 +455,7 @@ private fun homeHeader(summary: HomeSummaryState, onServers: () -> Unit) {
         verticalAlignment = Alignment.CenterVertically,
     ) {
         Column(modifier = Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(Spacing.xxs)) {
-            Text("[ Home ]", style = MaterialTheme.typography.titleMedium, color = LocalOpenCodeTheme.current.text)
+            Text("Home", style = MaterialTheme.typography.titleMedium, color = LocalOpenCodeTheme.current.text)
             Text(
                 stringResource(R.string.home_summary_counts, summary.sessions.size, summary.workspaces.size),
                 style = MaterialTheme.typography.labelSmall,
@@ -952,7 +954,10 @@ private fun compactAction(label: String, onClick: () -> Unit) {
 @Composable
 private fun sectionLabel(text: String) = Text(
     text.uppercase(),
-    style = MaterialTheme.typography.labelMedium,
+    style = MaterialTheme.typography.labelSmall.copy(
+        fontFamily = FontFamily.Monospace,
+        letterSpacing = 1.sp,
+    ),
     color = LocalOpenCodeTheme.current.textMuted,
 )
 
