@@ -698,7 +698,7 @@ private fun TuiFileItem(
     onClick: () -> Unit,
 ) {
     val theme = LocalOpenCodeTheme.current
-    val (icon, iconColor) = getFileIcon(file)
+    val iconColor = getFileIcon(file).second
     val gitStatusColor = getGitStatusColor(file.gitStatus)
     val clipboardManager = LocalClipboardManager.current
     val haptic = LocalHapticFeedback.current
@@ -772,25 +772,22 @@ private fun TuiFileItem(
                 horizontalArrangement = Arrangement.spacedBy(Spacing.sm),
                 verticalAlignment = Alignment.CenterVertically
             ) {
-                // File type indicator
-                Text(
-                    text = if (file.isDirectory) "▸" else " ",
-                    style = MaterialTheme.typography.bodyMedium,
-                    color = theme.accent
-                )
-
-                // Icon
-                Icon(
-                    imageVector = icon,
-                    contentDescription = null,
-                    tint = gitStatusColor ?: iconColor,
-                    modifier = Modifier.size(Sizing.iconSm)
-                )
+                // Type glyph (design 07): ▸ folders in secondary, ■ files in type color
+                Box(
+                    modifier = Modifier.width(Sizing.iconMd),
+                    contentAlignment = Alignment.Center,
+                ) {
+                    Text(
+                        text = if (file.isDirectory) "▸" else "■",
+                        style = MaterialTheme.typography.bodyMedium.copy(fontFamily = FontFamily.Monospace),
+                        color = if (file.isDirectory) theme.secondary else (gitStatusColor ?: iconColor),
+                    )
+                }
 
                 // File name
                 Text(
                     text = file.name,
-                    style = MaterialTheme.typography.bodyMedium,
+                    style = MaterialTheme.typography.bodyMedium.copy(fontFamily = FontFamily.Monospace),
                     fontWeight = if (file.isDirectory) FontWeight.Medium else FontWeight.Normal,
                     color = gitStatusColor ?: theme.text,
                     modifier = Modifier.weight(1f),
@@ -803,12 +800,12 @@ private fun TuiFileItem(
                     TuiGitStatusBadge(status)
                 }
 
-                // Directory indicator
-                if (file.isDirectory) {
+                // Trailing chevron — files open in the viewer
+                if (!file.isDirectory) {
                     Text(
-                        text = ">",
-                        style = MaterialTheme.typography.bodyMedium,
-                        color = theme.textMuted
+                        text = "›",
+                        style = MaterialTheme.typography.titleMedium,
+                        color = theme.border
                     )
                 }
             }
