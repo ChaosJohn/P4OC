@@ -326,13 +326,7 @@ private fun PermissionWarningBanner(
 
 @Composable
 private fun SectionHeader(title: String) {
-    val theme = LocalOpenCodeTheme.current
-    Text(
-        text = title,
-        style = MaterialTheme.typography.titleSmall,
-        color = theme.accent,
-        modifier = Modifier.padding(horizontal = Spacing.lg, vertical = Spacing.md)
-    )
+    dev.blazelight.p4oc.ui.components.TuiSectionHeader(title)
 }
 
 @Composable
