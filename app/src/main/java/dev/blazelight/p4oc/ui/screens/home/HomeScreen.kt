@@ -23,11 +23,8 @@ import androidx.compose.foundation.layout.widthIn
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.LazyListScope
 import androidx.compose.foundation.lazy.LazyListState
-import androidx.compose.foundation.lazy.LazyRow
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.lazy.rememberLazyListState
-import androidx.compose.foundation.selection.toggleable
-import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.text.BasicTextField
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.Chat
@@ -46,7 +43,6 @@ import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
-import androidx.compose.ui.draw.alpha
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.RectangleShape
 import androidx.compose.ui.platform.testTag
@@ -54,7 +50,6 @@ import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.semantics.Role
 import androidx.compose.ui.semantics.contentDescription
 import androidx.compose.ui.semantics.semantics
-import androidx.compose.ui.semantics.stateDescription
 import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.sp
@@ -74,7 +69,6 @@ import java.util.concurrent.TimeUnit
 
 private const val RECENT_DAY_LIMIT = 30
 private const val HOME_WORKSPACE_SHORTCUT_LIMIT = 3
-private const val DISABLED_FILTER_ALPHA = 0.5f
 data class HomeActions(
     val onBrowseSessions: (StartWorkTarget) -> Unit,
     val onBrowseAllSessions: () -> Unit = {},
@@ -99,6 +93,8 @@ private data class HomeOverviewInput(
     val showAllWorkspaces: Boolean,
     val onShowAllWorkspacesChange: (Boolean) -> Unit,
     val onWorkspaceClick: (WorkspaceSummary) -> Unit,
+    val expandedServerKeys: Set<String>,
+    val onToggleServerExpand: (String) -> Unit,
     val actions: HomeActions,
     val listState: LazyListState,
 )
@@ -122,6 +118,7 @@ fun homeScreen(
     var disabledEndpointKeys by rememberSaveable { mutableStateOf(emptyList<String>()) }
     var searchQuery by rememberSaveable { mutableStateOf("") }
     var showAllWorkspaces by rememberSaveable { mutableStateOf(false) }
+    var expandedServers by rememberSaveable { mutableStateOf(emptyList<String>()) }
     val selected = selectedWorkspace
     if (selected != null) {
         workspaceDetail(
@@ -176,6 +173,8 @@ fun homeScreen(
                         StartWorkSelection.Selected(StartWorkTarget(it.serverRef, it.workspaceKey)),
                     )
                 },
+                expandedServerKeys = expandedServers.toSet(),
+                onToggleServerExpand = { key -> expandedServers = expandedServers.toggleMembership(key) },
                 actions = actions,
                 listState = rememberLazyListState(),
             ),
@@ -234,24 +233,6 @@ private fun LazyListScope.homeOverviewContent(
     val summary = input.summary
     item { homeHeader(summary, input.actions.onManageServers) }
     item { homeSearchField(input.searchQuery, input.onSearchQueryChange) }
-    item {
-        serverFilters(
-            servers = summary.servers,
-            enabledEndpointKeys = input.enabledEndpointKeys,
-            searchActive = input.searchQuery.isNotBlank(),
-            onToggle = input.onToggleServer,
-        )
-    }
-    if (input.searchQuery.isNotBlank() && input.enabledEndpointKeys.size < summary.servers.size) {
-        item {
-            Text(
-                globalSearchOverrideLabel(input.enabledEndpointKeys.size),
-                style = MaterialTheme.typography.labelSmall,
-                color = LocalOpenCodeTheme.current.textMuted,
-                maxLines = 2,
-            )
-        }
-    }
     if (summary.isLoading) {
         item {
             infoCard("Loading existing work", "Sessions already loaded remain available while Home refreshes.")
@@ -260,30 +241,14 @@ private fun LazyListScope.homeOverviewContent(
     if (summary.partialFailures.isNotEmpty()) {
         item { infoCard("Some work is unavailable", summary.partialFailures.joinToString(" · ")) }
     }
-    if (input.searchQuery.isBlank() && input.enabledEndpointKeys.isEmpty()) {
-        item {
-            infoCard(
-                "No servers enabled",
-                "Turn on one or more servers above to browse existing work.",
-            )
-        }
-        item {
-            textAction(
-                label = "Select all servers",
-                description = "Include every saved server in Home browsing",
-                onClick = input.onEnableAllServers,
-                modifier = Modifier.testTag("home_enable_all_servers"),
-            )
-        }
-    } else {
+    if (input.searchQuery.isNotBlank()) {
         homeWorkspaces(input, results.workspaces)
         HomeSessions(input, results.sessions)
+    } else {
+        homeWorkspaces(input, results.workspaces)
+        serversProjectsTree(input, summary.servers, summary.workspaces)
     }
 }
-
-private fun globalSearchOverrideLabel(enabledCount: Int): String =
-    "Global search includes every server · clear search to resume " +
-        "$enabledCount enabled server${if (enabledCount == 1) "" else "s"}"
 
 @Composable
 private fun homeSearchField(query: String, onQueryChange: (String) -> Unit) {
@@ -468,140 +433,148 @@ private fun homeHeader(summary: HomeSummaryState, onServers: () -> Unit) {
     }
 }
 
-@Composable
-private fun serverFilters(
+/** Collapsible SERVERS · PROJECTS tree (design 02) — each server expands to its projects. */
+private fun LazyListScope.serversProjectsTree(
+    input: HomeOverviewInput,
     servers: List<ServerSummary>,
-    enabledEndpointKeys: Set<String>,
-    searchActive: Boolean,
-    onToggle: (String) -> Unit,
+    workspaces: List<WorkspaceSummary>,
 ) {
-    Column(
-        Modifier.fillMaxWidth().testTag("home_server_filters"),
-        verticalArrangement = Arrangement.spacedBy(Spacing.xxs),
-    ) {
-        Row(
-            Modifier.fillMaxWidth(),
-            verticalAlignment = Alignment.CenterVertically,
-            horizontalArrangement = Arrangement.SpaceBetween,
-        ) {
-            Text(
-                "Servers · ${enabledEndpointKeys.size}/${servers.size} on",
-                style = MaterialTheme.typography.labelSmall,
-                color = LocalOpenCodeTheme.current.textMuted,
-            )
-            if (servers.size > 1) {
-                Text(
-                    "Swipe ›",
-                    style = MaterialTheme.typography.labelSmall,
-                    color = LocalOpenCodeTheme.current.primary,
-                )
-            }
+    item { sectionLabel("Servers · Projects") }
+    if (servers.isEmpty()) {
+        item { infoCard("No servers", "Add a server to browse its projects.") }
+        return
+    }
+    servers.forEach { server ->
+        val key = server.serverRef.endpointKey
+        val expanded = key in input.expandedServerKeys
+        val serverWorkspaces = workspaces.filter { it.serverRef.endpointKey == key }
+        item(key = "srv_$key") {
+            serverGroupHeader(server, expanded, serverWorkspaces.size) { input.onToggleServerExpand(key) }
         }
-        LazyRow(
-            horizontalArrangement = Arrangement.spacedBy(Spacing.xs),
-            contentPadding = PaddingValues(end = Spacing.xl),
-            modifier = Modifier.fillMaxWidth(),
-        ) {
-            items(servers, key = { it.serverRef.endpointKey }) { server ->
-                serverToggleCard(
-                    server = server,
-                    enabled = server.serverRef.endpointKey in enabledEndpointKeys,
-                    searchActive = searchActive,
-                    onToggle = { onToggle(server.serverRef.endpointKey) },
-                )
+        if (expanded) {
+            if (serverWorkspaces.isEmpty()) {
+                item(key = "srv_${key}_empty") { emptyProjectRow() }
+            } else {
+                items(serverWorkspaces, key = { "proj_${key}_${it.workspaceKey}" }) { ws ->
+                    projectRow(ws) { input.onWorkspaceClick(ws) }
+                }
             }
         }
     }
 }
 
 @Composable
-private fun serverToggleCard(
+private fun serverGroupHeader(
     server: ServerSummary,
-    enabled: Boolean,
-    searchActive: Boolean,
+    expanded: Boolean,
+    projectCount: Int,
     onToggle: () -> Unit,
 ) {
     val theme = LocalOpenCodeTheme.current
     val status = server.connectionState.toServerStatus()
-    val accessibilityDescription = remember(server, status) {
-        "${server.displayName}, ${status.visualLabel}, ${server.sessionCount} sessions, " +
-            serverEndpointDetail(server)
-    }
     Surface(
+        onClick = onToggle,
         shape = RectangleShape,
         color = theme.backgroundPanel,
         modifier = Modifier
-            .width(Sizing.serverFilterCardWidth)
-            .alpha(if (searchActive) DISABLED_FILTER_ALPHA else 1f)
-            .then(
-                if (enabled && !searchActive) {
-                    Modifier.border(Sizing.strokeMd, theme.primary, RectangleShape)
-                } else {
-                    Modifier
-                },
-            )
-            .toggleable(
-                value = enabled,
-                enabled = !searchActive,
-                role = Role.Checkbox,
-                onValueChange = { onToggle() },
-            )
-            .semantics {
-                stateDescription = if (searchActive) {
-                    "${if (enabled) "On" else "Off"}; saved filter paused during global search"
-                } else if (enabled) {
-                    "On"
-                } else {
-                    "Off"
-                }
-                contentDescription = accessibilityDescription
-            }
-            .testTag("home_server_toggle_${server.serverRef.endpointKey}"),
+            .fillMaxWidth()
+            .testTag("home_server_group_${server.serverRef.endpointKey}"),
     ) {
-        serverToggleCardContent(server, status, enabled, theme)
+        Row(
+            Modifier.fillMaxWidth().padding(horizontal = Spacing.sm, vertical = Spacing.xs),
+            verticalAlignment = Alignment.CenterVertically,
+            horizontalArrangement = Arrangement.spacedBy(Spacing.sm),
+        ) {
+            Box(
+                Modifier.size(Sizing.indicatorDotActive)
+                    .background(status.dotColor(theme), RectangleShape)
+                    .semantics { contentDescription = status.contentDescription },
+            )
+            Column(Modifier.weight(1f)) {
+                Text(
+                    server.displayName,
+                    style = MaterialTheme.typography.labelMedium,
+                    color = theme.text,
+                    maxLines = 1,
+                    overflow = TextOverflow.Ellipsis,
+                )
+                Text(
+                    serverEndpointDetail(server),
+                    style = MaterialTheme.typography.labelSmall.copy(fontFamily = FontFamily.Monospace),
+                    color = theme.textMuted,
+                    maxLines = 1,
+                    overflow = TextOverflow.Ellipsis,
+                )
+            }
+            Text("$projectCount", style = MaterialTheme.typography.labelSmall, color = theme.textMuted)
+            Text(
+                if (expanded) "▾" else "▸",
+                style = MaterialTheme.typography.labelMedium.copy(fontFamily = FontFamily.Monospace),
+                color = theme.textMuted,
+            )
+        }
     }
 }
 
 @Composable
-private fun serverToggleCardContent(
-    server: ServerSummary,
-    status: ServerConnectionStatus,
-    enabled: Boolean,
-    theme: OpenCodeTheme,
-) {
-    Column(Modifier.padding(horizontal = Spacing.sm, vertical = Spacing.xs)) {
-        Row(verticalAlignment = Alignment.CenterVertically) {
-            Box(
-                Modifier.size(Sizing.indicatorDot)
-                    .background(status.dotColor(theme), CircleShape)
-                    .semantics { contentDescription = status.contentDescription },
-            )
-            Spacer(Modifier.width(Spacing.xs))
+private fun projectRow(workspace: WorkspaceSummary, onOpen: () -> Unit) {
+    val theme = LocalOpenCodeTheme.current
+    Surface(
+        onClick = onOpen,
+        shape = RectangleShape,
+        color = theme.background,
+        modifier = Modifier
+            .fillMaxWidth()
+            .testTag("home_project_${workspace.serverRef.endpointKey}_${workspace.workspaceKey}"),
+    ) {
+        Row(
+            Modifier
+                .fillMaxWidth()
+                .padding(start = Sizing.treeIndent, top = Spacing.xs, bottom = Spacing.xs, end = Spacing.sm),
+            verticalAlignment = Alignment.CenterVertically,
+            horizontalArrangement = Arrangement.spacedBy(Spacing.sm),
+        ) {
+            projectPill(workspace)
             Text(
-                server.displayName,
-                style = MaterialTheme.typography.labelMedium,
-                color = if (enabled) theme.text else theme.textMuted,
-                maxLines = 1,
-                overflow = TextOverflow.Ellipsis,
-                modifier = Modifier.weight(1f),
-            )
-            Text(
-                if (enabled) "ON" else "OFF",
-                style = MaterialTheme.typography.labelSmall,
-                color = if (enabled) theme.primary else theme.textMuted,
-            )
-        }
-        Row {
-            Text(
-                serverEndpointDetail(server),
-                style = MaterialTheme.typography.labelSmall,
+                "${workspace.sessionCount} sessions · ${recency(workspace.mostRecentAt)}",
+                style = MaterialTheme.typography.labelSmall.copy(fontFamily = FontFamily.Monospace),
                 color = theme.textMuted,
                 maxLines = 1,
                 overflow = TextOverflow.Ellipsis,
                 modifier = Modifier.weight(1f),
             )
-            Text("${server.sessionCount}", style = MaterialTheme.typography.labelSmall, color = theme.textMuted)
+            Text("›", style = MaterialTheme.typography.labelMedium, color = theme.border)
         }
+    }
+}
+
+@Composable
+private fun emptyProjectRow() {
+    Text(
+        "no projects · tap server to open",
+        style = MaterialTheme.typography.labelSmall.copy(fontFamily = FontFamily.Monospace),
+        color = LocalOpenCodeTheme.current.border,
+        modifier = Modifier
+            .fillMaxWidth()
+            .padding(start = Sizing.treeIndent, top = Spacing.xs, bottom = Spacing.xs),
+    )
+}
+
+/** Colored project pill (dark text on a per-project color), shared by rows and the tree. */
+@Composable
+private fun projectPill(workspace: WorkspaceSummary) {
+    val key = "${workspace.serverRef.endpointKey}:${workspace.workspaceKey}"
+    Surface(shape = RectangleShape, color = ProjectColors.colorForProject(key)) {
+        Text(
+            workspace.workspaceKey.displayLabel(),
+            style = MaterialTheme.typography.labelSmall.copy(fontFamily = FontFamily.Monospace),
+            color = ProjectColors.textColorForProject(key),
+            maxLines = 1,
+            overflow = TextOverflow.Ellipsis,
+            modifier = Modifier
+                .widthIn(max = Sizing.chipMaxWidth)
+                .padding(horizontal = Spacing.sm, vertical = Spacing.xxs),
+        )
     }
 }
 
@@ -626,47 +599,31 @@ private fun workspaceShortcut(
         onClick = { onOpen(workspace) },
         shape = RectangleShape,
         color = theme.backgroundPanel,
-        modifier = modifier.border(Sizing.strokeThin, theme.border, RectangleShape),
+        modifier = modifier,
     ) {
         Row(
-            Modifier.height(Sizing.listItemHeightSm),
+            Modifier
+                .fillMaxWidth()
+                .height(Sizing.listItemHeightSm)
+                .padding(horizontal = Spacing.sm),
             verticalAlignment = Alignment.CenterVertically,
+            horizontalArrangement = Arrangement.spacedBy(Spacing.sm),
         ) {
-            Box(
-                Modifier
-                    .width(Sizing.strokeThick)
-                    .height(Sizing.listItemHeightSm)
-                    .background(ProjectColors.colorForProject("server:${workspace.serverRef.endpointKey}")),
-            )
-            Column(
-                Modifier.weight(1f).padding(horizontal = Spacing.xs),
-                verticalArrangement = Arrangement.spacedBy(Spacing.xxs),
-            ) {
-                Row(horizontalArrangement = Arrangement.spacedBy(Spacing.xxs)) {
-                    Text(
-                        workspace.workspaceKey.displayLabel(),
-                        style = MaterialTheme.typography.labelMedium,
-                        color = theme.text,
-                        maxLines = 1,
-                        overflow = TextOverflow.Ellipsis,
-                        modifier = Modifier.weight(1f),
-                    )
-                }
-                Text(
-                    workspace.workspaceKey.detailLabel(),
-                    style = MaterialTheme.typography.labelSmall,
-                    color = theme.textMuted,
-                    maxLines = 1,
-                    overflow = TextOverflow.Ellipsis,
-                )
-            }
             Text(
-                "${workspace.sessionCount} ›",
-                style = MaterialTheme.typography.labelSmall,
+                "↺",
+                style = MaterialTheme.typography.labelMedium.copy(fontFamily = FontFamily.Monospace),
+                color = theme.warning,
+            )
+            projectPill(workspace)
+            Text(
+                "${workspace.serverRef.displayName} · ${recency(workspace.mostRecentAt)}",
+                style = MaterialTheme.typography.labelSmall.copy(fontFamily = FontFamily.Monospace),
                 color = theme.textMuted,
                 maxLines = 1,
-                modifier = Modifier.padding(end = Spacing.xxs),
+                overflow = TextOverflow.Ellipsis,
+                modifier = Modifier.weight(1f),
             )
+            Text("›", style = MaterialTheme.typography.labelMedium, color = theme.border)
         }
     }
 }
@@ -806,15 +763,6 @@ private val ServerConnectionStatus.contentDescription: String
         ServerConnectionStatus.AVAILABLE -> "Server available"
         ServerConnectionStatus.DISCONNECTED -> "Server disconnected"
         ServerConnectionStatus.ERROR -> "Server connection error"
-    }
-
-private val ServerConnectionStatus.visualLabel: String
-    get() = when (this) {
-        ServerConnectionStatus.CONNECTED -> "online"
-        ServerConnectionStatus.CONNECTING -> "connecting"
-        ServerConnectionStatus.AVAILABLE -> "available"
-        ServerConnectionStatus.DISCONNECTED -> "offline"
-        ServerConnectionStatus.ERROR -> "error"
     }
 
 @Composable
