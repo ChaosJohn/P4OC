@@ -519,6 +519,37 @@ fun TuiSection(
 }
 
 /**
+ * Design section header: monospace, letter-spaced, uppercase, on a full-width
+ * panel-background bar (matches SERVERS·PROJECTS / RECENT / EVENT TYPES labels).
+ */
+@Composable
+fun TuiSectionHeader(
+    text: String,
+    modifier: Modifier = Modifier,
+    trailing: @Composable (RowScope.() -> Unit)? = null,
+) {
+    val theme = LocalOpenCodeTheme.current
+    Row(
+        modifier = modifier
+            .fillMaxWidth()
+            .background(theme.backgroundPanel)
+            .padding(horizontal = Spacing.md, vertical = Spacing.xs),
+        verticalAlignment = Alignment.CenterVertically,
+    ) {
+        Text(
+            text = text.uppercase(),
+            style = MaterialTheme.typography.labelSmall.copy(
+                fontFamily = FontFamily.Monospace,
+                letterSpacing = 1.sp,
+            ),
+            color = theme.textMuted,
+            modifier = Modifier.weight(1f),
+        )
+        trailing?.invoke(this)
+    }
+}
+
+/**
  * TUI-style bottom sheet content wrapper.
  */
 @Composable

@@ -8,6 +8,7 @@ import androidx.compose.runtime.Composable
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.res.stringResource
+import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import dev.blazelight.p4oc.R
@@ -37,7 +38,7 @@ fun TuiTopBar(
     val theme = LocalOpenCodeTheme.current
     Surface(
         modifier = modifier.fillMaxWidth(),
-        color = theme.backgroundElement,
+        color = theme.background,
         tonalElevation = 0.dp
     ) {
         Column {
@@ -72,12 +73,15 @@ fun TuiTopBar(
                         maxLines = 1,
                         overflow = TextOverflow.Ellipsis,
                         modifier = Modifier.weight(1f),
-                        style = MaterialTheme.typography.titleMedium
+                        style = MaterialTheme.typography.titleMedium.copy(
+                            fontWeight = FontWeight.SemiBold
+                        )
                     )
                 }
 
                 actions()
             }
+            HorizontalDivider(color = theme.border, thickness = Sizing.strokeThin)
         }
     }
 }
