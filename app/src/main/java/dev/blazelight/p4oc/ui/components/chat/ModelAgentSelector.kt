@@ -1,5 +1,6 @@
 package dev.blazelight.p4oc.ui.components.chat
 
+import androidx.compose.foundation.background
 import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyColumn
@@ -20,7 +21,10 @@ import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.semantics.Role
 import androidx.compose.ui.semantics.contentDescription
 import androidx.compose.ui.semantics.semantics
+import androidx.compose.ui.text.font.FontFamily
+import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
+import androidx.compose.ui.unit.sp
 import androidx.compose.ui.window.Dialog
 import androidx.compose.ui.window.DialogProperties
 import dev.blazelight.p4oc.R
@@ -75,6 +79,7 @@ fun ModelAgentSelectorBar(
     recentModels: List<ModelInput> = emptyList(),
     onToggleFavorite: (ModelInput) -> Unit = {},
     usedContextTokens: Int? = null,
+    providerNames: Map<String, String> = emptyMap(),
     modifier: Modifier = Modifier
 ) {
     val theme = LocalOpenCodeTheme.current
@@ -100,10 +105,15 @@ fun ModelAgentSelectorBar(
 
     Surface(
         modifier = modifier.fillMaxWidth().testTag("agent_selector"),
-        color = theme.backgroundElement
+        color = theme.background
     ) {
         Row(
-            modifier = Modifier.padding(horizontal = Spacing.md, vertical = Spacing.xs),
+            modifier = Modifier.padding(
+                start = Spacing.md,
+                end = Spacing.md,
+                top = Spacing.md,
+                bottom = Spacing.xs,
+            ),
             verticalAlignment = Alignment.CenterVertically
         ) {
           Row(
@@ -254,6 +264,7 @@ fun ModelAgentSelectorBar(
             selectedModel = selectedModel,
             favoriteModels = favoriteModels,
             recentModels = recentModels,
+            providerNames = providerNames,
             onModelSelected = {
                 onModelSelected(it)
                 showModelPicker = false
@@ -299,19 +310,20 @@ fun ModelPickerDialog(
     recentModels: List<ModelInput>,
     onModelSelected: (ModelInput) -> Unit,
     onToggleFavorite: (ModelInput) -> Unit,
-    onDismiss: () -> Unit
+    onDismiss: () -> Unit,
+    providerNames: Map<String, String> = emptyMap()
 ) {
     val theme = LocalOpenCodeTheme.current
     var searchQuery by remember { mutableStateOf("") }
     var selectedCategory by remember { mutableStateOf<String?>(null) }
 
-    val enhancedModels = remember(availableModels, favoriteModels, recentModels) {
+    val enhancedModels = remember(availableModels, favoriteModels, recentModels, providerNames) {
         availableModels.map { (providerId, model) ->
             val modelInput = ModelInput(providerID = providerId, modelID = model.id)
             EnhancedModelInfo(
                 model = modelInput,
                 name = model.name,
-                providerName = providerId.replaceFirstChar { it.uppercase() },
+                providerName = providerNames[providerId] ?: providerId,
                 contextWindow = model.limit?.context,
                 hasReasoning = model.capabilities?.reasoning == true,
                 hasTools = model.capabilities?.toolcall == true,
@@ -322,14 +334,20 @@ fun ModelPickerDialog(
         }
     }
 
+    // Provider id paired with the label to show for it — the provider's own display
+    // name when it has one, so config-defined providers read "LLM Proxy", not "llmproxy".
     val providers = remember(enhancedModels) {
-        enhancedModels.map { it.model.providerID }.distinct().sorted()
+        enhancedModels
+            .map { it.model.providerID to it.providerName }
+            .distinct()
+            .sortedBy { it.second.lowercase() }
     }
 
     val filteredModels = remember(enhancedModels, searchQuery, selectedCategory) {
         enhancedModels.filter { model ->
             val matchesSearch = searchQuery.isBlank() ||
                 model.name.contains(searchQuery, ignoreCase = true) ||
+                model.providerName.contains(searchQuery, ignoreCase = true) ||
                 model.model.providerID.contains(searchQuery, ignoreCase = true)
             val matchesCategory = selectedCategory == null || model.model.providerID == selectedCategory
             matchesSearch && matchesCategory
@@ -353,67 +371,73 @@ fun ModelPickerDialog(
             modifier = Modifier
                 .align(Alignment.BottomCenter)
                 .fillMaxWidth()
-                .fillMaxHeight(0.85f),
+                .fillMaxHeight(0.7f)
+                .testTag("model_picker_sheet"),
             shape = RectangleShape,
-            color = theme.background,
+            color = theme.backgroundPanel,
             border = androidx.compose.foundation.BorderStroke(Sizing.strokeMd, theme.border)
         ) {
             Column {
-                // TUI-style header
-                Surface(
-                    color = theme.backgroundElement,
-                    modifier = Modifier.fillMaxWidth()
+                // Header: "Select Model" title + close — flush on the sheet's panel bg.
+                Row(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .padding(start = Spacing.md, end = Spacing.xs, top = Spacing.sm, bottom = Spacing.sm),
+                    horizontalArrangement = Arrangement.SpaceBetween,
+                    verticalAlignment = Alignment.CenterVertically
                 ) {
-                    Row(
-                        modifier = Modifier
-                            .fillMaxWidth()
-                            .padding(horizontal = Spacing.md, vertical = Spacing.sm),
-                        horizontalArrangement = Arrangement.SpaceBetween,
-                        verticalAlignment = Alignment.CenterVertically
+                    Text(
+                        text = stringResource(R.string.select_model),
+                        style = MaterialTheme.typography.titleSmall.copy(fontWeight = FontWeight.SemiBold),
+                        color = theme.text
+                    )
+                    IconButton(
+                        onClick = onDismiss,
+                        modifier = Modifier.size(Sizing.iconButtonSm)
                     ) {
                         Text(
-                            text = stringResource(R.string.select_model),
-                            style = MaterialTheme.typography.titleSmall.copy(
-                                fontFamily = androidx.compose.ui.text.font.FontFamily.Monospace
-                            ),
-                            color = theme.primary
+                            text = "×",
+                            style = MaterialTheme.typography.titleMedium,
+                            fontFamily = FontFamily.Monospace,
+                            color = theme.textMuted
                         )
-                        IconButton(
-                            onClick = onDismiss,
-                            modifier = Modifier.size(Sizing.iconButtonSm)
-                        ) {
-                            Icon(
-                                Icons.Default.Close,
-                                contentDescription = stringResource(R.string.close),
-                                tint = theme.textMuted,
-                                modifier = Modifier.size(Sizing.iconSm)
-                            )
-                        }
                     }
                 }
 
-                // Search field - TUI style
+                // Search field — inset element-bg box with `/` prompt prefix.
+                // Height is pinned (not `heightIn`/intrinsic) so the box can't grow as text
+                // is typed — BasicTextField's measured height otherwise nudges the container.
                 Surface(
                     color = theme.backgroundElement,
-                    modifier = Modifier.fillMaxWidth()
+                    shape = RectangleShape,
+                    border = androidx.compose.foundation.BorderStroke(Sizing.strokeMd, theme.borderSubtle),
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .height(Sizing.buttonHeightMd)
+                        .padding(horizontal = Spacing.md, vertical = Spacing.xs)
                 ) {
                     Row(
                         modifier = Modifier
-                            .fillMaxWidth()
-                            .padding(horizontal = Spacing.md, vertical = Spacing.xs),
+                            .fillMaxSize()
+                            .padding(horizontal = Spacing.md),
                         verticalAlignment = Alignment.CenterVertically,
                         horizontalArrangement = Arrangement.spacedBy(Spacing.sm)
                     ) {
                         Text(
                             text = "/",
                             style = MaterialTheme.typography.bodyMedium,
-                            color = theme.accent
+                            fontFamily = FontFamily.Monospace,
+                            color = theme.primary
                         )
                         androidx.compose.foundation.text.BasicTextField(
                             value = searchQuery,
                             onValueChange = { searchQuery = it },
-                            modifier = Modifier.weight(1f),
-                            textStyle = MaterialTheme.typography.bodyMedium.copy(color = theme.text),
+                            modifier = Modifier.weight(1f).testTag("model_search_field"),
+                            textStyle = MaterialTheme.typography.bodyMedium.copy(
+                                color = theme.text,
+                                fontFamily = FontFamily.Monospace
+                            ),
+                            cursorBrush = androidx.compose.ui.graphics.SolidColor(theme.primary),
                             singleLine = true,
                             decorationBox = { innerTextField ->
                                 Box {
@@ -421,6 +445,7 @@ fun ModelPickerDialog(
                                         Text(
                                             text = stringResource(R.string.models_search_placeholder),
                                             style = MaterialTheme.typography.bodyMedium,
+                                            fontFamily = FontFamily.Monospace,
                                             color = theme.textMuted
                                         )
                                     }
@@ -444,7 +469,7 @@ fun ModelPickerDialog(
                     }
                 }
 
-                // Provider filter tabs - TUI style
+                // Provider filter chips
                 Row(
                     modifier = Modifier
                         .horizontalScroll(rememberScrollState())
@@ -457,12 +482,12 @@ fun ModelPickerDialog(
                         selected = selectedCategory == null,
                         onClick = { selectedCategory = null }
                     )
-                    providers.forEach { provider ->
+                    providers.forEach { (providerId, label) ->
                         TuiFilterTab(
-                            text = provider.lowercase(),
-                            selected = selectedCategory == provider,
+                            text = label,
+                            selected = selectedCategory == providerId,
                             onClick = {
-                                selectedCategory = if (selectedCategory == provider) null else provider
+                                selectedCategory = if (selectedCategory == providerId) null else providerId
                             }
                         )
                     }
@@ -479,7 +504,7 @@ fun ModelPickerDialog(
                 ) {
                     if (favorites.isNotEmpty()) {
                         item {
-                            TuiSectionHeader(text = "★ favorites", color = theme.warning)
+                            TuiSectionHeader(text = "★ favorites")
                         }
                         items(favorites, key = { "${it.model.providerID}/${it.model.modelID}" }) { model ->
                             TuiModelListItem(
@@ -493,7 +518,7 @@ fun ModelPickerDialog(
 
                     if (recents.isNotEmpty()) {
                         item {
-                            TuiSectionHeader(text = "◷ recent", color = theme.accent)
+                            TuiSectionHeader(text = "recent")
                         }
                         items(recents, key = { "${it.model.providerID}/${it.model.modelID}" }) { model ->
                             TuiModelListItem(
@@ -508,8 +533,7 @@ fun ModelPickerDialog(
                     if (others.isNotEmpty()) {
                         item {
                             TuiSectionHeader(
-                                text = if (favorites.isEmpty() && recents.isEmpty()) "models" else "other",
-                                color = theme.textMuted
+                                text = if (favorites.isEmpty() && recents.isEmpty()) "models" else "other"
                             )
                         }
                         items(others, key = { "${it.model.providerID}/${it.model.modelID}" }) { model ->
@@ -533,6 +557,7 @@ fun ModelPickerDialog(
                                 Text(
                                     text = "-- no models found --",
                                     style = MaterialTheme.typography.bodyMedium,
+                                    fontFamily = FontFamily.Monospace,
                                     color = theme.textMuted
                                 )
                             }
@@ -540,18 +565,16 @@ fun ModelPickerDialog(
                     }
                 }
 
+                HorizontalDivider(color = theme.border, thickness = Sizing.dividerThickness)
+
                 // Footer with count
-                Surface(
-                    color = theme.backgroundElement,
-                    modifier = Modifier.fillMaxWidth()
-                ) {
-                    Text(
-                        text = "${filteredModels.size} models",
-                        style = MaterialTheme.typography.labelSmall,
-                        color = theme.textMuted,
-                        modifier = Modifier.padding(horizontal = Spacing.md, vertical = Spacing.xs)
-                    )
-                }
+                Text(
+                    text = "${filteredModels.size} models",
+                    style = MaterialTheme.typography.labelSmall,
+                    fontFamily = FontFamily.Monospace,
+                    color = theme.textMuted,
+                    modifier = Modifier.padding(horizontal = Spacing.md, vertical = Spacing.sm)
+                )
             }
         }
       }
@@ -627,13 +650,8 @@ private fun TuiFilterTab(
 ) {
     val theme = LocalOpenCodeTheme.current
     Surface(
-        color = if (selected) theme.accent.copy(alpha = 0.15f) else Color.Transparent,
+        color = if (selected) theme.backgroundElement else Color.Transparent,
         shape = RectangleShape,
-        border = if (selected) {
-            androidx.compose.foundation.BorderStroke(Sizing.strokeMd, theme.accent.copy(alpha = 0.5f))
-        } else {
-            null
-        },
         modifier = Modifier.selectable(
             selected = selected,
             onClick = onClick,
@@ -643,22 +661,30 @@ private fun TuiFilterTab(
         Text(
             text = text,
             style = MaterialTheme.typography.labelSmall,
-            color = if (selected) theme.accent else theme.textMuted,
-            modifier = Modifier.padding(horizontal = Spacing.sm, vertical = Spacing.xxs)
+            fontFamily = FontFamily.Monospace,
+            fontWeight = if (selected) FontWeight.SemiBold else FontWeight.Normal,
+            color = if (selected) theme.primary else theme.textMuted,
+            modifier = Modifier.padding(horizontal = Spacing.md, vertical = Spacing.xs)
         )
     }
 }
 
+/** Uppercase, letter-spaced section label — `RECENT` / `OTHER`, matching design 06. */
 @Composable
-private fun TuiSectionHeader(
-    text: String,
-    color: Color
-) {
+private fun TuiSectionHeader(text: String) {
+    val theme = LocalOpenCodeTheme.current
     Text(
-        text = text,
+        text = text.uppercase(),
         style = MaterialTheme.typography.labelSmall,
-        color = color,
-        modifier = Modifier.padding(horizontal = Spacing.md, vertical = Spacing.xs)
+        fontFamily = FontFamily.Monospace,
+        letterSpacing = 1.sp,
+        color = theme.textMuted,
+        modifier = Modifier.padding(
+            start = Spacing.md,
+            end = Spacing.md,
+            top = Spacing.md,
+            bottom = Spacing.xs
+        )
     )
 }
 
@@ -672,17 +698,26 @@ private fun TuiModelListItem(
     val theme = LocalOpenCodeTheme.current
     val addFavoriteDescription = stringResource(R.string.cd_add_to_favorites)
     val removeFavoriteDescription = stringResource(R.string.cd_remove_from_favorites)
+    val providerColor = SemanticColors.Provider.forName(model.model.providerID).first
 
-    Surface(
-        color = if (isSelected) theme.accent.copy(alpha = 0.1f) else Color.Transparent,
+    Row(
         modifier = Modifier
             .fillMaxWidth()
+            .height(IntrinsicSize.Min)
+            .background(if (isSelected) theme.backgroundElement else Color.Transparent)
             .selectable(
                 selected = isSelected,
                 onClick = onSelect,
                 role = Role.RadioButton,
             )
     ) {
+        // Left accent strip on the selected row.
+        Box(
+            modifier = Modifier
+                .width(Sizing.strokeThick)
+                .fillMaxHeight()
+                .background(if (isSelected) theme.success else Color.Transparent)
+        )
         Row(
             modifier = Modifier
                 .fillMaxWidth()
@@ -690,76 +725,74 @@ private fun TuiModelListItem(
             horizontalArrangement = Arrangement.spacedBy(Spacing.sm),
             verticalAlignment = Alignment.CenterVertically
         ) {
-            // Selection indicator
+            // Selection chevron (reserves width so squares stay aligned).
             Text(
                 text = if (isSelected) ">" else " ",
                 style = MaterialTheme.typography.bodyMedium,
-                color = theme.accent
+                fontFamily = FontFamily.Monospace,
+                color = theme.primary
+            )
+
+            // Provider color square.
+            Text(
+                text = "■",
+                style = MaterialTheme.typography.bodyMedium,
+                fontFamily = FontFamily.Monospace,
+                color = providerColor
             )
 
             // Model info
             Column(modifier = Modifier.weight(1f)) {
+                Text(
+                    text = model.name,
+                    style = MaterialTheme.typography.bodyMedium,
+                    fontFamily = FontFamily.Monospace,
+                    fontWeight = if (isSelected) FontWeight.SemiBold else FontWeight.Medium,
+                    color = theme.text,
+                    maxLines = 1,
+                    overflow = TextOverflow.Ellipsis
+                )
+                // Metadata row: provider · context
                 Row(
-                    horizontalArrangement = Arrangement.spacedBy(Spacing.sm),
+                    horizontalArrangement = Arrangement.spacedBy(Spacing.xs),
                     verticalAlignment = Alignment.CenterVertically
                 ) {
                     Text(
-                        text = model.name,
-                        style = MaterialTheme.typography.bodyMedium,
-                        color = if (isSelected) theme.text else theme.text.copy(alpha = 0.9f),
-                        maxLines = 1,
-                        overflow = TextOverflow.Ellipsis,
-                        modifier = Modifier.weight(1f, fill = false)
-                    )
-                }
-
-                // Metadata row
-                Row(
-                    horizontalArrangement = Arrangement.spacedBy(Spacing.sm),
-                    verticalAlignment = Alignment.CenterVertically
-                ) {
-                    Text(
-                        text = model.providerName.lowercase(),
+                        text = model.providerName,
                         style = MaterialTheme.typography.labelSmall,
+                        fontFamily = FontFamily.Monospace,
                         color = theme.textMuted
                     )
                     model.contextWindow?.let { ctx ->
                         if (ctx > 0) {
                             Text(
-                                text = "·",
+                                text = "· ${formatContextWindow(ctx)}",
                                 style = MaterialTheme.typography.labelSmall,
-                                color = theme.textMuted
-                            )
-                            Text(
-                                text = "${ctx / 1000}k",
-                                style = MaterialTheme.typography.labelSmall,
+                                fontFamily = FontFamily.Monospace,
                                 color = theme.textMuted
                             )
                         }
-                    }
-                    if (model.hasReasoning) {
-                        val reasoningLabel = if (model.reasoningEfforts.isEmpty()) {
-                            "[R]"
-                        } else {
-                            "[R:${model.reasoningEfforts.joinToString("/")}]"
-                        }
-                        Text(
-                            text = reasoningLabel,
-                            style = MaterialTheme.typography.labelSmall,
-                            color = theme.warning
-                        )
-                    }
-                    if (model.hasTools) {
-                        Text(
-                            text = "[T]",
-                            style = MaterialTheme.typography.labelSmall,
-                            color = theme.accent
-                        )
                     }
                 }
             }
 
-            // Favorite button
+            // Capability badges + favorite, right-aligned.
+            if (model.hasReasoning) {
+                Text(
+                    text = "[R]",
+                    style = MaterialTheme.typography.labelSmall,
+                    fontFamily = FontFamily.Monospace,
+                    color = theme.textMuted
+                )
+            }
+            if (model.hasTools) {
+                Text(
+                    text = "[T]",
+                    style = MaterialTheme.typography.labelSmall,
+                    fontFamily = FontFamily.Monospace,
+                    color = theme.textMuted
+                )
+            }
             IconButton(
                 onClick = onToggleFavorite,
                 modifier = Modifier
@@ -780,4 +813,14 @@ private fun TuiModelListItem(
             }
         }
     }
+}
+
+private const val CONTEXT_MILLION = 1_000_000
+private const val CONTEXT_THOUSAND = 1_000
+
+/** `200K`, `1M`, `64K` — uppercase, matching design 06. */
+private fun formatContextWindow(ctx: Int): String = when {
+    ctx >= CONTEXT_MILLION -> "${ctx / CONTEXT_MILLION}M"
+    ctx >= CONTEXT_THOUSAND -> "${ctx / CONTEXT_THOUSAND}K"
+    else -> ctx.toString()
 }

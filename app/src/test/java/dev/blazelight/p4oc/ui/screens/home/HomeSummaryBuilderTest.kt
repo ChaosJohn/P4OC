@@ -375,6 +375,27 @@ class HomeSummaryBuilderTest {
         assertEquals(emptyList<WorkspaceSummary>(), filtered.workspaces)
     }
 
+    @Test
+    fun `launcher shows connected servers only when more than two are connected`() {
+        val summaries = (1..4).map { index ->
+            val (_, serverRef) = server("http://server-$index.example.com", "Server $index")
+            ServerSummary(
+                serverRef = serverRef,
+                displayName = serverRef.displayName,
+                connectionState = if (index < 4) ConnectionState.Connected else ConnectionState.Disconnected,
+                sessionCount = index,
+                openTabCount = 0,
+                isLoading = false,
+            )
+        }
+
+        assertEquals(emptyList<ServerSummary>(), connectedServersForLauncher(summaries.take(2)))
+        assertEquals(
+            listOf("Server 1", "Server 2", "Server 3"),
+            connectedServersForLauncher(summaries).map { it.displayName },
+        )
+    }
+
     private fun build(
         servers: List<SavedServer>,
         tabs: List<TabInstance> = emptyList(),

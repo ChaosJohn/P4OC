@@ -68,8 +68,8 @@ fun NavGraph(
     ) {
         composable(Screen.Setup.route) {
             SetupScreen(
-                onSetupComplete = {
-                    navController.navigate(Screen.Server.route) {
+                onConnected = {
+                    navController.navigate(Screen.Sessions.route) {
                         popUpTo(Screen.Setup.route) { inclusive = true }
                     }
                 }
@@ -79,11 +79,6 @@ fun NavGraph(
         composable(Screen.Server.route) {
             serverScreen(
                 onNavigateToSessions = {
-                    navController.navigate(Screen.Sessions.route) {
-                        popUpTo(Screen.Server.route) { inclusive = true }
-                    }
-                },
-                onNavigateToProjects = {
                     navController.navigate(Screen.Sessions.route) {
                         popUpTo(Screen.Server.route) { inclusive = true }
                     }
@@ -98,13 +93,14 @@ fun NavGraph(
             val serverConnectionRegistry: ServerConnectionRegistry = koinInject()
             serverScreen(
                 onNavigateToSessions = { navController.popBackStack() },
-                onNavigateToProjects = { navController.popBackStack() },
                 onSettings = { navController.navigate(Screen.Settings.route) },
                 autoReconnect = false,
+                showManualFormInitially = true,
                 onConnectSavedServer = { saved ->
                     serverConnectionRegistry.connect(saved)
                     navController.popBackStack()
                 },
+                onNavigateBack = { navController.popBackStack() },
             )
         }
 
@@ -115,6 +111,9 @@ fun NavGraph(
                 onNotificationRouteConsumed = onNotificationRouteConsumed,
                 onDisconnect = {
                     navController.navigate(Screen.ServerManagement.route)
+                },
+                onSettings = {
+                    navController.navigate(Screen.Settings.route)
                 }
             )
         }

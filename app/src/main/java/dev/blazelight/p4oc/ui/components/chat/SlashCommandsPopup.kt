@@ -14,6 +14,7 @@ import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.RectangleShape
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.res.stringResource
@@ -26,6 +27,7 @@ import androidx.compose.ui.unit.IntRect
 import androidx.compose.ui.unit.IntSize
 import androidx.compose.ui.unit.LayoutDirection
 import androidx.compose.ui.unit.dp
+import androidx.compose.ui.unit.sp
 import androidx.compose.ui.window.Popup
 import androidx.compose.ui.window.PopupPositionProvider
 import androidx.compose.ui.window.PopupProperties
@@ -41,6 +43,7 @@ import dev.blazelight.p4oc.ui.theme.Spacing
  * Shows filtered list of available slash commands
  */
 @Composable
+@Suppress("LongMethod", "FunctionNaming")
 fun SlashCommandsPopup(
     state: SlashCommandsPopupState,
     callbacks: SlashCommandsPopupCallbacks,
@@ -53,7 +56,8 @@ fun SlashCommandsPopup(
 
     LaunchedEffect(activeIndex) {
         if (activeIndex >= 0) {
-            listState.animateScrollToItem(activeIndex)
+            // +1 for the pinned "SLASH COMMANDS" header item at index 0.
+            listState.animateScrollToItem(activeIndex + 1)
         }
     }
 
@@ -79,8 +83,9 @@ fun SlashCommandsPopup(
             LazyColumn(
                 modifier = Modifier.fillMaxWidth(),
                 state = listState,
-                contentPadding = PaddingValues(vertical = Spacing.hairline)
+                contentPadding = PaddingValues(bottom = Spacing.hairline)
             ) {
+                item { SlashCommandsHeader() }
                 when {
                     state.isLoading && filteredCommands.isEmpty() -> {
                         item { SlashCommandMessage(text = stringResource(R.string.slash_commands_loading)) }
@@ -221,6 +226,24 @@ private fun SlashCommandError(
     }
 }
 
+/** Uppercase, letter-spaced panel header — `SLASH COMMANDS`, matching the design. */
+@Composable
+@Suppress("FunctionNaming")
+private fun SlashCommandsHeader() {
+    val theme = LocalOpenCodeTheme.current
+    Column(modifier = Modifier.background(theme.background)) {
+        Text(
+            text = "SLASH COMMANDS",
+            style = MaterialTheme.typography.labelSmall,
+            fontFamily = FontFamily.Monospace,
+            letterSpacing = 1.sp,
+            color = theme.textMuted,
+            modifier = Modifier.padding(horizontal = Spacing.md, vertical = Spacing.sm)
+        )
+        HorizontalDivider(color = theme.border, thickness = Sizing.strokeThin)
+    }
+}
+
 @Composable
 private fun SlashCommandItem(
     command: Command,
@@ -228,6 +251,7 @@ private fun SlashCommandItem(
     onClick: () -> Unit
 ) {
     val theme = LocalOpenCodeTheme.current
+    val (glyph, glyphColor) = slashCommandIcon(command)
 
     Row(
         modifier = Modifier
@@ -235,47 +259,66 @@ private fun SlashCommandItem(
             .testTag("slash_command_${command.name}")
             .background(if (active) theme.backgroundElement else theme.background)
             .clickable(onClick = onClick, role = Role.Button)
-            .padding(horizontal = Spacing.md, vertical = Spacing.xs),
+            .padding(horizontal = Spacing.md, vertical = Spacing.sm),
         verticalAlignment = Alignment.CenterVertically,
-        horizontalArrangement = Arrangement.spacedBy(Spacing.sm)
+        horizontalArrangement = Arrangement.spacedBy(Spacing.md)
     ) {
-        Column(modifier = Modifier.weight(1f)) {
+        Text(
+            text = glyph,
+            color = glyphColor,
+            style = MaterialTheme.typography.bodyMedium,
+            fontFamily = FontFamily.Monospace,
+            modifier = Modifier.widthIn(min = Sizing.iconMd)
+        )
+        Text(
+            text = "/${command.name}",
+            color = theme.primary,
+            style = MaterialTheme.typography.bodySmall,
+            fontFamily = FontFamily.Monospace,
+            fontWeight = FontWeight.Medium,
+            maxLines = 1,
+            overflow = TextOverflow.Ellipsis,
+            modifier = Modifier.widthIn(min = Sizing.panelWidthSm)
+        )
+        command.description?.let { description ->
             Text(
-                text = "/${command.name}",
-                color = theme.accent,
-                style = MaterialTheme.typography.bodySmall,
-                fontFamily = FontFamily.Monospace,
-                fontWeight = FontWeight.Medium,
+                text = description,
+                style = MaterialTheme.typography.labelSmall,
+                color = theme.textMuted,
                 maxLines = 1,
                 overflow = TextOverflow.Ellipsis,
+                modifier = Modifier.weight(1f)
             )
-            command.description?.let { description ->
-                Text(
-                    text = description,
-                    style = MaterialTheme.typography.labelSmall,
-                    color = theme.textMuted,
-                    maxLines = 1,
-                    overflow = TextOverflow.Ellipsis,
-                )
-            }
         }
-        Text(
-            text = slashCommandSourceCompactLabel(command.source),
-            style = MaterialTheme.typography.labelSmall,
-            fontFamily = FontFamily.Monospace,
-            color = command.source.badgeColor(),
-            maxLines = 1
-        )
     }
 }
 
+/** Glyph + accent color for a command, keyed on well-known names then falling back to source. */
 @Composable
-private fun CommandSource.badgeColor() = when (this) {
-    CommandSource.BuiltIn -> LocalOpenCodeTheme.current.textMuted
-    CommandSource.Skill -> LocalOpenCodeTheme.current.info
-    CommandSource.Mcp -> LocalOpenCodeTheme.current.warning
-    CommandSource.Custom -> LocalOpenCodeTheme.current.accent
-    CommandSource.Subtask -> LocalOpenCodeTheme.current.info
+@Suppress("CyclomaticComplexMethod")
+private fun slashCommandIcon(command: Command): Pair<String, Color> {
+    val theme = LocalOpenCodeTheme.current
+    return when (command.name.lowercase()) {
+        "model", "models" -> "◆" to theme.secondary
+        "agent", "agents", "mode" -> "△" to theme.info
+        "diff", "changes" -> "±" to theme.warning
+        "undo", "revert" -> "↺" to theme.error
+        "redo" -> "↻" to theme.success
+        "share" -> "↗" to theme.info
+        "unshare" -> "⊘" to theme.textMuted
+        "summarize", "compact" -> "≡" to theme.warning
+        "clear", "new", "reset" -> "✕" to theme.textMuted
+        "init" -> "✦" to theme.accent
+        "help" -> "?" to theme.info
+        "editor", "edit" -> "✎" to theme.accent
+        else -> when (command.source) {
+            CommandSource.Skill -> "✧" to theme.info
+            CommandSource.Mcp -> "◇" to theme.warning
+            CommandSource.Custom -> "▸" to theme.accent
+            CommandSource.Subtask -> "▹" to theme.info
+            CommandSource.BuiltIn -> "▸" to theme.textMuted
+        }
+    }
 }
 
 internal fun slashCommandSourceCompactLabel(source: CommandSource): String = when (source) {

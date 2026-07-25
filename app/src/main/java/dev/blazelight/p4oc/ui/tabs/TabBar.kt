@@ -14,6 +14,7 @@ import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.drawBehind
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.RectangleShape
 import androidx.compose.ui.graphics.vector.ImageVector
@@ -199,6 +200,15 @@ private fun tabIndicator(
         modifier = modifier
             .height(Sizing.tabBarHeight)
             .background(backgroundColor)
+            .drawBehind {
+                drawRect(
+                    color = topStripColor,
+                    size = androidx.compose.ui.geometry.Size(
+                        width = size.width,
+                        height = Sizing.strokeThick.toPx(),
+                    ),
+                )
+            }
             .semantics {
                 contentDescription = state.accessibilityLabel
                 selected = state.isActive
@@ -207,11 +217,10 @@ private fun tabIndicator(
     ) {
         Box(
             modifier = Modifier
-                .fillMaxWidth()
-                .height(Sizing.strokeThick)
-                .background(topStripColor)
-        )
-        Box(modifier = Modifier.weight(1f), contentAlignment = Alignment.Center) {
+                .weight(1f)
+                .padding(top = Sizing.strokeThick),
+            contentAlignment = Alignment.Center,
+        ) {
             tabIndicatorRow(state = state, needsAttention = needsAttention)
         }
     }

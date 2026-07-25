@@ -24,6 +24,7 @@ import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.semantics.Role
 import androidx.compose.ui.text.font.FontFamily
+import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import dev.blazelight.p4oc.R
@@ -131,6 +132,7 @@ fun ChatScreen(
     val availableAgents by viewModel.modelAgentManager.availableAgents.collectAsStateWithLifecycle()
     val selectedAgent by viewModel.modelAgentManager.selectedAgent.collectAsStateWithLifecycle()
     val availableModels by viewModel.modelAgentManager.availableModels.collectAsStateWithLifecycle()
+    val providerNames by viewModel.modelAgentManager.providerNames.collectAsStateWithLifecycle()
     val selectedModel by viewModel.modelAgentManager.selectedModel.collectAsStateWithLifecycle()
     val selectedReasoningEffort by viewModel.modelAgentManager.selectedReasoningEffort.collectAsStateWithLifecycle()
     val favoriteModels by viewModel.modelAgentManager.favoriteModels.collectAsStateWithLifecycle()
@@ -357,6 +359,11 @@ fun ChatScreen(
                         .imePadding()
                         .navigationBarsPadding()
                 ) {
+                    // Hairline separating the flat composer from the chat above it.
+                    HorizontalDivider(
+                        color = LocalOpenCodeTheme.current.border,
+                        thickness = Sizing.strokeThin
+                    )
                     ModelAgentSelectorBar(
                         availableAgents = availableAgents,
                         selectedAgent = selectedAgent,
@@ -370,6 +377,7 @@ fun ChatScreen(
                         recentModels = recentModels,
                         onToggleFavorite = viewModel.modelAgentManager::toggleFavoriteModel,
                         usedContextTokens = usedContextTokens,
+                        providerNames = providerNames,
                     )
                     ChatInputBar(
                         value = uiState.inputText,
@@ -691,27 +699,38 @@ private fun ChatTopBar(
     var showOverflow by remember { mutableStateOf(false) }
 
     TuiTopBar(
-        title = title,
         onNavigateBack = onBack,
-        actions = {
-            // Compact status: connection dot + branch (no 40dp boxes)
-            ConnectionDot(state = connectionState)
-            branchName?.let { branch ->
-                Text(
-                    text = "${stringResource(R.string.vcs_branch_prefix)} $branch",
-                    style = MaterialTheme.typography.labelSmall.copy(
-                        fontFamily = FontFamily.Monospace
-                    ),
-                    color = theme.textMuted,
-                    maxLines = 1,
-                    overflow = TextOverflow.Ellipsis,
-                    modifier = Modifier
-                        .widthIn(max = Sizing.panelWidthSm) // 80dp — tighter
-                        .padding(start = Spacing.xxs)
-                )
+        titleContent = {
+            Column {
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    ConnectionDot(state = connectionState)
+                    Spacer(Modifier.width(Spacing.xs))
+                    Text(
+                        text = title,
+                        maxLines = 1,
+                        overflow = TextOverflow.Ellipsis,
+                        style = MaterialTheme.typography.titleSmall.copy(
+                            fontWeight = FontWeight.SemiBold
+                        )
+                    )
+                }
+                // Branch sits below the title so it gets full width instead of
+                // being squeezed/truncated in the actions row.
+                branchName?.let { branch ->
+                    Text(
+                        text = "${stringResource(R.string.vcs_branch_prefix)} $branch",
+                        style = MaterialTheme.typography.labelSmall.copy(
+                            fontFamily = FontFamily.Monospace
+                        ),
+                        color = theme.textMuted,
+                        maxLines = 1,
+                        overflow = TextOverflow.Ellipsis
+                    )
+                }
             }
-
-            Spacer(Modifier.width(Spacing.xs))
+        },
+        title = title,
+        actions = {
             // Todo count — only when there are todos (TUI glyph, no rounded badge)
             if (todoCount > 0) {
                 IconButton(
@@ -731,13 +750,13 @@ private fun ChatTopBar(
             Box {
                 IconButton(
                     onClick = { showOverflow = true },
-                    modifier = Modifier.size(Sizing.iconButtonMd).testTag("chat_overflow_button")
+                    modifier = Modifier.size(Sizing.iconButtonLg).testTag("chat_overflow_button")
                 ) {
                     Text(
                         text = "≡",
-                        color = theme.accent,
+                        color = theme.text,
                         fontFamily = FontFamily.Monospace,
-                        style = MaterialTheme.typography.titleMedium
+                        style = MaterialTheme.typography.headlineSmall
                     )
                 }
                 DropdownMenu(

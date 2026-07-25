@@ -16,6 +16,7 @@ import androidx.compose.foundation.layout.fillMaxHeight
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.navigationBarsPadding
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
@@ -28,8 +29,12 @@ import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.foundation.text.BasicTextField
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.Chat
+import androidx.compose.material.icons.filled.Add
 import androidx.compose.material.icons.filled.Folder
+import androidx.compose.material.icons.filled.Refresh
+import androidx.compose.material.icons.filled.Settings
 import androidx.compose.material.icons.filled.Terminal
+import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Surface
@@ -43,8 +48,11 @@ import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.drawBehind
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.PathEffect
 import androidx.compose.ui.graphics.RectangleShape
+import androidx.compose.ui.graphics.drawscope.Stroke
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.semantics.Role
@@ -57,18 +65,21 @@ import dev.blazelight.p4oc.R
 import dev.blazelight.p4oc.core.network.ConnectionState
 import dev.blazelight.p4oc.domain.model.SessionPresence
 import dev.blazelight.p4oc.domain.server.WorkspaceKey
-import dev.blazelight.p4oc.ui.screens.server.ServerConnectionStatus
+import dev.blazelight.p4oc.ui.components.TuiBackButton
+import dev.blazelight.p4oc.ui.components.status.SessionStatusDot
 import dev.blazelight.p4oc.ui.tabs.StartWorkSelection
 import dev.blazelight.p4oc.ui.tabs.StartWorkTarget
 import dev.blazelight.p4oc.ui.theme.LocalOpenCodeTheme
 import dev.blazelight.p4oc.ui.theme.ProjectColors
 import dev.blazelight.p4oc.ui.theme.Sizing
 import dev.blazelight.p4oc.ui.theme.Spacing
-import dev.blazelight.p4oc.ui.theme.opencode.OpenCodeTheme
 import java.util.concurrent.TimeUnit
 
 private const val RECENT_DAY_LIMIT = 30
 private const val HOME_WORKSPACE_SHORTCUT_LIMIT = 3
+private const val CONNECTED_SERVER_LIST_THRESHOLD = 2
+private const val DASH_ON = 10f
+private const val DASH_OFF = 8f
 data class HomeActions(
     val onBrowseSessions: (StartWorkTarget) -> Unit,
     val onBrowseAllSessions: () -> Unit = {},
@@ -76,6 +87,8 @@ data class HomeActions(
     val onOpenTerminal: (StartWorkTarget) -> Unit,
     val onChooseTarget: () -> Unit,
     val onManageServers: () -> Unit = {},
+    val onRefresh: () -> Unit = {},
+    val onSettings: () -> Unit = {},
     val onFocusTab: (String) -> Unit = {},
     val onResumeSession: (SessionPreview) -> Unit = {},
     val onWorkspaceSelected: (WorkspaceSummary) -> Unit = {},
@@ -90,17 +103,14 @@ private data class HomeOverviewInput(
     val onToggleServer: (String) -> Unit,
     val onEnableAllServers: () -> Unit,
     val onSearchQueryChange: (String) -> Unit,
-    val showAllWorkspaces: Boolean,
-    val onShowAllWorkspacesChange: (Boolean) -> Unit,
     val onWorkspaceClick: (WorkspaceSummary) -> Unit,
-    val expandedServerKeys: Set<String>,
-    val onToggleServerExpand: (String) -> Unit,
     val actions: HomeActions,
     val listState: LazyListState,
 )
 
 private data class WorkspaceDetailInput(
     val workspace: WorkspaceSummary,
+    val serverConnected: Boolean,
     val openWork: List<OpenWorkSummary>,
     val sessions: List<SessionPreview>,
     val actions: HomeActions,
@@ -117,13 +127,14 @@ fun homeScreen(
     var selectedWorkspace by remember { mutableStateOf<WorkspaceSummary?>(null) }
     var disabledEndpointKeys by rememberSaveable { mutableStateOf(emptyList<String>()) }
     var searchQuery by rememberSaveable { mutableStateOf("") }
-    var showAllWorkspaces by rememberSaveable { mutableStateOf(false) }
-    var expandedServers by rememberSaveable { mutableStateOf(emptyList<String>()) }
     val selected = selectedWorkspace
     if (selected != null) {
         workspaceDetail(
             input = WorkspaceDetailInput(
                 workspace = selected,
+                serverConnected = summary.servers.firstOrNull {
+                    it.serverRef.endpointKey == selected.serverRef.endpointKey
+                }?.connectionState is ConnectionState.Connected,
                 openWork = summary.openWork.filter {
                     it.serverRef.endpointKey == selected.serverRef.endpointKey &&
                         it.workspaceKey == selected.workspaceKey
@@ -140,19 +151,6 @@ fun homeScreen(
             ),
             modifier = modifier,
         )
-    } else if (showAllWorkspaces) {
-        allWorkspacesScreen(
-            workspaces = summary.filteredHomeResults(
-                enabledEndpointKeys = summary.enabledEndpointKeys(disabledEndpointKeys),
-                query = "",
-            ).workspaces,
-            onWorkspaceClick = {
-                selectedWorkspace = it
-                actions.onWorkspaceSelected(it)
-            },
-            onBack = { showAllWorkspaces = false },
-            modifier = modifier,
-        )
     } else {
         homeOverview(
             input = HomeOverviewInput(
@@ -164,8 +162,6 @@ fun homeScreen(
                 },
                 onEnableAllServers = { disabledEndpointKeys = emptyList() },
                 onSearchQueryChange = { searchQuery = it },
-                showAllWorkspaces = showAllWorkspaces,
-                onShowAllWorkspacesChange = { showAllWorkspaces = it },
                 onWorkspaceClick = {
                     selectedWorkspace = it
                     actions.onWorkspaceSelected(it)
@@ -173,40 +169,11 @@ fun homeScreen(
                         StartWorkSelection.Selected(StartWorkTarget(it.serverRef, it.workspaceKey)),
                     )
                 },
-                expandedServerKeys = expandedServers.toSet(),
-                onToggleServerExpand = { key -> expandedServers = expandedServers.toggleMembership(key) },
                 actions = actions,
                 listState = rememberLazyListState(),
             ),
             modifier = modifier,
         )
-    }
-}
-
-@Composable
-private fun allWorkspacesScreen(
-    workspaces: List<WorkspaceSummary>,
-    onWorkspaceClick: (WorkspaceSummary) -> Unit,
-    onBack: () -> Unit,
-    modifier: Modifier,
-) {
-    LazyColumn(
-        modifier = modifier.fillMaxSize().testTag("home_all_workspaces"),
-        contentPadding = androidx.compose.foundation.layout.PaddingValues(Spacing.md),
-        verticalArrangement = Arrangement.spacedBy(Spacing.xs),
-    ) {
-        item { textAction("‹ Home", "Back to recent workspaces", onBack) }
-        item { sectionLabel("All workspaces · ${workspaces.size}") }
-        item {
-            Column(
-                Modifier.fillMaxWidth(),
-                verticalArrangement = Arrangement.spacedBy(Spacing.xxs),
-            ) {
-                workspaces.forEach { workspace ->
-                    workspaceShortcut(workspace, onWorkspaceClick, Modifier.fillMaxWidth())
-                }
-            }
-        }
     }
 }
 
@@ -231,8 +198,9 @@ private fun LazyListScope.homeOverviewContent(
     results: FilteredHomeResults,
 ) {
     val summary = input.summary
-    item { homeHeader(summary, input.actions.onManageServers) }
+    item { homeHeader(summary, input.actions) }
     item { homeSearchField(input.searchQuery, input.onSearchQueryChange) }
+    item { Spacer(Modifier.height(Spacing.sm)) }
     if (summary.isLoading) {
         item {
             infoCard("Loading existing work", "Sessions already loaded remain available while Home refreshes.")
@@ -246,7 +214,8 @@ private fun LazyListScope.homeOverviewContent(
         HomeSessions(input, results.sessions)
     } else {
         homeWorkspaces(input, results.workspaces)
-        serversProjectsTree(input, summary.servers, summary.workspaces)
+        homeProjects(input, summary.workspaces)
+        connectedServers(input, summary.servers)
     }
 }
 
@@ -258,12 +227,16 @@ private fun homeSearchField(query: String, onQueryChange: (String) -> Unit) {
         value = query,
         onValueChange = onQueryChange,
         singleLine = true,
-        textStyle = MaterialTheme.typography.bodyMedium.copy(color = theme.text),
-        cursorBrush = androidx.compose.ui.graphics.SolidColor(theme.accent),
+        textStyle = MaterialTheme.typography.labelMedium.copy(
+            color = theme.text,
+            fontFamily = FontFamily.Monospace,
+        ),
+        cursorBrush = androidx.compose.ui.graphics.SolidColor(theme.primary),
         modifier = Modifier
             .fillMaxWidth()
-            .height(Sizing.minTouchTarget)
-            .border(Sizing.strokeThin, theme.border, RectangleShape)
+            .height(Sizing.textFieldHeightSm)
+            .background(theme.backgroundPanel, RectangleShape)
+            .border(Sizing.strokeMd, theme.borderSubtle, RectangleShape)
             .semantics { contentDescription = searchDescription }
             .testTag("home_search_field"),
         decorationBox = { field ->
@@ -273,8 +246,8 @@ private fun homeSearchField(query: String, onQueryChange: (String) -> Unit) {
             ) {
                 Text(
                     "/",
-                    style = MaterialTheme.typography.labelMedium,
-                    color = theme.textMuted,
+                    style = MaterialTheme.typography.labelMedium.copy(fontFamily = FontFamily.Monospace),
+                    color = theme.primary,
                 )
                 Spacer(Modifier.width(Spacing.xs))
                 Box(Modifier.weight(1f), contentAlignment = Alignment.CenterStart) {
@@ -282,7 +255,7 @@ private fun homeSearchField(query: String, onQueryChange: (String) -> Unit) {
                     if (query.isEmpty()) {
                         Text(
                             "Search every server, session, or workspace…",
-                            style = MaterialTheme.typography.labelMedium,
+                            style = MaterialTheme.typography.labelMedium.copy(fontFamily = FontFamily.Monospace),
                             color = theme.textMuted,
                             maxLines = 1,
                         )
@@ -339,7 +312,7 @@ private val HomeSessions: LazyListScope.(HomeOverviewInput, List<SessionPreview>
 
 @Suppress("LongMethod")
 private fun LazyListScope.homeWorkspaces(input: HomeOverviewInput, filteredWorkspaces: List<WorkspaceSummary>) {
-    item { sectionLabel(if (input.showAllWorkspaces) "All workspaces" else "Recent workspaces") }
+    item { sectionLabel("Recent workspaces") }
     if (filteredWorkspaces.isEmpty()) {
         item {
             infoCard(
@@ -357,167 +330,70 @@ private fun LazyListScope.homeWorkspaces(input: HomeOverviewInput, filteredWorks
                 },
             )
         }
-    } else if (input.showAllWorkspaces || input.searchQuery.isNotBlank()) {
-        item {
-            Column(
-                Modifier.fillMaxWidth(),
-                verticalArrangement = Arrangement.spacedBy(Spacing.xxs),
-            ) {
-                filteredWorkspaces.forEach { workspace ->
-                    workspaceShortcut(workspace, input.onWorkspaceClick, Modifier.fillMaxWidth())
-                }
-            }
-        }
-        if (input.searchQuery.isBlank()) {
-            item {
-                textAction(
-                    "Show recent only",
-                    "Collapse the workspace list",
-                    { input.onShowAllWorkspacesChange(false) },
-                )
-            }
-        }
+    } else if (input.searchQuery.isNotBlank()) {
+        item { dividedRows(filteredWorkspaces) { workspace -> workspaceShortcut(workspace, input.onWorkspaceClick) } }
     } else {
         item {
-            Column(
-                Modifier.fillMaxWidth(),
-                verticalArrangement = Arrangement.spacedBy(Spacing.xxs),
-            ) {
-                filteredWorkspaces.take(HOME_WORKSPACE_SHORTCUT_LIMIT).forEach { workspace ->
-                    workspaceShortcut(workspace, input.onWorkspaceClick, Modifier.fillMaxWidth())
-                }
-            }
-        }
-        if (filteredWorkspaces.size > HOME_WORKSPACE_SHORTCUT_LIMIT) {
-            item {
-                Row(
-                    Modifier.fillMaxWidth(),
-                    horizontalArrangement = Arrangement.SpaceBetween,
-                    verticalAlignment = Alignment.CenterVertically,
-                ) {
-                    Text(
-                        "${HOME_WORKSPACE_SHORTCUT_LIMIT.coerceAtMost(filteredWorkspaces.size)} most recently used",
-                        style = MaterialTheme.typography.labelSmall,
-                        color = LocalOpenCodeTheme.current.textMuted,
-                    )
-                    textAction(
-                        "All ${filteredWorkspaces.size} workspaces ›",
-                        "",
-                        { input.onShowAllWorkspacesChange(true) },
-                        Modifier.testTag("home_all_workspaces_action"),
-                    )
-                }
+            dividedRows(filteredWorkspaces.take(HOME_WORKSPACE_SHORTCUT_LIMIT)) { workspace ->
+                workspaceShortcut(workspace, input.onWorkspaceClick)
             }
         }
     }
 }
 
 @Composable
-private fun homeHeader(summary: HomeSummaryState, onServers: () -> Unit) {
+private fun homeHeader(summary: HomeSummaryState, actions: HomeActions) {
+    val theme = LocalOpenCodeTheme.current
     Row(
         modifier = Modifier.fillMaxWidth(),
         horizontalArrangement = Arrangement.SpaceBetween,
         verticalAlignment = Alignment.CenterVertically,
     ) {
         Column(modifier = Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(Spacing.xxs)) {
-            Text("Home", style = MaterialTheme.typography.titleMedium, color = LocalOpenCodeTheme.current.text)
+            Text(
+                "Home",
+                style = MaterialTheme.typography.titleMedium.copy(fontFamily = FontFamily.Monospace),
+                color = theme.text,
+            )
             Text(
                 stringResource(R.string.home_summary_counts, summary.sessions.size, summary.workspaces.size),
-                style = MaterialTheme.typography.labelSmall,
-                color = LocalOpenCodeTheme.current.textMuted,
+                style = MaterialTheme.typography.labelSmall.copy(fontFamily = FontFamily.Monospace),
+                color = theme.textMuted,
                 maxLines = 1,
                 overflow = TextOverflow.Ellipsis,
             )
         }
-        textAction("Servers ›", "", onServers, Modifier.testTag("home_servers_action"))
-    }
-}
-
-/** Collapsible SERVERS · PROJECTS tree (design 02) — each server expands to its projects. */
-private fun LazyListScope.serversProjectsTree(
-    input: HomeOverviewInput,
-    servers: List<ServerSummary>,
-    workspaces: List<WorkspaceSummary>,
-) {
-    item { sectionLabel("Servers · Projects") }
-    if (servers.isEmpty()) {
-        item { infoCard("No servers", "Add a server to browse its projects.") }
-        return
-    }
-    servers.forEach { server ->
-        val key = server.serverRef.endpointKey
-        val expanded = key in input.expandedServerKeys
-        val serverWorkspaces = workspaces.filter { it.serverRef.endpointKey == key }
-        item(key = "srv_$key") {
-            serverGroupHeader(server, expanded, serverWorkspaces.size) { input.onToggleServerExpand(key) }
-        }
-        if (expanded) {
-            if (serverWorkspaces.isEmpty()) {
-                item(key = "srv_${key}_empty") { emptyProjectRow() }
-            } else {
-                items(serverWorkspaces, key = { "proj_${key}_${it.workspaceKey}" }) { ws ->
-                    projectRow(ws) { input.onWorkspaceClick(ws) }
-                }
-            }
-        }
+        homeHeaderIconButton(Icons.Default.Refresh, "Refresh", actions.onRefresh, "home_refresh")
+        homeHeaderIconButton(Icons.Default.Add, "Register new server", actions.onManageServers, "home_add_server")
+        homeHeaderIconButton(Icons.Default.Settings, "Settings", actions.onSettings, "home_settings")
     }
 }
 
 @Composable
-private fun serverGroupHeader(
-    server: ServerSummary,
-    expanded: Boolean,
-    projectCount: Int,
-    onToggle: () -> Unit,
+private fun homeHeaderIconButton(
+    icon: androidx.compose.ui.graphics.vector.ImageVector,
+    description: String,
+    onClick: () -> Unit,
+    testTag: String,
 ) {
     val theme = LocalOpenCodeTheme.current
-    val status = server.connectionState.toServerStatus()
     Surface(
-        onClick = onToggle,
+        onClick = onClick,
         shape = RectangleShape,
-        color = theme.backgroundPanel,
+        color = theme.background,
         modifier = Modifier
-            .fillMaxWidth()
-            .testTag("home_server_group_${server.serverRef.endpointKey}"),
+            .size(Sizing.minTouchTarget)
+            .semantics { contentDescription = description }
+            .testTag(testTag),
     ) {
-        Row(
-            Modifier.fillMaxWidth().padding(horizontal = Spacing.sm, vertical = Spacing.xs),
-            verticalAlignment = Alignment.CenterVertically,
-            horizontalArrangement = Arrangement.spacedBy(Spacing.sm),
-        ) {
-            Box(
-                Modifier.size(Sizing.indicatorDotActive)
-                    .background(status.dotColor(theme), RectangleShape)
-                    .semantics { contentDescription = status.contentDescription },
-            )
-            Column(Modifier.weight(1f)) {
-                Text(
-                    server.displayName,
-                    style = MaterialTheme.typography.labelMedium,
-                    color = theme.text,
-                    maxLines = 1,
-                    overflow = TextOverflow.Ellipsis,
-                )
-                Text(
-                    serverEndpointDetail(server),
-                    style = MaterialTheme.typography.labelSmall.copy(fontFamily = FontFamily.Monospace),
-                    color = theme.textMuted,
-                    maxLines = 1,
-                    overflow = TextOverflow.Ellipsis,
-                )
-            }
-            Text("$projectCount", style = MaterialTheme.typography.labelSmall, color = theme.textMuted)
-            Text(
-                if (expanded) "▾" else "▸",
-                style = MaterialTheme.typography.labelMedium.copy(fontFamily = FontFamily.Monospace),
-                color = theme.textMuted,
-            )
+        Box(contentAlignment = Alignment.Center) {
+            Icon(icon, contentDescription = null, tint = theme.textMuted, modifier = Modifier.size(Sizing.iconMd))
         }
     }
 }
 
 @Composable
-private fun projectRow(workspace: WorkspaceSummary, onOpen: () -> Unit) {
+private fun homeProjectRow(workspace: WorkspaceSummary, onOpen: () -> Unit) {
     val theme = LocalOpenCodeTheme.current
     Surface(
         onClick = onOpen,
@@ -528,36 +404,103 @@ private fun projectRow(workspace: WorkspaceSummary, onOpen: () -> Unit) {
             .testTag("home_project_${workspace.serverRef.endpointKey}_${workspace.workspaceKey}"),
     ) {
         Row(
-            Modifier
-                .fillMaxWidth()
-                .padding(start = Sizing.treeIndent, top = Spacing.xs, bottom = Spacing.xs, end = Spacing.sm),
+            Modifier.fillMaxWidth().height(Sizing.listItemHeightMd).padding(horizontal = Spacing.sm),
             verticalAlignment = Alignment.CenterVertically,
             horizontalArrangement = Arrangement.spacedBy(Spacing.sm),
         ) {
             projectPill(workspace)
-            Text(
-                "${workspace.sessionCount} sessions · ${recency(workspace.mostRecentAt)}",
-                style = MaterialTheme.typography.labelSmall.copy(fontFamily = FontFamily.Monospace),
-                color = theme.textMuted,
-                maxLines = 1,
-                overflow = TextOverflow.Ellipsis,
-                modifier = Modifier.weight(1f),
-            )
+            Column(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(Spacing.xxs)) {
+                val sessionLabel = if (workspace.sessionCount == 1) "session" else "sessions"
+                Text(
+                    "${workspace.sessionCount} $sessionLabel · ${recency(workspace.mostRecentAt)}",
+                    style = MaterialTheme.typography.labelMedium.copy(fontFamily = FontFamily.Monospace),
+                    color = theme.text,
+                    maxLines = 1,
+                    overflow = TextOverflow.Ellipsis,
+                )
+                Text(
+                    workspace.serverRef.displayName,
+                    style = MaterialTheme.typography.labelSmall.copy(fontFamily = FontFamily.Monospace),
+                    color = theme.textMuted,
+                    maxLines = 1,
+                    overflow = TextOverflow.Ellipsis,
+                )
+            }
             Text("›", style = MaterialTheme.typography.labelMedium, color = theme.border)
         }
     }
 }
 
+private fun LazyListScope.homeProjects(
+    input: HomeOverviewInput,
+    workspaces: List<WorkspaceSummary>,
+) {
+    item { sectionLabel("Workspaces") }
+    if (workspaces.isEmpty()) {
+        item { infoCard("No workspaces", "Start a session in a project to keep it within reach.") }
+    } else {
+        item {
+            dividedRows(workspaces) { workspace ->
+                homeProjectRow(workspace) { input.onWorkspaceClick(workspace) }
+            }
+        }
+    }
+}
+
+private fun LazyListScope.connectedServers(
+    input: HomeOverviewInput,
+    servers: List<ServerSummary>,
+) {
+    val connected = connectedServersForLauncher(servers)
+    if (connected.isEmpty()) return
+    item { sectionLabel("Connected servers · ${connected.size}") }
+    items(connected, key = { "connected_${it.serverRef.endpointKey}" }) { server ->
+        serverLauncherRow(server, input.actions.onManageServers)
+    }
+}
+
+internal fun connectedServersForLauncher(servers: List<ServerSummary>): List<ServerSummary> =
+    servers.filter { it.connectionState is ConnectionState.Connected }
+        .takeIf { it.size > CONNECTED_SERVER_LIST_THRESHOLD }
+        .orEmpty()
+
 @Composable
-private fun emptyProjectRow() {
-    Text(
-        "no projects · tap server to open",
-        style = MaterialTheme.typography.labelSmall.copy(fontFamily = FontFamily.Monospace),
-        color = LocalOpenCodeTheme.current.border,
+private fun serverLauncherRow(server: ServerSummary, onOpen: () -> Unit) {
+    val theme = LocalOpenCodeTheme.current
+    Surface(
+        onClick = onOpen,
+        shape = RectangleShape,
+        color = theme.backgroundPanel,
         modifier = Modifier
             .fillMaxWidth()
-            .padding(start = Sizing.treeIndent, top = Spacing.xs, bottom = Spacing.xs),
-    )
+            .testTag("home_connected_server_${server.serverRef.endpointKey}"),
+    ) {
+        Row(
+            Modifier.fillMaxWidth().height(Sizing.listItemHeightSm).padding(horizontal = Spacing.sm),
+            verticalAlignment = Alignment.CenterVertically,
+            horizontalArrangement = Arrangement.spacedBy(Spacing.sm),
+        ) {
+            Box(
+                Modifier.size(Sizing.indicatorDot)
+                    .background(theme.success, RectangleShape)
+                    .semantics { contentDescription = "Connected server" },
+            )
+            Text(
+                server.displayName,
+                style = MaterialTheme.typography.labelMedium.copy(fontFamily = FontFamily.Monospace),
+                color = theme.text,
+                maxLines = 1,
+                overflow = TextOverflow.Ellipsis,
+                modifier = Modifier.weight(1f),
+            )
+            Text(
+                "${server.sessionCount} sessions",
+                style = MaterialTheme.typography.labelSmall.copy(fontFamily = FontFamily.Monospace),
+                color = theme.textMuted,
+            )
+            Text("›", style = MaterialTheme.typography.labelMedium, color = theme.border)
+        }
+    }
 }
 
 /** Colored project pill (dark text on a per-project color), shared by rows and the tree. */
@@ -578,21 +521,25 @@ private fun projectPill(workspace: WorkspaceSummary) {
     }
 }
 
-private fun serverEndpointDetail(server: ServerSummary): String =
-    server.serverRef.endpointKey.removePrefix("http://").removePrefix("https://")
-
-private fun ConnectionState.toServerStatus(): ServerConnectionStatus = when (this) {
-    ConnectionState.Connected -> ServerConnectionStatus.CONNECTED
-    ConnectionState.Connecting -> ServerConnectionStatus.CONNECTING
-    ConnectionState.Disconnected -> ServerConnectionStatus.DISCONNECTED
-    is ConnectionState.Error -> ServerConnectionStatus.ERROR
+/** Renders [items] as a single continuous panel, each row separated by a thin divider. */
+@Composable
+private fun <T> dividedRows(items: List<T>, row: @Composable (T) -> Unit) {
+    val theme = LocalOpenCodeTheme.current
+    Column(Modifier.fillMaxWidth()) {
+        items.forEachIndexed { index, value ->
+            row(value)
+            if (index != items.lastIndex) {
+                HorizontalDivider(thickness = Sizing.strokeThin, color = theme.borderSubtle)
+            }
+        }
+    }
 }
 
 @Composable
 private fun workspaceShortcut(
     workspace: WorkspaceSummary,
     onOpen: (WorkspaceSummary) -> Unit,
-    modifier: Modifier,
+    modifier: Modifier = Modifier.fillMaxWidth(),
 ) {
     val theme = LocalOpenCodeTheme.current
     Surface(
@@ -609,11 +556,6 @@ private fun workspaceShortcut(
             verticalAlignment = Alignment.CenterVertically,
             horizontalArrangement = Arrangement.spacedBy(Spacing.sm),
         ) {
-            Text(
-                "↺",
-                style = MaterialTheme.typography.labelMedium.copy(fontFamily = FontFamily.Monospace),
-                color = theme.warning,
-            )
             projectPill(workspace)
             Text(
                 "${workspace.serverRef.displayName} · ${recency(workspace.mostRecentAt)}",
@@ -746,72 +688,121 @@ private fun SessionPresence.statusColor(
     SessionPresence.IDLE, SessionPresence.BACKGROUND -> theme.textMuted
 }
 
-private fun ServerConnectionStatus.dotColor(
-    theme: OpenCodeTheme,
-): Color = when (this) {
-    ServerConnectionStatus.CONNECTED -> theme.success
-    ServerConnectionStatus.CONNECTING -> theme.accent
-    ServerConnectionStatus.AVAILABLE -> theme.success
-    ServerConnectionStatus.DISCONNECTED -> theme.textMuted
-    ServerConnectionStatus.ERROR -> theme.error
-}
-
-private val ServerConnectionStatus.contentDescription: String
-    get() = when (this) {
-        ServerConnectionStatus.CONNECTED -> "Connected server"
-        ServerConnectionStatus.CONNECTING -> "Server connecting"
-        ServerConnectionStatus.AVAILABLE -> "Server available"
-        ServerConnectionStatus.DISCONNECTED -> "Server disconnected"
-        ServerConnectionStatus.ERROR -> "Server connection error"
-    }
-
 @Composable
 private fun workspaceDetail(
     input: WorkspaceDetailInput,
     modifier: Modifier,
 ) {
+    val theme = LocalOpenCodeTheme.current
     val workspace = input.workspace
     val target = StartWorkTarget(workspace.serverRef, workspace.workspaceKey)
-    LazyColumn(
-        modifier = modifier.fillMaxSize().testTag("home_workspace_detail"),
-        contentPadding = androidx.compose.foundation.layout.PaddingValues(Spacing.md),
-        verticalArrangement = Arrangement.spacedBy(Spacing.md),
+    Column(modifier.fillMaxSize().testTag("home_workspace_detail")) {
+        workspaceDetailHeader(input)
+        LazyColumn(
+            modifier = Modifier.fillMaxSize(),
+            contentPadding = PaddingValues(Spacing.md),
+            verticalArrangement = Arrangement.spacedBy(Spacing.md),
+        ) {
+            item { workspaceDetailCard(workspace) }
+            item { sectionLabel("Open work") }
+            workspaceOpenWork(input)
+            item {
+                Row(
+                    Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.SpaceBetween,
+                    verticalAlignment = Alignment.CenterVertically,
+                ) {
+                    sectionLabel("Sessions in this workspace")
+                    Text(
+                        "+ new",
+                        style = MaterialTheme.typography.labelSmall.copy(fontFamily = FontFamily.Monospace),
+                        color = theme.accent,
+                        modifier = Modifier
+                            .clickable(role = Role.Button) { input.actions.onStartScopedWork(target) }
+                            .padding(horizontal = Spacing.xs, vertical = Spacing.xxs)
+                            .testTag("home_workspace_detail_new"),
+                    )
+                }
+            }
+            workspaceSessions(input)
+            item { Spacer(Modifier.navigationBarsPadding()) }
+        }
+    }
+}
+
+@Composable
+private fun workspaceDetailHeader(input: WorkspaceDetailInput) {
+    val theme = LocalOpenCodeTheme.current
+    Row(
+        Modifier.fillMaxWidth().padding(horizontal = Spacing.md, vertical = Spacing.sm),
+        verticalAlignment = Alignment.CenterVertically,
+        horizontalArrangement = Arrangement.spacedBy(Spacing.sm),
     ) {
-        item {
-            textAction(
-                label = "← Home",
-                description = "Back to the previous Home filter and position",
-                onClick = input.onBack,
-                modifier = Modifier.testTag("home_workspace_detail_back"),
-            )
-        }
-        item {
-            infoCard(
-                workspace.workspaceKey.displayLabel(),
-                "${workspace.workspaceKey.detailLabel()}\n" +
-                    "${workspace.serverRef.badgeLabel}  ${workspace.serverRef.displayName}",
-            )
-        }
-        item { sectionLabel("Open work") }
-        workspaceOpenWork(input)
-        item { sectionLabel("Sessions in this workspace") }
-        workspaceSessions(input)
-        item { sectionLabel("Start new work") }
-        item {
-            textAction(
-                label = "New chat, Files, or Terminal",
-                description = "Create work through the shared coordinator in this exact workspace",
-                onClick = { input.actions.onStartScopedWork(target) },
+        TuiBackButton(
+            onClick = input.onBack,
+            description = "Back to Home",
+            modifier = Modifier.testTag("home_workspace_detail_back"),
+        )
+        Box(
+            Modifier
+                .size(Sizing.indicatorDotActive)
+                .background(if (input.serverConnected) theme.success else theme.textMuted, RectangleShape)
+                .semantics {
+                    contentDescription = if (input.serverConnected) "Connected" else "Disconnected"
+                },
+        )
+        Text(
+            input.workspace.workspaceKey.displayLabel(),
+            style = MaterialTheme.typography.titleMedium.copy(fontFamily = FontFamily.Monospace),
+            color = theme.text,
+            maxLines = 1,
+            overflow = TextOverflow.Ellipsis,
+            modifier = Modifier.weight(1f),
+        )
+        Icon(
+            Icons.Default.Refresh,
+            contentDescription = "Refresh",
+            tint = theme.textMuted,
+            modifier = Modifier
+                .clickable(role = Role.Button, onClick = input.actions.onRefresh)
+                .padding(Spacing.xs)
+                .size(Sizing.iconMd),
+        )
+    }
+}
+
+@Composable
+private fun workspaceDetailCard(workspace: WorkspaceSummary) {
+    val theme = LocalOpenCodeTheme.current
+    Surface(shape = RectangleShape, color = theme.backgroundElement, modifier = Modifier.fillMaxWidth()) {
+        Column(Modifier.padding(Spacing.sm), verticalArrangement = Arrangement.spacedBy(Spacing.xs)) {
+            Row(
+                verticalAlignment = Alignment.CenterVertically,
+                horizontalArrangement = Arrangement.spacedBy(Spacing.sm),
+            ) {
+                projectPill(workspace)
+                Text(
+                    "${workspace.serverRef.badgeLabel} · ${workspace.serverRef.displayName}",
+                    style = MaterialTheme.typography.labelSmall.copy(fontFamily = FontFamily.Monospace),
+                    color = theme.textMuted,
+                    maxLines = 1,
+                    overflow = TextOverflow.Ellipsis,
+                )
+            }
+            Text(
+                workspace.workspaceKey.detailLabel(),
+                style = MaterialTheme.typography.labelSmall.copy(fontFamily = FontFamily.Monospace),
+                color = theme.textMuted,
+                maxLines = 1,
+                overflow = TextOverflow.Ellipsis,
             )
         }
     }
 }
 
-private fun androidx.compose.foundation.lazy.LazyListScope.workspaceOpenWork(input: WorkspaceDetailInput) {
+private fun LazyListScope.workspaceOpenWork(input: WorkspaceDetailInput) {
     if (input.openWork.isEmpty()) {
-        item {
-            infoCard("Nothing open", "Existing tabs for this exact workspace appear here.")
-        }
+        item { dashedEmptyCard("Nothing open", "Open tabs for this workspace appear here") }
     } else {
         items(input.openWork, key = { it.tabId }) { work ->
             openWorkCard(work) { input.actions.onFocusTab(work.tabId) }
@@ -819,19 +810,78 @@ private fun androidx.compose.foundation.lazy.LazyListScope.workspaceOpenWork(inp
     }
 }
 
-private fun androidx.compose.foundation.lazy.LazyListScope.workspaceSessions(input: WorkspaceDetailInput) {
+private fun LazyListScope.workspaceSessions(input: WorkspaceDetailInput) {
     if (input.sessions.isEmpty()) {
-        item {
-            infoCard(
-                "No sessions",
-                "No resumable sessions were found for this exact server and workspace.",
-            )
-        }
+        item { dashedEmptyCard("No sessions", "Sessions in this workspace appear here") }
     } else {
         items(input.sessions, key = { it.sessionId.value }) { session ->
-            sessionRow(session = session, onResume = { input.actions.onResumeSession(session) })
+            workspaceSessionRow(session) { input.actions.onResumeSession(session) }
         }
     }
+}
+
+@Composable
+private fun workspaceSessionRow(session: SessionPreview, onResume: () -> Unit) {
+    val theme = LocalOpenCodeTheme.current
+    Surface(
+        onClick = onResume,
+        shape = RectangleShape,
+        color = theme.backgroundElement,
+        modifier = Modifier.fillMaxWidth(),
+    ) {
+        Row(
+            Modifier.fillMaxWidth().padding(Spacing.sm),
+            verticalAlignment = Alignment.CenterVertically,
+            horizontalArrangement = Arrangement.spacedBy(Spacing.sm),
+        ) {
+            SessionStatusDot(session.status, size = Sizing.indicatorDotActive)
+            Column(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(Spacing.xxs)) {
+                Text(
+                    session.title,
+                    style = MaterialTheme.typography.bodyMedium,
+                    color = theme.text,
+                    maxLines = 1,
+                    overflow = TextOverflow.Ellipsis,
+                )
+                Text(
+                    "${session.status.label()} · ${recency(session.updatedAt)}",
+                    style = MaterialTheme.typography.labelSmall.copy(fontFamily = FontFamily.Monospace),
+                    color = theme.textMuted,
+                    maxLines = 1,
+                )
+            }
+            SessionWorkspaceLabel(session, null)
+        }
+    }
+}
+
+@Composable
+private fun dashedEmptyCard(title: String, body: String) {
+    val theme = LocalOpenCodeTheme.current
+    Row(
+        Modifier
+            .fillMaxWidth()
+            .dashedBorder(theme.borderSubtle)
+            .padding(Spacing.md),
+        verticalAlignment = Alignment.CenterVertically,
+        horizontalArrangement = Arrangement.spacedBy(Spacing.sm),
+    ) {
+        Text("⌀", style = MaterialTheme.typography.bodyMedium, color = theme.textMuted)
+        Column(verticalArrangement = Arrangement.spacedBy(Spacing.xxs)) {
+            Text(title, style = MaterialTheme.typography.labelMedium, color = theme.textMuted)
+            Text(body, style = MaterialTheme.typography.labelSmall, color = theme.textMuted)
+        }
+    }
+}
+
+private fun Modifier.dashedBorder(color: Color): Modifier = drawBehind {
+    drawRect(
+        color = color,
+        style = Stroke(
+            width = Sizing.strokeMd.toPx(),
+            pathEffect = PathEffect.dashPathEffect(floatArrayOf(DASH_ON, DASH_OFF), 0f),
+        ),
+    )
 }
 
 @Composable
@@ -870,19 +920,6 @@ private fun infoCard(title: String, body: String) {
         Column(Modifier.padding(Spacing.sm), verticalArrangement = Arrangement.spacedBy(Spacing.xxs)) {
             Text(title, style = MaterialTheme.typography.labelMedium, color = theme.text)
             Text(body, style = MaterialTheme.typography.bodySmall, color = theme.textMuted)
-        }
-    }
-}
-
-@Composable
-private fun textAction(label: String, description: String, onClick: () -> Unit, modifier: Modifier = Modifier) {
-    val theme = LocalOpenCodeTheme.current
-    Surface(onClick = onClick, shape = RectangleShape, color = theme.background, modifier = modifier) {
-        Column(Modifier.padding(Spacing.xs)) {
-            Text(label, style = MaterialTheme.typography.labelMedium, color = theme.accent)
-            if (description.isNotEmpty()) {
-                Text(description, style = MaterialTheme.typography.labelSmall, color = theme.textMuted)
-            }
         }
     }
 }

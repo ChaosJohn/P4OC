@@ -5,6 +5,7 @@
 
 package dev.blazelight.p4oc.ui.tabs
 
+import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
@@ -17,9 +18,11 @@ import androidx.compose.foundation.layout.WindowInsets
 import androidx.compose.foundation.layout.consumeWindowInsets
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.navigationBarsPadding
 import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.statusBars
 import androidx.compose.foundation.layout.statusBarsPadding
 import androidx.compose.foundation.layout.width
@@ -33,6 +36,7 @@ import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.text.BasicTextField
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material3.ExperimentalMaterial3Api
+import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.ModalBottomSheet
 import androidx.compose.material3.Scaffold
@@ -42,7 +46,6 @@ import androidx.compose.material3.SnackbarHostState
 import androidx.compose.material3.SnackbarResult
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
-import androidx.compose.material3.TextButton
 import androidx.compose.material3.rememberModalBottomSheetState
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.DisposableEffect
@@ -57,6 +60,7 @@ import androidx.compose.runtime.setValue
 import androidx.compose.runtime.snapshots.SnapshotStateMap
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.RectangleShape
 import androidx.compose.ui.graphics.SolidColor
 import androidx.compose.ui.platform.LocalLifecycleOwner
@@ -67,7 +71,10 @@ import androidx.compose.ui.semantics.Role
 import androidx.compose.ui.semantics.contentDescription
 import androidx.compose.ui.semantics.selected
 import androidx.compose.ui.semantics.semantics
+import androidx.compose.ui.text.font.FontFamily
+import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
+import androidx.compose.ui.unit.sp
 import androidx.lifecycle.Lifecycle
 import androidx.lifecycle.LifecycleOwner
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
@@ -103,9 +110,9 @@ import dev.blazelight.p4oc.ui.screens.home.HomeSummaryInput
 import dev.blazelight.p4oc.ui.screens.home.ScopedHomeRepositoryState
 import dev.blazelight.p4oc.ui.screens.home.homeScreen
 import dev.blazelight.p4oc.ui.theme.LocalOpenCodeTheme
+import dev.blazelight.p4oc.ui.theme.ProjectColors
 import dev.blazelight.p4oc.ui.theme.Sizing
 import dev.blazelight.p4oc.ui.theme.Spacing
-import dev.blazelight.p4oc.ui.theme.TuiShapes
 import dev.blazelight.p4oc.ui.workspace.WorkspaceRepositoryOwner
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.flow.StateFlow
@@ -113,6 +120,7 @@ import kotlinx.coroutines.launch
 import org.koin.compose.koinInject
 
 private const val TAG = "MainTabScreen"
+private const val SELECTED_ROW_TINT = 0.12f
 
 private data class SavedServerView(
     val endpointKey: String,
@@ -167,26 +175,35 @@ private val startWorkPickerSearch: @Composable (StartWorkUiState) -> Unit = { ui
         value = uiState.pickerSearchQuery,
         onValueChange = { uiState.pickerSearchQuery = it },
         singleLine = true,
-        textStyle = MaterialTheme.typography.bodyMedium.copy(color = theme.text),
-        cursorBrush = SolidColor(theme.accent),
+        textStyle = MaterialTheme.typography.labelMedium.copy(
+            color = theme.text,
+            fontFamily = FontFamily.Monospace,
+        ),
+        cursorBrush = SolidColor(theme.primary),
         modifier = Modifier
             .fillMaxWidth()
-            .border(Sizing.strokeThin, theme.border, RectangleShape)
+            .height(Sizing.textFieldHeightSm)
+            .background(theme.backgroundPanel, RectangleShape)
+            .border(Sizing.strokeMd, theme.borderSubtle, RectangleShape)
             .semantics { contentDescription = searchDescription }
             .testTag("start_work_search_field"),
         decorationBox = { field ->
             Row(
-                Modifier.fillMaxWidth().padding(horizontal = Spacing.sm, vertical = Spacing.xs),
+                Modifier.fillMaxSize().padding(horizontal = Spacing.sm),
                 verticalAlignment = Alignment.CenterVertically,
             ) {
-                Text("/", style = MaterialTheme.typography.labelMedium, color = theme.textMuted)
+                Text(
+                    "/",
+                    style = MaterialTheme.typography.labelMedium.copy(fontFamily = FontFamily.Monospace),
+                    color = theme.primary,
+                )
                 Spacer(Modifier.width(Spacing.xs))
                 Box(Modifier.weight(1f), contentAlignment = Alignment.CenterStart) {
                     field()
                     if (uiState.pickerSearchQuery.isEmpty()) {
                         Text(
                             stringResource(R.string.start_work_filter_workspaces),
-                            style = MaterialTheme.typography.labelMedium,
+                            style = MaterialTheme.typography.labelMedium.copy(fontFamily = FontFamily.Monospace),
                             color = theme.textMuted,
                             maxLines = 1,
                         )
@@ -204,47 +221,57 @@ private val startWorkServerRail: @Composable (
 ) -> Unit = { groups, selectedGroup, uiState ->
     val theme = LocalOpenCodeTheme.current
     val resources = LocalResources.current
-    LazyRow(horizontalArrangement = Arrangement.spacedBy(Spacing.xs)) {
-        items(groups, key = { it.server.endpointKey }) { group ->
-            val selected = group.server.endpointKey == selectedGroup?.server?.endpointKey
-            Surface(
-                color = theme.backgroundPanel,
-                shape = RectangleShape,
-                modifier = Modifier
-                    .width(Sizing.serverFilterCardWidth)
-                    .then(if (selected) Modifier.border(Sizing.strokeMd, theme.primary) else Modifier)
-                    .clickable(role = Role.Tab) {
-                        uiState.pickerSelectedEndpointKey = group.server.endpointKey
-                        uiState.pickerSearchQuery = ""
-                    }
-                    .semantics {
-                        contentDescription = resources.getString(
-                            R.string.start_work_server_workspaces,
-                            group.server.displayName,
-                            group.targets.size - 1,
-                        )
-                        this.selected = selected
-                    }
-                    .testTag("start_work_server_${group.server.endpointKey}"),
-            ) {
+    Column(Modifier.fillMaxWidth()) {
+        LazyRow(horizontalArrangement = Arrangement.spacedBy(Spacing.md)) {
+            items(groups, key = { it.server.endpointKey }) { group ->
+                val selected = group.server.endpointKey == selectedGroup?.server?.endpointKey
+                val markerColor = if (selected) theme.success else theme.textMuted
                 Column(
-                    Modifier.padding(horizontal = Spacing.sm, vertical = Spacing.xs),
+                    modifier = Modifier
+                        .clickable(role = Role.Tab) {
+                            uiState.pickerSelectedEndpointKey = group.server.endpointKey
+                            uiState.pickerSearchQuery = ""
+                        }
+                        .semantics {
+                            contentDescription = resources.getString(
+                                R.string.start_work_server_workspaces,
+                                group.server.displayName,
+                                group.targets.size - 1,
+                            )
+                            this.selected = selected
+                        }
+                        .testTag("start_work_server_${group.server.endpointKey}"),
+                    horizontalAlignment = Alignment.Start,
                 ) {
-                    Text(
-                        group.badgeLabel,
-                        style = MaterialTheme.typography.labelMedium,
-                        color = if (selected) theme.primary else theme.text,
-                    )
-                    Text(
-                        group.server.displayName,
-                        style = MaterialTheme.typography.labelSmall,
-                        color = theme.textMuted,
-                        maxLines = 1,
-                        overflow = TextOverflow.Ellipsis,
+                    Row(
+                        modifier = Modifier.padding(top = Spacing.xs, bottom = Spacing.xxs),
+                        verticalAlignment = Alignment.CenterVertically,
+                        horizontalArrangement = Arrangement.spacedBy(Spacing.xs),
+                    ) {
+                        Box(
+                            Modifier
+                                .size(Sizing.indicatorDot)
+                                .background(markerColor, RectangleShape),
+                        )
+                        Text(
+                            group.badgeLabel,
+                            style = MaterialTheme.typography.labelMedium.copy(fontFamily = FontFamily.Monospace),
+                            fontWeight = if (selected) FontWeight.SemiBold else FontWeight.Normal,
+                            color = if (selected) theme.primary else theme.textMuted,
+                            maxLines = 1,
+                            overflow = TextOverflow.Ellipsis,
+                        )
+                    }
+                    Box(
+                        Modifier
+                            .fillMaxWidth()
+                            .height(Sizing.strokeThick)
+                            .background(if (selected) theme.primary else Color.Transparent, RectangleShape),
                     )
                 }
             }
         }
+        HorizontalDivider(thickness = Sizing.strokeThin, color = theme.borderSubtle)
     }
 }
 
@@ -253,11 +280,15 @@ private val startWorkPickerLedger: @Composable ColumnScope.(
     List<StartWorkTarget>,
 ) -> Unit = { params, targets ->
     val labels = rememberTabTitleLabels()
+    val currentTarget = params.uiState.startWorkContext?.selectedTarget
     targets.firstOrNull { it.workspaceKey == WorkspaceKey.Global }?.let { globalTarget ->
-        filesWorkspaceOption(
-            title = stringResource(R.string.sessions_global),
-            subtitle = workspaceSubtitle(globalTarget.workspaceKey),
-            marker = "◆",
+        startWorkWorkspaceRow(
+            spec = StartWorkWorkspaceRowSpec(
+                target = globalTarget,
+                title = stringResource(R.string.sessions_global),
+                subtitle = workspaceSubtitle(globalTarget.workspaceKey),
+                selected = globalTarget == currentTarget,
+            ),
             onClick = { selectStartWorkPickerTarget(params, globalTarget) },
             modifier = Modifier.testTag("start_work_target_global"),
         )
@@ -279,15 +310,83 @@ private val startWorkPickerLedger: @Composable ColumnScope.(
                 items = directories,
                 key = { target -> "target:${target.serverRef.endpointKey}:${target.workspaceKey}" },
             ) { target ->
-                filesWorkspaceOption(
-                    title = workspaceLabel(target.workspaceKey, labels) ?: workspaceSubtitle(target.workspaceKey),
-                    subtitle = workspaceSubtitle(target.workspaceKey),
-                    marker = "◇",
+                startWorkWorkspaceRow(
+                    spec = StartWorkWorkspaceRowSpec(
+                        target = target,
+                        title = workspaceLabel(target.workspaceKey, labels)
+                            ?: workspaceSubtitle(target.workspaceKey),
+                        subtitle = workspaceSubtitle(target.workspaceKey),
+                        selected = target == currentTarget,
+                    ),
                     onClick = { selectStartWorkPickerTarget(params, target) },
                     modifier = Modifier.testTag("start_work_target_${target.workspaceKey}"),
                 )
             }
             item(key = "picker_navigation_bar") { Spacer(Modifier.navigationBarsPadding()) }
+        }
+    }
+}
+
+private data class StartWorkWorkspaceRowSpec(
+    val target: StartWorkTarget,
+    val title: String,
+    val subtitle: String,
+    val selected: Boolean,
+)
+
+@Composable
+private fun startWorkWorkspaceRow(
+    spec: StartWorkWorkspaceRowSpec,
+    onClick: () -> Unit,
+    modifier: Modifier = Modifier,
+) {
+    val theme = LocalOpenCodeTheme.current
+    val title = spec.title
+    val subtitle = spec.subtitle
+    val selected = spec.selected
+    val projectColor =
+        ProjectColors.colorForProject("${spec.target.serverRef.endpointKey}:${spec.target.workspaceKey}")
+    Surface(
+        onClick = onClick,
+        shape = RectangleShape,
+        color = if (selected) projectColor.copy(alpha = SELECTED_ROW_TINT) else theme.backgroundElement,
+        modifier = modifier
+            .fillMaxWidth()
+            .heightIn(min = Sizing.minTouchTarget),
+    ) {
+        Row(
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(horizontal = Spacing.md, vertical = Spacing.sm),
+            verticalAlignment = Alignment.CenterVertically,
+            horizontalArrangement = Arrangement.spacedBy(Spacing.sm),
+        ) {
+            Text("◆", style = MaterialTheme.typography.bodyMedium, color = projectColor)
+            Column(
+                modifier = Modifier.weight(1f),
+                verticalArrangement = Arrangement.spacedBy(Spacing.xxs),
+            ) {
+                Text(
+                    text = title,
+                    style = MaterialTheme.typography.bodyMedium.copy(fontFamily = FontFamily.Monospace),
+                    fontWeight = if (selected) FontWeight.SemiBold else FontWeight.Normal,
+                    color = if (selected) projectColor else theme.text,
+                    maxLines = 1,
+                    overflow = TextOverflow.Ellipsis,
+                )
+                Text(
+                    text = subtitle,
+                    style = MaterialTheme.typography.labelSmall.copy(fontFamily = FontFamily.Monospace),
+                    color = theme.textMuted,
+                    maxLines = 1,
+                    overflow = TextOverflow.Ellipsis,
+                )
+            }
+            Text(
+                text = "→",
+                style = MaterialTheme.typography.bodyMedium,
+                color = if (selected) projectColor else theme.textMuted,
+            )
         }
     }
 }
@@ -342,6 +441,8 @@ private data class MainTabContentParams(
     val savedServerExists: (String) -> Boolean,
     val connectSavedServer: (String) -> Unit,
     val onDisconnect: () -> Unit,
+    val onSettings: () -> Unit,
+    val onRefreshHome: () -> Unit,
 )
 
 @Composable
@@ -806,6 +907,7 @@ object MainTabScreen {
         pendingNotificationRoute: StateFlow<NotificationRoute?>,
         onNotificationRouteConsumed: (NotificationRoute) -> Unit,
         onDisconnect: () -> Unit,
+        onSettings: () -> Unit = {},
         modifier: Modifier = Modifier,
     ) {
         val deps = rememberMainTabDeps()
@@ -865,12 +967,17 @@ object MainTabScreen {
         )
         mainTabPresenceCollection(tabs, activeTabId, tabMaps)
 
-        val homeRepositoryStates = tabMaps.workspaceOwners.values
+        val distinctWorkspaceOwners = tabMaps.workspaceOwners.values
             .distinctBy { it.workspace.server.endpointKey to it.workspace.key }
-            .map { owner ->
-                val state by owner.sessionRepository.state.collectAsStateWithLifecycle()
-                ScopedHomeRepositoryState(owner.workspace.server, state)
+        val homeRepositoryStates = distinctWorkspaceOwners.map { owner ->
+            val state by owner.sessionRepository.state.collectAsStateWithLifecycle()
+            ScopedHomeRepositoryState(owner.workspace.server, state)
+        }
+        val onRefreshHome: () -> Unit = {
+            distinctWorkspaceOwners.forEach { owner ->
+                deps.coroutineScope.launch { owner.sessionRepository.refresh() }
             }
+        }
 
         val closeTab = rememberCloseTab(deps, tabMaps)
         val snackbarHostState = remember { SnackbarHostState() }
@@ -898,6 +1005,8 @@ object MainTabScreen {
             savedServerExists = savedServerExists,
             connectSavedServer = connectSavedServer,
             onDisconnect = onDisconnect,
+            onSettings = onSettings,
+            onRefreshHome = onRefreshHome,
         )
         mainTabScaffold(params, snackbarHostState, modifier)
         startWorkSheets(params)
@@ -950,6 +1059,8 @@ private fun mainTabScaffold(
                 onTabClose = params.closeTab,
                 onAddClick = {
                     if (params.deps.tabManager.activeTab?.isPinnedHome == true) {
+                        params.uiState.startWorkContext = startWorkContextFor(params.deps.tabManager.activeTab)
+                            .copy(defaultAction = StartWorkAction.NewChat)
                         params.uiState.showStartWorkPicker = true
                     } else {
                         params.uiState.startWorkContext = startWorkContextFor(params.deps.tabManager.activeTab)
@@ -1028,6 +1139,8 @@ private fun mainTabHomeContent(
             },
             onBrowseAllSessions = { params.uiState.showFilesTabPrompt = true },
             onManageServers = params.onDisconnect,
+            onRefresh = params.onRefreshHome,
+            onSettings = params.onSettings,
             onFocusTab = params.deps.tabManager::focusTab,
             onResumeSession = { session ->
                 val existing = params.deps.tabManager.findTabBySessionId(session.sessionId.value)
@@ -1200,18 +1313,23 @@ private fun startWorkSheetContent(
             .padding(bottom = Spacing.md),
         verticalArrangement = Arrangement.spacedBy(Spacing.sm),
     ) {
-        Text(stringResource(R.string.start_work_title), style = MaterialTheme.typography.titleLarge)
+        Text(
+            stringResource(R.string.start_work_title),
+            style = MaterialTheme.typography.titleLarge.copy(fontWeight = FontWeight.SemiBold),
+        )
         if (target == null) {
             Text(stringResource(R.string.start_work_choose_context), color = theme.textMuted)
             LaunchedEffect(Unit) { params.uiState.showStartWorkPicker = true }
         } else {
             startWorkSheetTargetCard(params, target)
+            startWorkSectionHeader(stringResource(R.string.start_work_section_new))
             startWorkSheetScopedActions(params, target)
-            Text(stringResource(R.string.start_work_existing_work), color = theme.textMuted)
+            startWorkSectionHeader(stringResource(R.string.start_work_section_existing))
             startWorkActionRow(
                 label = stringResource(R.string.start_work_sessions),
                 description = stringResource(R.string.start_work_sessions_description),
                 marker = "S",
+                markerColor = theme.accent,
             ) {
                 params.uiState.showStartWorkSheet = false
                 requestScopedAction(params, target, StartWorkAction.BrowseSessions)
@@ -1220,41 +1338,94 @@ private fun startWorkSheetContent(
     }
 }
 
+/** Uppercase, letter-spaced `NEW` / `EXISTING` section label for the Start-work sheet. */
 @Composable
+private fun startWorkSectionHeader(label: String) {
+    val theme = LocalOpenCodeTheme.current
+    Text(
+        text = label.uppercase(),
+        style = MaterialTheme.typography.labelSmall,
+        fontFamily = FontFamily.Monospace,
+        letterSpacing = 1.sp,
+        color = theme.textMuted,
+        modifier = Modifier.padding(top = Spacing.sm, bottom = Spacing.xxs),
+    )
+}
+
+@Composable
+@Suppress("LongMethod")
 private fun startWorkSheetTargetCard(
     params: MainTabContentParams,
     target: StartWorkTarget,
 ) {
     val theme = LocalOpenCodeTheme.current
     val tabTitleLabels = rememberTabTitleLabels()
+    val connectionState = params.scopedConnectionStates[target.serverRef.endpointKey]
+    val statusColor = connectionStatusColor(connectionState)
+    val workspaceName = workspaceLabel(target.workspaceKey, tabTitleLabels)
+        ?: workspaceSubtitle(target.workspaceKey)
     Surface(
         color = theme.backgroundElement,
-        shape = TuiShapes.small,
-        modifier = Modifier.fillMaxWidth().testTag("start_work_context"),
+        shape = RectangleShape,
+        modifier = Modifier
+            .fillMaxWidth()
+            .border(Sizing.strokeMd, theme.borderSubtle, RectangleShape)
+            .testTag("start_work_context"),
     ) {
-        Column(Modifier.padding(Spacing.md)) {
+        Column(Modifier.padding(Spacing.md), verticalArrangement = Arrangement.spacedBy(Spacing.xs)) {
             Row(verticalAlignment = Alignment.CenterVertically) {
-                Text(stringResource(R.string.start_work_in), color = theme.textMuted)
-                Spacer(Modifier.width(Spacing.sm))
-                val connectionStatus = connectionStatusText(
-                    params.scopedConnectionStates[target.serverRef.endpointKey],
+                Box(
+                    modifier = Modifier
+                        .size(Sizing.indicatorDotActive)
+                        .background(statusColor, RectangleShape),
                 )
+                Spacer(Modifier.width(Spacing.sm))
                 Text(
-                    "${target.serverRef.displayName} · $connectionStatus",
+                    target.serverRef.displayName,
+                    color = statusColor,
+                    fontFamily = FontFamily.Monospace,
+                    style = MaterialTheme.typography.bodyMedium,
+                    maxLines = 1,
+                    overflow = TextOverflow.Ellipsis,
+                )
+                Spacer(Modifier.width(Spacing.sm))
+                Text(
+                    "· ${connectionStatusText(connectionState)}",
                     color = theme.textMuted,
+                    style = MaterialTheme.typography.bodySmall,
                     modifier = Modifier.weight(1f),
                     maxLines = 1,
                     overflow = TextOverflow.Ellipsis,
                 )
-                TextButton(onClick = { params.uiState.showStartWorkPicker = true }) {
-                    Text(stringResource(R.string.start_work_change))
-                }
+                Text(
+                    text = stringResource(R.string.start_work_change).lowercase(),
+                    color = theme.accent,
+                    style = MaterialTheme.typography.bodySmall,
+                    modifier = Modifier
+                        .clickable(role = Role.Button) { params.uiState.showStartWorkPicker = true }
+                        .padding(Spacing.xxs),
+                )
             }
             Text(
-                workspaceLabel(target.workspaceKey, tabTitleLabels)
-                    ?: workspaceSubtitle(target.workspaceKey),
+                text = workspaceName,
+                color = ProjectColors.colorForProject(
+                    "${target.serverRef.endpointKey}:${target.workspaceKey}",
+                ),
+                fontFamily = FontFamily.Monospace,
+                fontWeight = FontWeight.Medium,
+                style = MaterialTheme.typography.titleSmall,
             )
         }
+    }
+}
+
+private val connectionStatusColor: @Composable (ConnectionState?) -> Color = { state ->
+    val theme = LocalOpenCodeTheme.current
+    when (state) {
+        is ConnectionState.Connected -> theme.success
+        is ConnectionState.Connecting -> theme.warning
+        is ConnectionState.Error -> theme.error
+        else -> theme.textMuted
     }
 }
 
@@ -1272,17 +1443,19 @@ private fun startWorkSheetScopedActions(
     params: MainTabContentParams,
     target: StartWorkTarget,
 ) {
+    val theme = LocalOpenCodeTheme.current
     val labels = mapOf(
-        StartWorkAction.NewChat to (R.string.start_work_new_chat to "C"),
-        StartWorkAction.Files to (R.string.start_work_files to "F"),
-        StartWorkAction.Terminal to (R.string.start_work_terminal to "T"),
+        StartWorkAction.NewChat to Triple(R.string.start_work_new_chat, "C", theme.primary),
+        StartWorkAction.Files to Triple(R.string.start_work_files, "F", theme.info),
+        StartWorkAction.Terminal to Triple(R.string.start_work_terminal, "T", theme.success),
     )
     startWorkScopedActionOrder.forEach { action ->
-        val (label, marker) = checkNotNull(labels[action])
+        val (label, marker, markerColor) = checkNotNull(labels[action])
         startWorkActionRow(
             label = stringResource(label),
             description = stringResource(R.string.start_work_scoped_action),
             marker = marker,
+            markerColor = markerColor,
         ) {
             params.uiState.showStartWorkSheet = false
             requestScopedAction(params, target, action)
@@ -1339,11 +1512,23 @@ private fun startWorkPickerContent(
     val pickerState = StartWorkPickerState(uiState.pickerSelectedEndpointKey, uiState.pickerSearchQuery)
     val selectedGroup = groups.firstOrNull { it.server.endpointKey == pickerState.selectedEndpointKey }
     val targets = remember(groups, pickerState) { pickerState.filteredTargets(groups) }
-    Column(Modifier.fillMaxWidth().padding(horizontal = Spacing.md)) {
-        Text(
-            stringResource(R.string.start_work_choose_context),
-            style = MaterialTheme.typography.titleMedium,
-        )
+    Column(
+        Modifier.fillMaxWidth().padding(horizontal = Spacing.md),
+        verticalArrangement = Arrangement.spacedBy(Spacing.sm),
+    ) {
+        Column(verticalArrangement = Arrangement.spacedBy(Spacing.xxs)) {
+            Text(
+                stringResource(R.string.start_work_picker_title),
+                style = MaterialTheme.typography.titleMedium,
+                fontWeight = FontWeight.SemiBold,
+                color = theme.text,
+            )
+            Text(
+                stringResource(R.string.start_work_picker_subtitle),
+                style = MaterialTheme.typography.labelSmall.copy(fontFamily = FontFamily.Monospace),
+                color = theme.textMuted,
+            )
+        }
         if (params.savedServerViews.isEmpty()) {
             Text(stringResource(R.string.start_work_no_servers), color = theme.textMuted)
         }
@@ -1370,7 +1555,11 @@ private val selectStartWorkPickerTarget: (MainTabContentParams, StartWorkTarget)
         params.uiState.homeDetailSelection = StartWorkSelection.Selected(pickedTarget)
         params.uiState.showStartWorkPicker = false
         params.uiState.showFilesTabPrompt = false
-        params.uiState.showStartWorkSheet = true
+        if (params.uiState.startWorkContext?.defaultAction == StartWorkAction.NewChat) {
+            requestScopedAction(params, pickedTarget, StartWorkAction.NewChat)
+        } else {
+            params.uiState.showStartWorkSheet = true
+        }
     }
 
 private val terminalTitle: (WorkspaceKey) -> String? = { workspaceKey ->
@@ -1394,6 +1583,7 @@ private fun startWorkActionRow(
     label: String,
     description: String,
     marker: String,
+    markerColor: Color,
     onClick: () -> Unit,
 ) {
     val actionDescription = stringResource(R.string.start_work_action_accessibility, label, description)
@@ -1401,6 +1591,7 @@ private fun startWorkActionRow(
         title = label,
         subtitle = description,
         marker = marker,
+        markerColor = markerColor,
         onClick = onClick,
         modifier = Modifier
             .testTag("start_work_${marker.lowercase()}")
@@ -1409,59 +1600,64 @@ private fun startWorkActionRow(
 }
 
 @Composable
+@Suppress("LongParameterList")
 private fun filesWorkspaceOption(
     title: String,
     subtitle: String,
     marker: String,
+    markerColor: Color,
     onClick: () -> Unit,
     modifier: Modifier = Modifier,
 ) {
     val theme = LocalOpenCodeTheme.current
-    Surface(
+    Row(
         modifier = modifier
             .fillMaxWidth()
             .heightIn(min = Sizing.minTouchTarget)
-            .clickable(role = Role.Button, onClick = onClick),
-        color = theme.backgroundElement,
-        shape = TuiShapes.small,
+            .clickable(role = Role.Button, onClick = onClick)
+            .padding(vertical = Spacing.xs),
+        verticalAlignment = Alignment.CenterVertically,
     ) {
-        Row(
+        // Bordered square badge with the action's letter (C/F/T/S).
+        Box(
             modifier = Modifier
-                .fillMaxWidth()
-                .padding(horizontal = Spacing.md, vertical = Spacing.sm),
-            verticalAlignment = Alignment.CenterVertically,
+                .size(Sizing.iconButtonSm)
+                .border(Sizing.strokeMd, theme.borderSubtle, RectangleShape),
+            contentAlignment = Alignment.Center,
         ) {
             Text(
                 text = marker,
                 style = MaterialTheme.typography.bodyMedium,
-                color = theme.textMuted,
-            )
-            Spacer(Modifier.width(Spacing.sm))
-            Column(
-                modifier = Modifier.weight(1f),
-                verticalArrangement = Arrangement.spacedBy(Spacing.xxs),
-            ) {
-                Text(
-                    text = title,
-                    style = MaterialTheme.typography.bodyMedium,
-                    color = theme.text,
-                    maxLines = 1,
-                    overflow = TextOverflow.Ellipsis,
-                )
-                Text(
-                    text = subtitle,
-                    style = MaterialTheme.typography.labelSmall,
-                    color = theme.textMuted,
-                    maxLines = 1,
-                    overflow = TextOverflow.Ellipsis,
-                )
-            }
-            Spacer(Modifier.width(Spacing.sm))
-            Text(
-                text = "→",
-                style = MaterialTheme.typography.bodyMedium,
-                color = theme.textMuted,
+                fontFamily = FontFamily.Monospace,
+                fontWeight = FontWeight.Medium,
+                color = markerColor,
             )
         }
+        Spacer(Modifier.width(Spacing.md))
+        Column(
+            modifier = Modifier.weight(1f),
+            verticalArrangement = Arrangement.spacedBy(Spacing.xxs),
+        ) {
+            Text(
+                text = title,
+                style = MaterialTheme.typography.bodyMedium,
+                color = theme.text,
+                maxLines = 1,
+                overflow = TextOverflow.Ellipsis,
+            )
+            Text(
+                text = subtitle,
+                style = MaterialTheme.typography.labelSmall,
+                color = theme.textMuted,
+                maxLines = 1,
+                overflow = TextOverflow.Ellipsis,
+            )
+        }
+        Spacer(Modifier.width(Spacing.sm))
+        Text(
+            text = "→",
+            style = MaterialTheme.typography.bodyMedium,
+            color = theme.textMuted,
+        )
     }
 }

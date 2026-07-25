@@ -23,6 +23,7 @@ import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.semantics.Role
 import androidx.compose.ui.text.AnnotatedString
 import androidx.compose.ui.text.font.FontFamily
+import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import dev.blazelight.p4oc.R
 import dev.blazelight.p4oc.domain.model.*
@@ -30,6 +31,7 @@ import dev.blazelight.p4oc.ui.components.TuiLoadingIndicator
 import dev.blazelight.p4oc.ui.components.toolwidgets.ToolGroupWidget
 import dev.blazelight.p4oc.ui.components.toolwidgets.ToolWidgetState
 import dev.blazelight.p4oc.ui.theme.LocalOpenCodeTheme
+import dev.blazelight.p4oc.ui.theme.SemanticColors
 import dev.blazelight.p4oc.ui.theme.Sizing
 import dev.blazelight.p4oc.ui.theme.Spacing
 
@@ -215,6 +217,13 @@ private fun AssistantMessageContent(
         modifier = Modifier.fillMaxWidth(),
         verticalArrangement = Arrangement.spacedBy(Spacing.hairline)
     ) {
+        // Per-turn attribution header: `@build · claude-sonnet-4-5` (design 05).
+        (messageWithParts.message as? Message.Assistant)?.let { assistant ->
+            if (partGroups.isNotEmpty()) {
+                AssistantAttributionHeader(agent = assistant.agent, modelID = assistant.modelID)
+            }
+        }
+
         // Render part groups in order
         partGroups.forEach { group ->
             when (group) {
@@ -278,6 +287,42 @@ private fun renderOtherPart(part: Part) {
         is Part.Retry -> activityMarker(stringResource(R.string.chat_retry_attempt, part.attempt))
         is Part.Compaction -> activityMarker(stringResource(R.string.chat_context_compacted))
         else -> Unit
+    }
+}
+
+/**
+ * Assistant turn attribution header — `@build · claude-sonnet-4-5` (design 05).
+ * `@agent` takes the agent's accent color; the model id trails muted.
+ */
+@Composable
+private fun AssistantAttributionHeader(agent: String, modelID: String) {
+    val theme = LocalOpenCodeTheme.current
+    val agentColor = SemanticColors.AgentSelector.forName(agent)
+    Row(
+        modifier = Modifier
+            .fillMaxWidth()
+            .padding(top = Spacing.xs, bottom = Spacing.xxs),
+        horizontalArrangement = Arrangement.spacedBy(Spacing.sm),
+        verticalAlignment = Alignment.CenterVertically
+    ) {
+        Text(
+            text = "@${agent.lowercase()}",
+            style = MaterialTheme.typography.labelMedium.copy(fontFamily = FontFamily.Monospace),
+            fontWeight = FontWeight.SemiBold,
+            color = agentColor
+        )
+        Text(
+            text = "·",
+            style = MaterialTheme.typography.labelMedium,
+            color = theme.textMuted
+        )
+        Text(
+            text = modelID,
+            style = MaterialTheme.typography.labelMedium.copy(fontFamily = FontFamily.Monospace),
+            color = theme.textMuted,
+            maxLines = 1,
+            overflow = androidx.compose.ui.text.style.TextOverflow.Ellipsis
+        )
     }
 }
 

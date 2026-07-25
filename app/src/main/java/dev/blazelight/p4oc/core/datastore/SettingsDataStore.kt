@@ -103,7 +103,7 @@ class SettingsDataStore constructor(
         private val KEY_THEME_NAME = stringPreferencesKey("theme_name")
         private val KEY_OLED_BLACK = booleanPreferencesKey("oled_black")
 
-        const val DEFAULT_THEME_NAME = "catppuccin"
+        const val DEFAULT_THEME_NAME = "opencode"
         private val KEY_ONBOARDING_COMPLETED = booleanPreferencesKey("onboarding_completed")
         private val KEY_RECENT_SERVERS = stringPreferencesKey("recent_servers")
         private val KEY_SAVED_SERVERS = stringPreferencesKey("saved_servers_v1")

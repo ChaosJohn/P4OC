@@ -11,6 +11,7 @@ import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableLongStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.platform.LocalContext
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
@@ -45,6 +46,7 @@ import dev.blazelight.p4oc.ui.screens.settings.*
 import dev.blazelight.p4oc.ui.screens.terminal.TerminalScreen
 import dev.blazelight.p4oc.ui.workspace.WorkspaceRepositoryOwner
 import dev.blazelight.p4oc.ui.workspace.WorkspaceViewModel
+import kotlinx.coroutines.launch
 import org.koin.androidx.compose.koinViewModel
 import org.koin.compose.koinInject
 import org.koin.core.parameter.parametersOf
@@ -173,6 +175,7 @@ fun TabNavHost(
             )
         ) {
             composable(Screen.Home.route) {
+                val homeCoroutineScope = rememberCoroutineScope()
                 homeScreen(
                     summary = HomeSummaryBuilder.build(
                         HomeSummaryInput(
@@ -186,6 +189,10 @@ fun TabNavHost(
                         onOpenFiles = { onNewFilesTab() },
                         onOpenTerminal = { onNewTerminalTab() },
                         onChooseTarget = onNewFilesTab,
+                        onRefresh = {
+                            homeCoroutineScope.launch { workspaceOwner.sessionRepository.refresh() }
+                        },
+                        onSettings = { navController.navigate(Screen.Settings.route) },
                     ),
                 )
             }

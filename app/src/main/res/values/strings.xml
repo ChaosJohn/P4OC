@@ -85,9 +85,12 @@
     <string name="server_setup_step3_title">Connect from this device</string>
     <string name="server_setup_step3_cmd">Enter http://&lt;your-pc-ip&gt;:4096\nin the URL field above.\nUsername: opencode\nPassword: &lt;your password&gt;</string>
     <string name="server_setup_tip_label">Tip</string>
-    <string name="server_setup_tip_text">--hostname 0.0.0.0 is required so the server is reachable from your phone, not just localhost. Use your computer\'s local IP (e.g., 192.168.x.x) when connecting.</string>
-    <string name="server_setup_find_ip">$ ip addr    # Linux\n$ ifconfig   # macOS\n$ ipconfig   # Windows</string>
-    <string name="server_setup_test_hint">Test from your phone browser:\nhttp://&lt;your-ip&gt;:4096/global/health</string>
+    <string name="server_setup_tip_text">--hostname 0.0.0.0 is required so the server is reachable from your phone, not just localhost. Use your computer\'s local IP (e.g. 192.168.x.x).</string>
+    <!-- Substring of server_setup_tip_text highlighted in the accent colour; keep the two in sync. -->
+    <string name="server_setup_tip_flag" translatable="false">--hostname 0.0.0.0</string>
+    <string name="server_setup_find_ip" translatable="false">$ ip addr    # Linux\n$ ifconfig   # macOS\n$ ipconfig   # Windows</string>
+    <string name="server_setup_test_label">Test from your phone browser:</string>
+    <string name="server_setup_test_url" translatable="false">http://&lt;your-ip&gt;:4096/global/health</string>
     
     <!-- Termux Setup -->
     <string name="termux_step1_title">Step 1: Install Termux</string>
@@ -126,7 +129,24 @@
     <string name="field_hide_password">Hide password</string>
     <string name="field_allow_insecure">Allow self-signed certificate</string>
     <string name="field_allow_insecure_desc">Skip TLS verification (use only on trusted networks)</string>
-    
+
+    <!-- First-run setup (design 01) -->
+    <string name="setup_brand_title">P4OC</string>
+    <string name="setup_brand_tagline">Pocket for OpenCode</string>
+    <string name="setup_server_url_label">SERVER URL</string>
+    <string name="setup_field_optional">· optional</string>
+    <string name="setup_username_label">USERNAME</string>
+    <string name="setup_password_label">PASSWORD</string>
+    <string name="setup_password_show">show</string>
+    <string name="setup_password_hide">hide</string>
+    <string name="setup_tls_label">TLS</string>
+    <string name="setup_tls_skip_verification">skip TLS verification</string>
+    <string name="setup_tls_warning">Only use on trusted networks — a self-signed cert can be spoofed on open Wi-Fi.</string>
+    <string name="setup_credentials_hint">username · password · TLS</string>
+    <string name="setup_scanning_nearby">scanning nearby servers…</string>
+    <string name="setup_retry">retry</string>
+    <string name="server_use">use</string>
+
     <!-- Settings Screen -->
     <string name="settings_title">Settings</string>
     <string name="settings_group_workspace">Workspace</string>
@@ -916,6 +936,8 @@
     <string name="start_work_in">In</string>
     <string name="start_work_change">Change</string>
     <string name="start_work_choose_context">Choose a server and workspace</string>
+    <string name="start_work_picker_title">Choose a workspace</string>
+    <string name="start_work_picker_subtitle">server · project to open</string>
     <string name="start_work_filter_workspaces">Filter workspaces…</string>
     <string name="start_work_no_matching_workspaces">No matching workspaces</string>
     <string name="start_work_no_servers">No servers configured. Add a server to start work.</string>
@@ -923,6 +945,8 @@
     <string name="start_work_files">Files</string>
     <string name="start_work_terminal">Terminal</string>
     <string name="start_work_scoped_action">Open in this exact server and workspace</string>
+    <string name="start_work_section_new">New</string>
+    <string name="start_work_section_existing">Existing</string>
     <string name="start_work_existing_work">Existing work</string>
     <string name="start_work_sessions">Sessions</string>
     <string name="start_work_sessions_description">Browse sessions in this exact workspace</string>

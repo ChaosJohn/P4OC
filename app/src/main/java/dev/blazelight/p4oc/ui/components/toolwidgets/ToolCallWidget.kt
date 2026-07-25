@@ -276,32 +276,37 @@ private fun getToolCompactDescription(tool: Part.Tool): String {
     val input = tool.state.input
     val name = tool.toolName.lowercase()
 
+    // TUI `verb arg` form, matching design 05: `read SseClient.kt`, `grep "reconnect"`, `bash ./gradlew …`.
     return when {
         name in listOf("bash", "execute", "shell") -> {
-            extractParam(input, "command")?.take(60) ?: tool.toolName
+            val command = extractParam(input, "command")?.take(60) ?: return "bash"
+            "bash $command"
         }
         name in listOf("read", "read_file", "serena_read_file") -> {
             val path = extractParam(input, "filePath")
                 ?: extractParam(input, "path")
                 ?: extractParam(input, "relative_path")
-            val fileName = path?.substringAfterLast("/") ?: "file"
-            val lines = extractParam(input, "limit")?.toIntOrNull()
-            if (lines != null) "Read $fileName ($lines lines)" else "Read $fileName"
+            "read ${path?.substringAfterLast("/") ?: "file"}"
         }
-        name in listOf("edit", "write", "morph_edit_file", "serena_replace_content", "serena_create_text_file") -> {
+        name in listOf("edit", "morph_edit_file", "serena_replace_content") -> {
             val path = extractParam(input, "filePath")
                 ?: extractParam(input, "path")
                 ?: extractParam(input, "relative_path")
-            val fileName = path?.substringAfterLast("/") ?: "file"
-            "Modified $fileName"
+            "edit ${path?.substringAfterLast("/") ?: "file"}"
+        }
+        name in listOf("write", "serena_create_text_file") -> {
+            val path = extractParam(input, "filePath")
+                ?: extractParam(input, "path")
+                ?: extractParam(input, "relative_path")
+            "write ${path?.substringAfterLast("/") ?: "file"}"
         }
         name in listOf("glob", "find", "serena_find_file") -> {
             val pattern = extractParam(input, "pattern") ?: extractParam(input, "file_mask")
-            pattern?.let { "Glob $it" } ?: tool.toolName
+            pattern?.let { "glob $it" } ?: tool.toolName
         }
         name in listOf("grep", "search", "serena_search_for_pattern") -> {
             val pattern = extractParam(input, "pattern") ?: extractParam(input, "substring_pattern")
-            pattern?.take(40)?.let { "Search: $it" } ?: tool.toolName
+            pattern?.take(40)?.let { "grep \"$it\"" } ?: tool.toolName
         }
         else -> tool.toolName
     }

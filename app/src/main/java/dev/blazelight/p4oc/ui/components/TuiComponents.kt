@@ -18,12 +18,16 @@ import androidx.compose.ui.draw.alpha
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.RectangleShape
 import androidx.compose.ui.graphics.vector.ImageVector
+import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.semantics.Role
+import androidx.compose.ui.semantics.contentDescription
+import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.input.VisualTransformation
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.sp
+import dev.blazelight.p4oc.R
 import dev.blazelight.p4oc.ui.theme.LocalOpenCodeTheme
 import dev.blazelight.p4oc.ui.theme.Sizing
 import dev.blazelight.p4oc.ui.theme.Spacing
@@ -517,6 +521,29 @@ fun TuiSection(
             content = content
         )
     }
+}
+
+/**
+ * Design back affordance: a plain "←" glyph rather than an Icon/IconButton, matching
+ * the terminal aesthetic. This is the single canonical back button — every screen-level
+ * back control (TuiTopBar, dialogs, sub-views) routes through this.
+ */
+@Composable
+fun TuiBackButton(
+    onClick: () -> Unit,
+    modifier: Modifier = Modifier,
+    description: String = stringResource(R.string.cd_back),
+) {
+    val theme = LocalOpenCodeTheme.current
+    Text(
+        "←",
+        style = MaterialTheme.typography.titleMedium,
+        color = theme.text,
+        modifier = modifier
+            .clickable(role = Role.Button, onClick = onClick)
+            .semantics { contentDescription = description }
+            .padding(Spacing.xs),
+    )
 }
 
 /**

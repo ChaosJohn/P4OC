@@ -8,6 +8,7 @@ import androidx.compose.foundation.isSystemInDarkTheme
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.material3.Surface
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.produceState
 import androidx.compose.ui.Modifier
 import androidx.core.splashscreen.SplashScreen.Companion.installSplashScreen
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
@@ -20,6 +21,7 @@ import dev.blazelight.p4oc.ui.navigation.Screen
 import dev.blazelight.p4oc.ui.theme.LocalOpenCodeTheme
 import dev.blazelight.p4oc.ui.theme.PocketCodeTheme
 import kotlinx.coroutines.flow.MutableStateFlow
+import kotlinx.coroutines.flow.first
 import org.koin.android.ext.android.inject
 
 class MainActivity : ComponentActivity() {
@@ -27,8 +29,12 @@ class MainActivity : ComponentActivity() {
     private val settingsDataStore: SettingsDataStore by inject()
     private val pendingNotificationRoute = MutableStateFlow<NotificationRoute?>(null)
 
+    @Volatile
+    private var startDestinationResolved = false
+
     override fun onCreate(savedInstanceState: Bundle?) {
-        installSplashScreen()
+        val splashScreen = installSplashScreen()
+        splashScreen.setKeepOnScreenCondition { !startDestinationResolved }
         super.onCreate(savedInstanceState)
         pendingNotificationRoute.value = NotificationRouteCodec.read(intent)
 
@@ -49,19 +55,33 @@ class MainActivity : ComponentActivity() {
                     modifier = Modifier.fillMaxSize(),
                     color = LocalOpenCodeTheme.current.background
                 ) {
-                    // Use NavGraph for initial Server/Setup screens,
-                    // then MainTabScreen takes over after connection
-                    val navController = rememberNavController()
-                    NavGraph(
-                        navController = navController,
-                        startDestination = Screen.Server.route,
-                        pendingNotificationRoute = pendingNotificationRoute,
-                        onNotificationRouteConsumed = { route ->
-                            if (pendingNotificationRoute.compareAndSet(route, null)) {
-                                NotificationRouteCodec.clear(intent)
-                            }
-                        },
-                    )
+                    // First launch (onboarding not completed) shows the first-run Setup
+                    // screen; returning users land on the Server connect screen. Resolved
+                    // from persisted state before the NavGraph composes, so the start
+                    // destination is stable for the navigation back stack.
+                    val startDestination by produceState<String?>(initialValue = null) {
+                        value = if (settingsDataStore.onboardingCompleted.first()) {
+                            Screen.Server.route
+                        } else {
+                            Screen.Setup.route
+                        }
+                        startDestinationResolved = true
+                    }
+                    startDestination?.let { destination ->
+                        // Use NavGraph for initial Server/Setup screens,
+                        // then MainTabScreen takes over after connection
+                        val navController = rememberNavController()
+                        NavGraph(
+                            navController = navController,
+                            startDestination = destination,
+                            pendingNotificationRoute = pendingNotificationRoute,
+                            onNotificationRouteConsumed = { route ->
+                                if (pendingNotificationRoute.compareAndSet(route, null)) {
+                                    NotificationRouteCodec.clear(intent)
+                                }
+                            },
+                        )
+                    }
                 }
             }
         }
