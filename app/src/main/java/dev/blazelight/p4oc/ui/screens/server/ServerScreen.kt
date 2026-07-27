@@ -300,13 +300,7 @@ private fun manualServerSection(
         }
     } else {
         remoteServerSection(
-            state = RemoteServerState(
-                uiState.remoteUrl,
-                uiState.username,
-                uiState.password,
-                uiState.allowInsecure,
-                uiState.isConnecting,
-            ),
+            state = uiState.toRemoteServerState(),
             actions = RemoteServerActions(
                 viewModel::setRemoteUrl,
                 viewModel::setUsername,
@@ -350,6 +344,16 @@ private data class RemoteServerState(
     val password: String,
     val allowInsecure: Boolean,
     val isConnecting: Boolean,
+    val showTlsOptions: Boolean,
+)
+
+private fun ServerUiState.toRemoteServerState() = RemoteServerState(
+    url = remoteUrl,
+    username = username,
+    password = password,
+    allowInsecure = allowInsecure,
+    isConnecting = isConnecting,
+    showTlsOptions = showTlsOptions,
 )
 
 private data class RemoteServerActions(
@@ -366,7 +370,8 @@ private fun remoteServerSection(
     actions: RemoteServerActions,
 ) {
     var passwordVisible by remember { mutableStateOf(false) }
-    var showCredentials by rememberSaveable { mutableStateOf(false) }
+    // Credentials are required to reach an OpenCode server, so the panel starts open.
+    var showCredentials by rememberSaveable { mutableStateOf(true) }
     var urlFieldValue by remember { mutableStateOf(serverUrlTextFieldValue(state.url)) }
 
     LaunchedEffect(state.url) {
@@ -548,8 +553,10 @@ private fun credentialsFields(
         serverFieldLabel(stringResource(R.string.setup_password_label))
         Spacer(Modifier.height(Spacing.sm))
         passwordField(state.password, actions.onPasswordChange, passwordVisible, onTogglePassword)
-        Spacer(Modifier.height(Spacing.xl))
-        serverTlsSection(state.allowInsecure, actions.onAllowInsecureChange)
+        if (state.showTlsOptions) {
+            Spacer(Modifier.height(Spacing.xl))
+            serverTlsSection(state.allowInsecure, actions.onAllowInsecureChange)
+        }
     }
 }
 
@@ -564,10 +571,10 @@ private fun serverFieldLabel(label: String) {
             color = theme.textMuted,
         )
         Text(
-            text = stringResource(R.string.setup_field_optional),
+            text = stringResource(R.string.setup_field_required),
             fontFamily = FontFamily.Monospace,
             fontSize = TuiCodeFontSize.md,
-            color = theme.border,
+            color = theme.textMuted,
         )
     }
 }
@@ -938,13 +945,7 @@ private fun savedServerEditorForm(presentation: SavedServerEditorPresentation, o
             }
         }
         remoteServerSection(
-            RemoteServerState(
-                uiState.remoteUrl,
-                uiState.username,
-                uiState.password,
-                uiState.allowInsecure,
-                uiState.isConnecting,
-            ),
+            uiState.toRemoteServerState(),
             RemoteServerActions(
                 viewModel::setRemoteUrl,
                 viewModel::setUsername,

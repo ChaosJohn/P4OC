@@ -80,68 +80,73 @@ fun SettingsScreen(
                 .padding(padding)
                 .verticalScroll(rememberScrollState())
         ) {
-            // Server info (non-clickable)
-            SettingsItem(
-                icon = if (uiState.isLocal) Icons.Default.PhoneAndroid else Icons.Default.Cloud,
-                title = stringResource(R.string.server),
-                subtitle = uiState.serverUrl
-            )
+            // Server-scoped configuration only appears when Settings was opened from a workspace
+            // tab; opened globally there is no single server these could apply to.
+            val scopedServerName = viewModel.scopedServerName
+            if (scopedServerName != null) {
+                // Server info (non-clickable)
+                SettingsItem(
+                    icon = if (uiState.isLocal) Icons.Default.PhoneAndroid else Icons.Default.Cloud,
+                    title = scopedServerName,
+                    subtitle = uiState.serverUrl
+                )
 
-            TuiSectionHeader(stringResource(R.string.settings_group_workspace))
+                TuiSectionHeader(stringResource(R.string.settings_group_server, scopedServerName))
 
-            SettingsItem(
-                icon = Icons.Default.SmartToy,
-                title = stringResource(R.string.settings_providers),
-                subtitle = if (isConnected && onProviderConfig != null) {
-                    stringResource(R.string.settings_providers_desc)
-                } else {
-                    stringResource(R.string.settings_requires_connection)
-                },
-                onClick = onProviderConfig?.takeIf { isConnected },
-                showChevron = isConnected && onProviderConfig != null,
-                enabled = isConnected && onProviderConfig != null,
-                testTag = "settings_provider_item"
-            )
+                SettingsItem(
+                    icon = Icons.Default.SmartToy,
+                    title = stringResource(R.string.settings_providers),
+                    subtitle = if (isConnected && onProviderConfig != null) {
+                        stringResource(R.string.settings_providers_desc)
+                    } else {
+                        stringResource(R.string.settings_requires_connection)
+                    },
+                    onClick = onProviderConfig?.takeIf { isConnected },
+                    showChevron = isConnected && onProviderConfig != null,
+                    enabled = isConnected && onProviderConfig != null,
+                    testTag = "settings_provider_item"
+                )
 
-            SettingsItem(
-                icon = Icons.Default.Tune,
-                title = stringResource(R.string.settings_model_controls),
-                subtitle = if (isConnected && onModelControls != null) {
-                    stringResource(R.string.settings_model_controls_desc)
-                } else {
-                    stringResource(R.string.settings_requires_connection)
-                },
-                onClick = onModelControls?.takeIf { isConnected },
-                showChevron = isConnected && onModelControls != null,
-                enabled = isConnected && onModelControls != null,
-                testTag = "settings_model_controls_item"
-            )
+                SettingsItem(
+                    icon = Icons.Default.Tune,
+                    title = stringResource(R.string.settings_model_controls),
+                    subtitle = if (isConnected && onModelControls != null) {
+                        stringResource(R.string.settings_model_controls_desc)
+                    } else {
+                        stringResource(R.string.settings_requires_connection)
+                    },
+                    onClick = onModelControls?.takeIf { isConnected },
+                    showChevron = isConnected && onModelControls != null,
+                    enabled = isConnected && onModelControls != null,
+                    testTag = "settings_model_controls_item"
+                )
 
-            SettingsItem(
-                icon = Icons.Default.Groups,
-                title = stringResource(R.string.settings_agents),
-                subtitle = if (isConnected) {
-                    stringResource(R.string.settings_agents_desc)
-                } else {
-                    stringResource(R.string.settings_requires_connection)
-                },
-                onClick = if (isConnected) onAgentsConfig else null,
-                showChevron = isConnected,
-                enabled = isConnected
-            )
+                SettingsItem(
+                    icon = Icons.Default.Groups,
+                    title = stringResource(R.string.settings_agents),
+                    subtitle = if (isConnected) {
+                        stringResource(R.string.settings_agents_desc)
+                    } else {
+                        stringResource(R.string.settings_requires_connection)
+                    },
+                    onClick = if (isConnected) onAgentsConfig else null,
+                    showChevron = isConnected,
+                    enabled = isConnected
+                )
 
-            SettingsItem(
-                icon = Icons.Default.Extension,
-                title = stringResource(R.string.settings_skills),
-                subtitle = if (isConnected) {
-                    stringResource(R.string.settings_skills_desc)
-                } else {
-                    stringResource(R.string.settings_requires_connection)
-                },
-                onClick = if (isConnected) onSkills else null,
-                showChevron = isConnected,
-                enabled = isConnected
-            )
+                SettingsItem(
+                    icon = Icons.Default.Extension,
+                    title = stringResource(R.string.settings_skills),
+                    subtitle = if (isConnected) {
+                        stringResource(R.string.settings_skills_desc)
+                    } else {
+                        stringResource(R.string.settings_requires_connection)
+                    },
+                    onClick = if (isConnected) onSkills else null,
+                    showChevron = isConnected,
+                    enabled = isConnected
+                )
+            }
 
             TuiSectionHeader(stringResource(R.string.settings_group_app))
 

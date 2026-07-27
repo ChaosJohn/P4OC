@@ -31,6 +31,17 @@ class SettingsViewModel constructor(
         settingsDataStore.connectionSettings
             .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), ConnectionSettings())
 
+    /**
+     * Display name of the server these settings are scoped to, or `null` when Settings was opened
+     * outside any workspace tab. Provider/agent/skill configuration lives on one specific server,
+     * so with several servers registered there is no meaningful "current" one to target — the
+     * caller hides that group instead of showing it permanently disabled.
+     */
+    val scopedServerName: String? = when (val context = connectionContext) {
+        SettingsConnectionContext.Global -> null
+        is SettingsConnectionContext.Tab -> context.owner.workspace.server.displayName
+    }
+
     /** Whether the app is currently connected to an OpenCode server. */
     val isConnected: StateFlow<Boolean> =
         connectionContext.connectionState(serverConnectionRegistry)

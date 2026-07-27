@@ -27,7 +27,7 @@ import androidx.compose.foundation.layout.statusBars
 import androidx.compose.foundation.layout.statusBarsPadding
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.lazy.LazyColumn
-import androidx.compose.foundation.lazy.LazyRow
+import androidx.compose.foundation.lazy.LazyListScope
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.pager.HorizontalPager
 import androidx.compose.foundation.pager.PagerState
@@ -36,7 +36,6 @@ import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.text.BasicTextField
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material3.ExperimentalMaterial3Api
-import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.ModalBottomSheet
 import androidx.compose.material3.Scaffold
@@ -144,8 +143,13 @@ private class StartWorkUiState {
     var showStartWorkPicker: Boolean by mutableStateOf(false)
     var homeDetailSelection: StartWorkSelection by mutableStateOf(StartWorkSelection.NeedsSelection)
     var pendingStartWork: Pair<StartWorkTarget, StartWorkAction>? by mutableStateOf(null)
-    var pickerSelectedEndpointKey: String? by mutableStateOf(null)
     var pickerSearchQuery: String by mutableStateOf("")
+
+    /** Servers the user has explicitly expanded/collapsed in the picker. */
+    val pickerExpandedServers: SnapshotStateMap<String, Boolean> = mutableStateMapOf()
+
+    /** Servers where the user tapped "show more" past the first page of workspaces. */
+    val pickerShowAllServers: SnapshotStateMap<String, Boolean> = mutableStateMapOf()
 }
 
 internal enum class PendingStartDisposition {
@@ -214,117 +218,153 @@ private val startWorkPickerSearch: @Composable (StartWorkUiState) -> Unit = { ui
     )
 }
 
-private val startWorkServerRail: @Composable (
-    List<StartWorkPickerGroup>,
-    StartWorkPickerGroup?,
-    StartWorkUiState,
-) -> Unit = { groups, selectedGroup, uiState ->
+/**
+ * Collapsible `▸ server ─ N workspaces` header. Collapsing keeps a server with a long workspace
+ * list from burying the others, and the count stays visible while collapsed.
+ */
+@Composable
+private fun startWorkServerHeader(
+    row: StartWorkPickerRow,
+    connectionState: ConnectionState?,
+    onToggle: () -> Unit,
+) {
     val theme = LocalOpenCodeTheme.current
     val resources = LocalResources.current
-    Column(Modifier.fillMaxWidth()) {
-        LazyRow(horizontalArrangement = Arrangement.spacedBy(Spacing.md)) {
-            items(groups, key = { it.server.endpointKey }) { group ->
-                val selected = group.server.endpointKey == selectedGroup?.server?.endpointKey
-                val markerColor = if (selected) theme.success else theme.textMuted
-                Column(
-                    modifier = Modifier
-                        .clickable(role = Role.Tab) {
-                            uiState.pickerSelectedEndpointKey = group.server.endpointKey
-                            uiState.pickerSearchQuery = ""
-                        }
-                        .semantics {
-                            contentDescription = resources.getString(
-                                R.string.start_work_server_workspaces,
-                                group.server.displayName,
-                                group.targets.size - 1,
-                            )
-                            this.selected = selected
-                        }
-                        .testTag("start_work_server_${group.server.endpointKey}"),
-                    horizontalAlignment = Alignment.Start,
-                ) {
-                    Row(
-                        modifier = Modifier.padding(top = Spacing.xs, bottom = Spacing.xxs),
-                        verticalAlignment = Alignment.CenterVertically,
-                        horizontalArrangement = Arrangement.spacedBy(Spacing.xs),
-                    ) {
-                        Box(
-                            Modifier
-                                .size(Sizing.indicatorDot)
-                                .background(markerColor, RectangleShape),
-                        )
-                        Text(
-                            group.badgeLabel,
-                            style = MaterialTheme.typography.labelMedium.copy(fontFamily = FontFamily.Monospace),
-                            fontWeight = if (selected) FontWeight.SemiBold else FontWeight.Normal,
-                            color = if (selected) theme.primary else theme.textMuted,
-                            maxLines = 1,
-                            overflow = TextOverflow.Ellipsis,
-                        )
-                    }
-                    Box(
-                        Modifier
-                            .fillMaxWidth()
-                            .height(Sizing.strokeThick)
-                            .background(if (selected) theme.primary else Color.Transparent, RectangleShape),
-                    )
-                }
+    val server = row.group.server
+    val workspaceCount = row.matchCount
+    Row(
+        modifier = Modifier
+            .fillMaxWidth()
+            .heightIn(min = Sizing.minTouchTarget)
+            .background(theme.backgroundPanel, RectangleShape)
+            .clickable(role = Role.Button, onClick = onToggle)
+            .padding(horizontal = Spacing.sm, vertical = Spacing.xs)
+            .semantics {
+                contentDescription = resources.getString(
+                    R.string.start_work_server_workspaces,
+                    server.displayName,
+                    workspaceCount,
+                )
+                selected = row.expanded
             }
-        }
-        HorizontalDivider(thickness = Sizing.strokeThin, color = theme.borderSubtle)
+            .testTag("start_work_server_${server.endpointKey}"),
+        verticalAlignment = Alignment.CenterVertically,
+        horizontalArrangement = Arrangement.spacedBy(Spacing.sm),
+    ) {
+        Text(
+            text = if (row.expanded) "▾" else "▸",
+            style = MaterialTheme.typography.labelMedium.copy(fontFamily = FontFamily.Monospace),
+            color = theme.secondary,
+        )
+        Box(
+            Modifier
+                .size(Sizing.indicatorDot)
+                .background(connectionStatusColor(connectionState), RectangleShape),
+        )
+        Text(
+            server.displayName,
+            style = MaterialTheme.typography.labelMedium.copy(fontFamily = FontFamily.Monospace),
+            fontWeight = FontWeight.SemiBold,
+            color = theme.text,
+            maxLines = 1,
+            overflow = TextOverflow.Ellipsis,
+            modifier = Modifier.weight(1f),
+        )
+        Text(
+            text = pluralWorkspaceCount(workspaceCount),
+            style = MaterialTheme.typography.labelSmall.copy(fontFamily = FontFamily.Monospace),
+            color = theme.textMuted,
+        )
     }
 }
 
-private val startWorkPickerLedger: @Composable ColumnScope.(
-    MainTabContentParams,
-    List<StartWorkTarget>,
-) -> Unit = { params, targets ->
-    val labels = rememberTabTitleLabels()
-    val currentTarget = params.uiState.startWorkContext?.selectedTarget
-    targets.firstOrNull { it.workspaceKey == WorkspaceKey.Global }?.let { globalTarget ->
-        startWorkWorkspaceRow(
-            spec = StartWorkWorkspaceRowSpec(
-                target = globalTarget,
-                title = stringResource(R.string.sessions_global),
-                subtitle = workspaceSubtitle(globalTarget.workspaceKey),
-                selected = globalTarget == currentTarget,
-            ),
-            onClick = { selectStartWorkPickerTarget(params, globalTarget) },
-            modifier = Modifier.testTag("start_work_target_global"),
-        )
-    }
-    val directories = targets.filter { it.workspaceKey != WorkspaceKey.Global }
-    if (directories.isEmpty()) {
-        Text(
-            stringResource(R.string.start_work_no_matching_workspaces),
-            style = MaterialTheme.typography.labelMedium,
-            color = LocalOpenCodeTheme.current.textMuted,
-            modifier = Modifier.padding(vertical = Spacing.md),
-        )
-    } else {
-        LazyColumn(
-            Modifier.fillMaxWidth().weight(1f, fill = false),
-            verticalArrangement = Arrangement.spacedBy(Spacing.hairline),
-        ) {
-            items(
-                items = directories,
-                key = { target -> "target:${target.serverRef.endpointKey}:${target.workspaceKey}" },
-            ) { target ->
-                startWorkWorkspaceRow(
-                    spec = StartWorkWorkspaceRowSpec(
-                        target = target,
-                        title = workspaceLabel(target.workspaceKey, labels)
-                            ?: workspaceSubtitle(target.workspaceKey),
-                        subtitle = workspaceSubtitle(target.workspaceKey),
-                        selected = target == currentTarget,
-                    ),
-                    onClick = { selectStartWorkPickerTarget(params, target) },
-                    modifier = Modifier.testTag("start_work_target_${target.workspaceKey}"),
-                )
+@Composable
+private fun pluralWorkspaceCount(count: Int): String = if (count == 1) {
+    stringResource(R.string.start_work_workspace_count_one)
+} else {
+    stringResource(R.string.start_work_workspace_count_other, count)
+}
+
+/** `+ N more` row that lifts the per-server cap once the list runs past a screenful. */
+@Composable
+private fun startWorkShowMoreRow(endpointKey: String, hiddenCount: Int, onShowAll: () -> Unit) {
+    val theme = LocalOpenCodeTheme.current
+    Text(
+        text = stringResource(R.string.start_work_show_more, hiddenCount),
+        style = MaterialTheme.typography.labelSmall.copy(fontFamily = FontFamily.Monospace),
+        color = theme.accent,
+        modifier = Modifier
+            .fillMaxWidth()
+            .heightIn(min = Sizing.minTouchTarget)
+            .clickable(role = Role.Button, onClick = onShowAll)
+            .padding(horizontal = Spacing.md, vertical = Spacing.sm)
+            .testTag("start_work_show_more_$endpointKey"),
+    )
+}
+
+private fun LazyListScope.startWorkPickerLedger(
+    params: MainTabContentParams,
+    rows: List<StartWorkPickerRow>,
+) {
+    val uiState = params.uiState
+    rows.forEach { row ->
+        val endpointKey = row.group.server.endpointKey
+        item(key = "server:$endpointKey") {
+            startWorkServerHeader(
+                row = row,
+                connectionState = params.scopedConnectionStates[endpointKey],
+            ) {
+                uiState.pickerExpandedServers[endpointKey] = !row.expanded
             }
-            item(key = "picker_navigation_bar") { Spacer(Modifier.navigationBarsPadding()) }
+        }
+        items(
+            items = row.visibleTargets,
+            key = { target -> "target:$endpointKey:${target.workspaceKey}" },
+        ) { target ->
+            startWorkPickerTargetRow(params, target)
+        }
+        if (row.hiddenCount > 0) {
+            item(key = "more:$endpointKey") {
+                startWorkShowMoreRow(endpointKey, row.hiddenCount) {
+                    uiState.pickerShowAllServers[endpointKey] = true
+                }
+            }
         }
     }
+    if (rows.isEmpty()) {
+        item(key = "picker_no_matches") {
+            Text(
+                stringResource(R.string.start_work_no_matching_workspaces),
+                style = MaterialTheme.typography.labelMedium,
+                color = LocalOpenCodeTheme.current.textMuted,
+                modifier = Modifier.padding(vertical = Spacing.md),
+            )
+        }
+    }
+    item(key = "picker_navigation_bar") { Spacer(Modifier.navigationBarsPadding()) }
+}
+
+@Composable
+private fun startWorkPickerTargetRow(params: MainTabContentParams, target: StartWorkTarget) {
+    val labels = rememberTabTitleLabels()
+    val currentTarget = params.uiState.startWorkContext?.selectedTarget
+    val isGlobal = target.workspaceKey == WorkspaceKey.Global
+    startWorkWorkspaceRow(
+        spec = StartWorkWorkspaceRowSpec(
+            target = target,
+            title = if (isGlobal) {
+                stringResource(R.string.sessions_global)
+            } else {
+                workspaceLabel(target.workspaceKey, labels) ?: workspaceSubtitle(target.workspaceKey)
+            },
+            subtitle = workspaceSubtitle(target.workspaceKey),
+            selected = target == currentTarget,
+        ),
+        onClick = { selectStartWorkPickerTarget(params, target) },
+        modifier = Modifier.testTag(
+            if (isGlobal) "start_work_target_global" else "start_work_target_${target.workspaceKey}",
+        ),
+    )
 }
 
 private data class StartWorkWorkspaceRowSpec(
@@ -1451,9 +1491,11 @@ private fun startWorkSheetScopedActions(
     )
     startWorkScopedActionOrder.forEach { action ->
         val (label, marker, markerColor) = checkNotNull(labels[action])
+        // The target card directly above already names the server and workspace, so the rows
+        // stay single-line instead of repeating it three times.
         startWorkActionRow(
             label = stringResource(label),
-            description = stringResource(R.string.start_work_scoped_action),
+            description = null,
             marker = marker,
             markerColor = markerColor,
         ) {
@@ -1476,11 +1518,16 @@ private fun startWorkPickerSheet(params: MainTabContentParams) {
     val knownHomeTargets = remember(params.homeRepositoryStates) {
         deriveStartWorkPickerTargets(params.homeRepositoryStates)
     }
+    // Every opening starts from the full tree rather than the previous session's filter.
+    LaunchedEffect(Unit) { uiState.pickerSearchQuery = "" }
     ModalBottomSheet(
         onDismissRequest = {
             uiState.showStartWorkPicker = false
             uiState.showFilesTabPrompt = false
         },
+        // Opening fully expanded gives the workspace list a bounded height to scroll inside;
+        // a partially-expanded sheet clips the tail of a long server instead.
+        sheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true),
         containerColor = theme.background,
         modifier = Modifier.testTag("start_work_context_picker"),
     ) {
@@ -1495,7 +1542,6 @@ private fun startWorkPickerContent(
     knownHomeTargets: List<StartWorkTarget>,
 ) {
     val theme = LocalOpenCodeTheme.current
-    val tabTitleLabels = rememberTabTitleLabels()
     val uiState = params.uiState
     val groups = remember(params.savedServerViews, openTargets, knownHomeTargets) {
         buildStartWorkPickerGroups(
@@ -1504,16 +1550,16 @@ private fun startWorkPickerContent(
             knownHomeTargets,
         )
     }
-    LaunchedEffect(groups, uiState.pickerSelectedEndpointKey) {
-        if (groups.none { it.server.endpointKey == uiState.pickerSelectedEndpointKey }) {
-            uiState.pickerSelectedEndpointKey = groups.firstOrNull()?.server?.endpointKey
-        }
-    }
-    val pickerState = StartWorkPickerState(uiState.pickerSelectedEndpointKey, uiState.pickerSearchQuery)
-    val selectedGroup = groups.firstOrNull { it.server.endpointKey == pickerState.selectedEndpointKey }
-    val targets = remember(groups, pickerState) { pickerState.filteredTargets(groups) }
+    val viewState = StartWorkPickerViewState(
+        query = uiState.pickerSearchQuery,
+        expandedOverrides = uiState.pickerExpandedServers,
+        showAllEndpointKeys = uiState.pickerShowAllServers.filterValues { it }.keys,
+        defaultExpandedEndpointKey = uiState.startWorkContext?.selectedTarget?.serverRef?.endpointKey
+            ?: groups.firstOrNull()?.server?.endpointKey,
+    )
+    val rows = remember(groups, viewState) { buildStartWorkPickerRows(groups, viewState) }
     Column(
-        Modifier.fillMaxWidth().padding(horizontal = Spacing.md),
+        Modifier.fillMaxSize().padding(horizontal = Spacing.md),
         verticalArrangement = Arrangement.spacedBy(Spacing.sm),
     ) {
         Column(verticalArrangement = Arrangement.spacedBy(Spacing.xxs)) {
@@ -1533,8 +1579,12 @@ private fun startWorkPickerContent(
             Text(stringResource(R.string.start_work_no_servers), color = theme.textMuted)
         }
         startWorkPickerSearch(uiState)
-        startWorkServerRail(groups, selectedGroup, uiState)
-        startWorkPickerLedger(params, targets)
+        LazyColumn(
+            Modifier.fillMaxWidth().weight(1f),
+            verticalArrangement = Arrangement.spacedBy(Spacing.hairline),
+        ) {
+            startWorkPickerLedger(params, rows)
+        }
     }
 }
 
@@ -1581,12 +1631,12 @@ private val workspaceSubtitle: (WorkspaceKey) -> String = { workspaceKey ->
 @Composable
 private fun startWorkActionRow(
     label: String,
-    description: String,
+    description: String?,
     marker: String,
     markerColor: Color,
     onClick: () -> Unit,
 ) {
-    val actionDescription = stringResource(R.string.start_work_action_accessibility, label, description)
+    val actionDescription = stringResource(R.string.start_work_action_accessibility, label, description.orEmpty())
     filesWorkspaceOption(
         title = label,
         subtitle = description,
@@ -1603,7 +1653,7 @@ private fun startWorkActionRow(
 @Suppress("LongParameterList")
 private fun filesWorkspaceOption(
     title: String,
-    subtitle: String,
+    subtitle: String?,
     marker: String,
     markerColor: Color,
     onClick: () -> Unit,
@@ -1645,13 +1695,15 @@ private fun filesWorkspaceOption(
                 maxLines = 1,
                 overflow = TextOverflow.Ellipsis,
             )
-            Text(
-                text = subtitle,
-                style = MaterialTheme.typography.labelSmall,
-                color = theme.textMuted,
-                maxLines = 1,
-                overflow = TextOverflow.Ellipsis,
-            )
+            if (subtitle != null) {
+                Text(
+                    text = subtitle,
+                    style = MaterialTheme.typography.labelSmall,
+                    color = theme.textMuted,
+                    maxLines = 1,
+                    overflow = TextOverflow.Ellipsis,
+                )
+            }
         }
         Spacer(Modifier.width(Spacing.sm))
         Text(

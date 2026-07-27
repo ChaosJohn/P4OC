@@ -100,9 +100,11 @@ private data class HomeOverviewInput(
     val summary: HomeSummaryState,
     val enabledEndpointKeys: Set<String>,
     val searchQuery: String,
+    val showAllWorkspaces: Boolean,
     val onToggleServer: (String) -> Unit,
     val onEnableAllServers: () -> Unit,
     val onSearchQueryChange: (String) -> Unit,
+    val onToggleAllWorkspaces: () -> Unit,
     val onWorkspaceClick: (WorkspaceSummary) -> Unit,
     val actions: HomeActions,
     val listState: LazyListState,
@@ -127,6 +129,7 @@ fun homeScreen(
     var selectedWorkspace by remember { mutableStateOf<WorkspaceSummary?>(null) }
     var disabledEndpointKeys by rememberSaveable { mutableStateOf(emptyList<String>()) }
     var searchQuery by rememberSaveable { mutableStateOf("") }
+    var showAllWorkspaces by rememberSaveable { mutableStateOf(false) }
     val selected = selectedWorkspace
     if (selected != null) {
         workspaceDetail(
@@ -157,11 +160,13 @@ fun homeScreen(
                 summary = summary,
                 enabledEndpointKeys = summary.enabledEndpointKeys(disabledEndpointKeys),
                 searchQuery = searchQuery,
+                showAllWorkspaces = showAllWorkspaces,
                 onToggleServer = { endpointKey ->
                     disabledEndpointKeys = disabledEndpointKeys.toggleMembership(endpointKey)
                 },
                 onEnableAllServers = { disabledEndpointKeys = emptyList() },
                 onSearchQueryChange = { searchQuery = it },
+                onToggleAllWorkspaces = { showAllWorkspaces = !showAllWorkspaces },
                 onWorkspaceClick = {
                     selectedWorkspace = it
                     actions.onWorkspaceSelected(it)
@@ -203,18 +208,16 @@ private fun LazyListScope.homeOverviewContent(
     item { Spacer(Modifier.height(Spacing.sm)) }
     if (summary.isLoading) {
         item {
-            infoCard("Loading existing work", "Sessions already loaded remain available while Home refreshes.")
+            infoCard("Refreshing", "Already-loaded work stays available.")
         }
     }
     if (summary.partialFailures.isNotEmpty()) {
-        item { infoCard("Some work is unavailable", summary.partialFailures.joinToString(" · ")) }
+        item { infoCard("Some servers did not respond", summary.partialFailures.joinToString(" · ")) }
     }
-    if (input.searchQuery.isNotBlank()) {
-        homeWorkspaces(input, results.workspaces)
-        HomeSessions(input, results.sessions)
-    } else {
-        homeWorkspaces(input, results.workspaces)
-        homeProjects(input, summary.workspaces)
+    // Workspaces first, then the sessions themselves, so resuming a session is one tap from Home.
+    homeWorkspaces(input, results.workspaces)
+    HomeSessions(input, results.sessions)
+    if (input.searchQuery.isBlank()) {
         connectedServers(input, summary.servers)
     }
 }
@@ -254,7 +257,7 @@ private fun homeSearchField(query: String, onQueryChange: (String) -> Unit) {
                     field()
                     if (query.isEmpty()) {
                         Text(
-                            "Search every server, session, or workspace…",
+                            "Search sessions and workspaces",
                             style = MaterialTheme.typography.labelMedium.copy(fontFamily = FontFamily.Monospace),
                             color = theme.textMuted,
                             maxLines = 1,
@@ -267,23 +270,12 @@ private fun homeSearchField(query: String, onQueryChange: (String) -> Unit) {
 }
 
 private val HomeSessions: LazyListScope.(HomeOverviewInput, List<SessionPreview>) -> Unit = { input, sessions ->
-    item {
-        val scope = if (input.searchQuery.isNotBlank()) {
-            "all servers"
-        } else {
-            "${input.enabledEndpointKeys.size} server${if (input.enabledEndpointKeys.size == 1) "" else "s"}"
-        }
-        sectionLabel("Newest sessions · $scope · ${sessions.size}")
-    }
+    item { sectionLabel("Sessions · ${sessions.size}") }
     if (sessions.isEmpty()) {
         item {
             infoCard(
-                if (input.searchQuery.isNotBlank()) "No matching sessions" else "No sessions here",
-                if (input.searchQuery.isNotBlank()) {
-                    "Try another search or server filter."
-                } else {
-                    "Sessions with history will appear here for quick resume."
-                },
+                if (input.searchQuery.isNotBlank()) "No matching sessions" else "No sessions yet",
+                if (input.searchQuery.isNotBlank()) "Try another search." else "Use + to start one.",
             )
         }
     } else {
@@ -310,35 +302,50 @@ private val HomeSessions: LazyListScope.(HomeOverviewInput, List<SessionPreview>
     }
 }
 
-@Suppress("LongMethod")
 private fun LazyListScope.homeWorkspaces(input: HomeOverviewInput, filteredWorkspaces: List<WorkspaceSummary>) {
-    item { sectionLabel("Recent workspaces") }
+    val searching = input.searchQuery.isNotBlank()
+    val capped = searching || input.showAllWorkspaces
+    val visible = if (capped) filteredWorkspaces else filteredWorkspaces.take(HOME_WORKSPACE_SHORTCUT_LIMIT)
+    item { sectionLabel(if (searching) "Workspaces" else "Recent workspaces") }
     if (filteredWorkspaces.isEmpty()) {
         item {
             infoCard(
-                if (input.summary.isLoading) {
-                    "Looking for workspaces"
-                } else if (input.searchQuery.isNotBlank()) {
-                    "No matching workspaces"
-                } else {
-                    "No resumable work"
+                when {
+                    input.summary.isLoading -> "Looking for workspaces"
+                    searching -> "No matching workspaces"
+                    else -> "No workspaces yet"
                 },
-                if (input.searchQuery.isNotBlank()) {
-                    "Try another search or server filter."
-                } else {
-                    "Choose another server filter, or use + to start something new."
-                },
+                if (searching) "Try another search." else "Use + to start something new.",
             )
         }
-    } else if (input.searchQuery.isNotBlank()) {
-        item { dividedRows(filteredWorkspaces) { workspace -> workspaceShortcut(workspace, input.onWorkspaceClick) } }
-    } else {
+        return
+    }
+    item { dividedRows(visible) { workspace -> workspaceShortcut(workspace, input.onWorkspaceClick) } }
+    val hidden = filteredWorkspaces.size - visible.size
+    if (!searching && (hidden > 0 || input.showAllWorkspaces)) {
         item {
-            dividedRows(filteredWorkspaces.take(HOME_WORKSPACE_SHORTCUT_LIMIT)) { workspace ->
-                workspaceShortcut(workspace, input.onWorkspaceClick)
-            }
+            homeMoreRow(
+                label = if (input.showAllWorkspaces) "− show less" else "+ $hidden more",
+                onClick = input.onToggleAllWorkspaces,
+                testTag = "home_workspaces_toggle",
+            )
         }
     }
+}
+
+/** Inline `+ N more` / `− show less` affordance under a capped Home list. */
+@Composable
+private fun homeMoreRow(label: String, onClick: () -> Unit, testTag: String) {
+    Text(
+        label,
+        style = MaterialTheme.typography.labelSmall.copy(fontFamily = FontFamily.Monospace),
+        color = LocalOpenCodeTheme.current.accent,
+        modifier = Modifier
+            .fillMaxWidth()
+            .clickable(role = Role.Button, onClick = onClick)
+            .padding(horizontal = Spacing.sm, vertical = Spacing.sm)
+            .testTag(testTag),
+    )
 }
 
 @Composable
@@ -364,7 +371,7 @@ private fun homeHeader(summary: HomeSummaryState, actions: HomeActions) {
             )
         }
         homeHeaderIconButton(Icons.Default.Refresh, "Refresh", actions.onRefresh, "home_refresh")
-        homeHeaderIconButton(Icons.Default.Add, "Register new server", actions.onManageServers, "home_add_server")
+        homeHeaderIconButton(Icons.Default.Add, "Add server", actions.onManageServers, "home_add_server")
         homeHeaderIconButton(Icons.Default.Settings, "Settings", actions.onSettings, "home_settings")
     }
 }
@@ -388,61 +395,6 @@ private fun homeHeaderIconButton(
     ) {
         Box(contentAlignment = Alignment.Center) {
             Icon(icon, contentDescription = null, tint = theme.textMuted, modifier = Modifier.size(Sizing.iconMd))
-        }
-    }
-}
-
-@Composable
-private fun homeProjectRow(workspace: WorkspaceSummary, onOpen: () -> Unit) {
-    val theme = LocalOpenCodeTheme.current
-    Surface(
-        onClick = onOpen,
-        shape = RectangleShape,
-        color = theme.background,
-        modifier = Modifier
-            .fillMaxWidth()
-            .testTag("home_project_${workspace.serverRef.endpointKey}_${workspace.workspaceKey}"),
-    ) {
-        Row(
-            Modifier.fillMaxWidth().height(Sizing.listItemHeightMd).padding(horizontal = Spacing.sm),
-            verticalAlignment = Alignment.CenterVertically,
-            horizontalArrangement = Arrangement.spacedBy(Spacing.sm),
-        ) {
-            projectPill(workspace)
-            Column(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(Spacing.xxs)) {
-                val sessionLabel = if (workspace.sessionCount == 1) "session" else "sessions"
-                Text(
-                    "${workspace.sessionCount} $sessionLabel · ${recency(workspace.mostRecentAt)}",
-                    style = MaterialTheme.typography.labelMedium.copy(fontFamily = FontFamily.Monospace),
-                    color = theme.text,
-                    maxLines = 1,
-                    overflow = TextOverflow.Ellipsis,
-                )
-                Text(
-                    workspace.serverRef.displayName,
-                    style = MaterialTheme.typography.labelSmall.copy(fontFamily = FontFamily.Monospace),
-                    color = theme.textMuted,
-                    maxLines = 1,
-                    overflow = TextOverflow.Ellipsis,
-                )
-            }
-            Text("›", style = MaterialTheme.typography.labelMedium, color = theme.border)
-        }
-    }
-}
-
-private fun LazyListScope.homeProjects(
-    input: HomeOverviewInput,
-    workspaces: List<WorkspaceSummary>,
-) {
-    item { sectionLabel("Workspaces") }
-    if (workspaces.isEmpty()) {
-        item { infoCard("No workspaces", "Start a session in a project to keep it within reach.") }
-    } else {
-        item {
-            dividedRows(workspaces) { workspace ->
-                homeProjectRow(workspace) { input.onWorkspaceClick(workspace) }
-            }
         }
     }
 }
@@ -551,20 +503,29 @@ private fun workspaceShortcut(
         Row(
             Modifier
                 .fillMaxWidth()
-                .height(Sizing.listItemHeightSm)
+                .height(Sizing.listItemHeightMd)
                 .padding(horizontal = Spacing.sm),
             verticalAlignment = Alignment.CenterVertically,
             horizontalArrangement = Arrangement.spacedBy(Spacing.sm),
         ) {
             projectPill(workspace)
-            Text(
-                "${workspace.serverRef.displayName} · ${recency(workspace.mostRecentAt)}",
-                style = MaterialTheme.typography.labelSmall.copy(fontFamily = FontFamily.Monospace),
-                color = theme.textMuted,
-                maxLines = 1,
-                overflow = TextOverflow.Ellipsis,
-                modifier = Modifier.weight(1f),
-            )
+            Column(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(Spacing.xxs)) {
+                Text(
+                    "${workspace.sessionCount} ${if (workspace.sessionCount == 1) "session" else "sessions"}" +
+                        " · ${recency(workspace.mostRecentAt)}",
+                    style = MaterialTheme.typography.labelMedium.copy(fontFamily = FontFamily.Monospace),
+                    color = theme.text,
+                    maxLines = 1,
+                    overflow = TextOverflow.Ellipsis,
+                )
+                Text(
+                    workspace.serverRef.displayName,
+                    style = MaterialTheme.typography.labelSmall.copy(fontFamily = FontFamily.Monospace),
+                    color = theme.textMuted,
+                    maxLines = 1,
+                    overflow = TextOverflow.Ellipsis,
+                )
+            }
             Text("›", style = MaterialTheme.typography.labelMedium, color = theme.border)
         }
     }
@@ -712,7 +673,7 @@ private fun workspaceDetail(
                     horizontalArrangement = Arrangement.SpaceBetween,
                     verticalAlignment = Alignment.CenterVertically,
                 ) {
-                    sectionLabel("Sessions in this workspace")
+                    sectionLabel("Sessions")
                     Text(
                         "+ new",
                         style = MaterialTheme.typography.labelSmall.copy(fontFamily = FontFamily.Monospace),
@@ -802,7 +763,7 @@ private fun workspaceDetailCard(workspace: WorkspaceSummary) {
 
 private fun LazyListScope.workspaceOpenWork(input: WorkspaceDetailInput) {
     if (input.openWork.isEmpty()) {
-        item { dashedEmptyCard("Nothing open", "Open tabs for this workspace appear here") }
+        item { dashedEmptyCard("Nothing open", "Tabs for this workspace show up here") }
     } else {
         items(input.openWork, key = { it.tabId }) { work ->
             openWorkCard(work) { input.actions.onFocusTab(work.tabId) }
@@ -812,7 +773,7 @@ private fun LazyListScope.workspaceOpenWork(input: WorkspaceDetailInput) {
 
 private fun LazyListScope.workspaceSessions(input: WorkspaceDetailInput) {
     if (input.sessions.isEmpty()) {
-        item { dashedEmptyCard("No sessions", "Sessions in this workspace appear here") }
+        item { dashedEmptyCard("No sessions", "Start one with + new") }
     } else {
         items(input.sessions, key = { it.sessionId.value }) { session ->
             workspaceSessionRow(session) { input.actions.onResumeSession(session) }

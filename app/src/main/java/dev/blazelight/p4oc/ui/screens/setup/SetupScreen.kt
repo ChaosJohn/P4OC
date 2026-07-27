@@ -176,7 +176,8 @@ private fun serverUrlField(value: String, onValueChange: (String) -> Unit) {
 @Composable
 private fun credentialsPanel(uiState: ServerUiState, viewModel: ServerViewModel) {
     val theme = LocalOpenCodeTheme.current
-    var expanded by rememberSaveable { mutableStateOf(false) }
+    // Credentials are required to reach an OpenCode server, so the panel starts open.
+    var expanded by rememberSaveable { mutableStateOf(true) }
     Column {
         Row(
             modifier = Modifier
@@ -266,8 +267,12 @@ private fun credentialsFields(uiState: ServerUiState, viewModel: ServerViewModel
                 )
             },
         )
-        Spacer(Modifier.height(Spacing.xl))
-        credentialsTlsSection(uiState.allowInsecure, viewModel::setAllowInsecure)
+        if (uiState.showTlsOptions) {
+            Spacer(Modifier.height(Spacing.xl))
+            credentialsTlsSection(uiState.allowInsecure, viewModel::setAllowInsecure)
+        } else {
+            Spacer(Modifier.height(Spacing.lg))
+        }
     }
 }
 
@@ -338,10 +343,10 @@ private fun fieldLabel(label: String) {
             color = theme.textMuted,
         )
         Text(
-            text = stringResource(R.string.setup_field_optional),
+            text = stringResource(R.string.setup_field_required),
             fontFamily = FontFamily.Monospace,
             fontSize = TuiCodeFontSize.md,
-            color = theme.border,
+            color = theme.textMuted,
         )
     }
 }

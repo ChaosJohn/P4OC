@@ -24,6 +24,9 @@ import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.launch
+import java.security.cert.CertPathValidatorException
+import java.security.cert.CertificateException
+import javax.net.ssl.SSLException
 
 enum class ServerConnectionStatus { CONNECTED, CONNECTING, AVAILABLE, DISCONNECTED, ERROR }
 
@@ -185,9 +188,10 @@ class ServerViewModel constructor(
         val state = _uiState.value
         AppLog.d(TAG, "connectToRemote called")
 
-        if (state.remoteUrl.isBlank()) {
-            AppLog.w(TAG, "URL is blank, showing error")
-            _uiState.update { it.copy(error = "Please enter a server URL") }
+        val formError = state.connectFormError()
+        if (formError != null) {
+            AppLog.w(TAG, "Connect form incomplete")
+            _uiState.update { it.copy(error = formError) }
             return
         }
 
@@ -260,11 +264,15 @@ class ServerViewModel constructor(
                             connectingEndpointKey = null,
                             connectedEndpointKey = endpointKey,
                             failedEndpointKey = null,
+                            showTlsOptions = false,
                         )
                     }
                 },
                 onFailure = { error ->
                     AppLog.e(TAG, "Connection failed")
+                    // A TLS trust failure is the only case where the self-signed escape hatch is
+                    // useful, so it stays hidden until an attempt actually fails that way.
+                    val tlsFailure = error.isTlsTrustFailure()
                     // Clear password from UI state on failure too - user can re-enter
                     _uiState.update {
                         it.copy(
@@ -272,7 +280,12 @@ class ServerViewModel constructor(
                             connectingEndpointKey = null,
                             failedEndpointKey = endpointKey,
                             password = "",
-                            error = "Could not connect to the server. Check the address, credentials, and connection."
+                            showTlsOptions = it.showTlsOptions || tlsFailure,
+                            error = if (tlsFailure) {
+                                "The server's TLS certificate is not trusted."
+                            } else {
+                                "Could not connect. Check the address, credentials, and network."
+                            }
                         )
                     }
                 }
@@ -313,6 +326,7 @@ class ServerViewModel constructor(
                 username = server.username ?: ServerUrl.DEFAULT_USERNAME,
                 password = password,
                 allowInsecure = server.allowInsecure,
+                showTlsOptions = server.allowInsecure,
                 error = null,
             )
         }
@@ -384,13 +398,17 @@ class ServerViewModel constructor(
     }
 
     fun connectToDiscoveredServer(server: DiscoveredServer) {
+        // Reuse a stored password when we already know this endpoint; otherwise the form fills in
+        // and connectToRemote stops with "enter the server password" rather than a 401 round-trip.
+        val savedPassword = credentialStore.getServerPassword(server.url).orEmpty()
         _uiState.update {
             it.copy(
                 remoteUrl = server.url,
                 serverNameCandidate = server.serviceName,
                 username = ServerUrl.DEFAULT_USERNAME,
-                password = "",
-                allowInsecure = server.allowInsecure
+                password = savedPassword,
+                allowInsecure = server.allowInsecure,
+                showTlsOptions = server.allowInsecure,
             )
         }
         connectToRemote()
@@ -410,12 +428,43 @@ class ServerViewModel constructor(
     }
 }
 
+/**
+ * Why the connect form cannot be submitted yet, or `null` when it is complete. OpenCode serves
+ * behind basic auth, so a username and password are as required as the URL itself.
+ */
+internal fun ServerUiState.connectFormError(): String? = when {
+    remoteUrl.isBlank() -> "Enter a server URL"
+    username.isBlank() -> "Enter a username (usually opencode)"
+    password.isBlank() -> "Enter the server password"
+    else -> null
+}
+
+/** True when [this] (or any cause beneath it) is a certificate/TLS trust failure. */
+internal fun Throwable.isTlsTrustFailure(): Boolean {
+    var current: Throwable? = this
+    val seen = HashSet<Throwable>()
+    while (current != null && seen.add(current)) {
+        val isTls = current is SSLException ||
+            current is CertificateException ||
+            current is CertPathValidatorException
+        if (isTls) return true
+        current = current.cause
+    }
+    return false
+}
+
 data class ServerUiState(
     val remoteUrl: String = "",
     val serverNameCandidate: String? = null,
-    val username: String = "opencode",
+    val username: String = ServerUrl.DEFAULT_USERNAME,
     val password: String = "",
     val allowInsecure: Boolean = false,
+    /**
+     * Whether to surface the self-signed-certificate escape hatch. OpenCode is normally served
+     * over plain HTTP, so the toggle only appears once a connection actually fails TLS validation
+     * (or when editing a server that already has it on).
+     */
+    val showTlsOptions: Boolean = false,
     val isConnecting: Boolean = false,
     val isConnected: Boolean = false,
     val error: String? = null,

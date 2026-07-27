@@ -18,7 +18,7 @@
     <string name="server_update_available">OpenCode server %1$s is available</string>
     <string name="server_updated">OpenCode server updated to %1$s</string>
     <string name="home_title">Home</string>
-    <string name="home_search_accessibility">Search every server, session, or workspace</string>
+    <string name="home_search_accessibility">Search sessions and workspaces</string>
     <string name="home_summary_counts">%1$d sessions · %2$d workspaces</string>
     <string name="home_shared_badge">◈ Shared</string>
     
@@ -134,22 +134,22 @@
     <string name="setup_brand_title">P4OC</string>
     <string name="setup_brand_tagline">Pocket for OpenCode</string>
     <string name="setup_server_url_label">SERVER URL</string>
-    <string name="setup_field_optional">· optional</string>
+    <string name="setup_field_required">· required</string>
     <string name="setup_username_label">USERNAME</string>
     <string name="setup_password_label">PASSWORD</string>
     <string name="setup_password_show">show</string>
     <string name="setup_password_hide">hide</string>
     <string name="setup_tls_label">TLS</string>
     <string name="setup_tls_skip_verification">skip TLS verification</string>
-    <string name="setup_tls_warning">Only use on trusted networks — a self-signed cert can be spoofed on open Wi-Fi.</string>
-    <string name="setup_credentials_hint">username · password · TLS</string>
-    <string name="setup_scanning_nearby">scanning nearby servers…</string>
+    <string name="setup_tls_warning">The certificate is not verified. Use only on a network you trust.</string>
+    <string name="setup_credentials_hint">username · password</string>
+    <string name="setup_scanning_nearby">scanning nearby servers</string>
     <string name="setup_retry">retry</string>
     <string name="server_use">use</string>
 
     <!-- Settings Screen -->
     <string name="settings_title">Settings</string>
-    <string name="settings_group_workspace">Workspace</string>
+    <string name="settings_group_server">Server · %1$s</string>
     <string name="notification_routing_section">Routing · per server</string>
     <string name="notification_routing_all">All</string>
     <string name="notification_routing_mentions">Mentions</string>
@@ -937,19 +937,21 @@
     <string name="start_work_change">Change</string>
     <string name="start_work_choose_context">Choose a server and workspace</string>
     <string name="start_work_picker_title">Choose a workspace</string>
-    <string name="start_work_picker_subtitle">server · project to open</string>
+    <string name="start_work_picker_subtitle">server · project</string>
+    <string name="start_work_workspace_count_one">1 workspace</string>
+    <string name="start_work_workspace_count_other">%1$d workspaces</string>
+    <string name="start_work_show_more">+ %1$d more</string>
     <string name="start_work_filter_workspaces">Filter workspaces…</string>
     <string name="start_work_no_matching_workspaces">No matching workspaces</string>
     <string name="start_work_no_servers">No servers configured. Add a server to start work.</string>
     <string name="start_work_new_chat">New chat</string>
     <string name="start_work_files">Files</string>
     <string name="start_work_terminal">Terminal</string>
-    <string name="start_work_scoped_action">Open in this exact server and workspace</string>
     <string name="start_work_section_new">New</string>
     <string name="start_work_section_existing">Existing</string>
     <string name="start_work_existing_work">Existing work</string>
     <string name="start_work_sessions">Sessions</string>
-    <string name="start_work_sessions_description">Browse sessions in this exact workspace</string>
+    <string name="start_work_sessions_description">Browse existing sessions</string>
     <string name="start_work_server_workspaces">%1$s, %2$d workspaces</string>
     <string name="start_work_action_accessibility">%1$s. %2$s</string>
     <string name="server_close_details">Close server details</string>
