@@ -24,6 +24,7 @@ import androidx.compose.ui.semantics.Role
 import androidx.compose.ui.text.AnnotatedString
 import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import dev.blazelight.p4oc.R
 import dev.blazelight.p4oc.domain.model.*
@@ -34,6 +35,8 @@ import dev.blazelight.p4oc.ui.theme.LocalOpenCodeTheme
 import dev.blazelight.p4oc.ui.theme.SemanticColors
 import dev.blazelight.p4oc.ui.theme.Sizing
 import dev.blazelight.p4oc.ui.theme.Spacing
+import kotlinx.serialization.json.contentOrNull
+import kotlinx.serialization.json.jsonPrimitive
 
 @Composable
 @Suppress("LongParameterList", "FunctionNaming")
@@ -511,11 +514,16 @@ private fun ReasoningPart(part: Part.Reasoning) {
                     }
                 }
 
+                val detailTitle = reasoningDetailTitle(part)
                 Text(
-                    text = stringResource(R.string.models_reasoning),
+                    text = detailTitle?.let {
+                        stringResource(R.string.reasoning_with_title, it)
+                    } ?: stringResource(R.string.models_reasoning),
                     style = MaterialTheme.typography.labelSmall,
                     color = theme.warning,
-                    modifier = Modifier.weight(1f)
+                    modifier = Modifier.weight(1f),
+                    maxLines = 1,
+                    overflow = TextOverflow.Ellipsis,
                 )
 
                 Icon(
@@ -551,6 +559,29 @@ private fun ReasoningPart(part: Part.Reasoning) {
         }
     }
 }
+
+internal fun reasoningDetailTitle(part: Part.Reasoning): String? {
+    val metadataTitle = listOf("title", "summary", "subject", "heading")
+        .firstNotNullOfOrNull { key -> part.metadata?.get(key)?.jsonPrimitive?.contentOrNull }
+        ?.trim()
+        ?.takeIf { it.isNotBlank() }
+    val source = metadataTitle ?: part.text.lineSequence()
+        .map(String::trim)
+        .firstOrNull { it.isNotBlank() }
+        ?.trimStart('#')
+        ?.trim()
+    return source
+        ?.stripReasoningTitleMarkdown()
+        ?.replace(Regex("\\s+"), " ")
+        ?.take(REASONING_TITLE_MAX_CHARS)
+        ?.takeIf { it.isNotBlank() && !it.equals("reasoning", ignoreCase = true) }
+}
+
+private fun String.stripReasoningTitleMarkdown(): String =
+    replace("**", "")
+        .replace("__", "")
+
+private const val REASONING_TITLE_MAX_CHARS = 80
 
 @Composable
 private fun FilePart(part: Part.File) {

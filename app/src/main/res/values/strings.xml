@@ -520,6 +520,7 @@
     <string name="models_context_format">Context: %s</string>
     <string name="models_tools">Tools</string>
     <string name="models_reasoning">Reasoning</string>
+    <string name="reasoning_with_title">Reasoning · %1$s</string>
     <string name="models_load_failed_title">Could not load models</string>
     <string name="models_load_failed_description">Check the server connection, then try again.</string>
     <string name="models_empty_title">No models available</string>

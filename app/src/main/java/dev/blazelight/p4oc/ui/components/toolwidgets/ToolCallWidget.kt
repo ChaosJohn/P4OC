@@ -242,6 +242,11 @@ fun ToolCallExpanded(
             onOpenSubSession = onOpenSubSession,
             modifier = modifier
         )
+        "todowrite", "todoread" -> TodoWidgetExpanded(
+            tool = tool,
+            onClick = onClick,
+            modifier = modifier,
+        )
         else -> DefaultWidgetExpanded(
             tool = tool,
             onClick = onClick,
@@ -285,6 +290,7 @@ internal fun getToolCompactDescription(tool: Part.Tool): String {
         name in GLOB_TOOLS -> patternDescription("glob", input, "file_mask") ?: tool.toolName
         name in GREP_TOOLS -> patternDescription("grep", input, "substring_pattern", 40, quoted = true)
             ?: tool.toolName
+        name in listOf("todowrite", "todoread") -> todoCompactDescription(tool)
         else -> tool.toolName
     }
 }
