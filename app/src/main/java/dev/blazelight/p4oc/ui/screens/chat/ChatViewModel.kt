@@ -280,6 +280,12 @@ class ChatViewModel constructor(
         _isActiveTab.value = false
     }
 
+    /** Reconciles REST-backed chat state after Android resumes from the background. */
+    fun refreshAfterForeground() {
+        loadSession()
+        loadMessages()
+    }
+
     fun updateInput(text: String) {
         persistInputText(text)
         _uiState.update { it.copy(inputText = text) }
@@ -298,6 +304,7 @@ class ChatViewModel constructor(
             endLoadStep("Loading session metadata")
             when (result) {
                 is ApiResult.Success -> {
+                    modelAgentManager.applyServerSessionModel(result.data.model)
                     val session = SessionMapper.mapToDomain(result.data)
                     _uiState.update { it.copy(session = session) }
                     // Reload VCS now that we have the canonical session directory
@@ -528,6 +535,7 @@ class ChatViewModel constructor(
         val result = sessionRepository.sendMessageAsync(SessionId(sessionId), request).await().toApiResult()
         when (result) {
             is ApiResult.Success -> {
+                modelAgentManager.markComposerSelectionSent()
                 sessionRepository.acceptEvent(
                     OpenCodeEvent.SessionStatusChanged(sessionId, SessionStatus.Busy)
                 )

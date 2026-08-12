@@ -1,5 +1,6 @@
 package dev.blazelight.p4oc.ui.screens.chat
 
+import dev.blazelight.p4oc.core.datastore.SessionComposerSelection
 import dev.blazelight.p4oc.core.datastore.SettingsDataStore
 import dev.blazelight.p4oc.core.log.AppLog
 import dev.blazelight.p4oc.core.network.ConnectionState
@@ -10,6 +11,7 @@ import dev.blazelight.p4oc.data.remote.dto.ModelInput
 import dev.blazelight.p4oc.data.remote.dto.ModelRefDto
 import dev.blazelight.p4oc.data.remote.dto.ProviderDto
 import dev.blazelight.p4oc.data.remote.dto.ProvidersResponseDto
+import dev.blazelight.p4oc.data.remote.dto.SessionModelDto
 import dev.blazelight.p4oc.data.server.ActiveServerApiProvider
 import dev.blazelight.p4oc.data.workspace.WorkspaceClient
 import dev.blazelight.p4oc.domain.server.ServerGeneration
@@ -53,6 +55,7 @@ class ModelAgentManagerTest {
         every { AppLog.e(any(), any<String>(), any()) } returns Unit
         every { settingsDataStore.favoriteModels } returns flowOf(emptySet())
         every { settingsDataStore.recentModels } returns flowOf(emptyList())
+        coEvery { settingsDataStore.getComposerSelectionForSession(any(), any()) } returns null
     }
 
     @After
@@ -292,6 +295,198 @@ class ModelAgentManagerTest {
 
         assertEquals(ModelInput(providerID = "openai", modelID = "gpt-4"), manager.selectedModel.value)
     }
+
+    @Test
+    fun `loadModels restores available model selected for this session before server default`() = runTest {
+        val sessionModel = ModelInput(providerID = "anthropic", modelID = "claude-3")
+        coEvery { settingsDataStore.getSelectedModelForSession("session-1") } returns sessionModel
+        val providersResponse = ProvidersResponseDto(
+            all = listOf(
+                ProviderDto(
+                    id = "anthropic",
+                    name = "Anthropic",
+                    source = "env",
+                    models = mapOf("claude-3" to makeModel("claude-3", "anthropic")),
+                ),
+                ProviderDto(
+                    id = "openai",
+                    name = "OpenAI",
+                    source = "env",
+                    models = mapOf("gpt-4" to makeModel("gpt-4", "openai")),
+                ),
+            ),
+            default = mapOf("openai" to "gpt-4"),
+            connected = listOf("anthropic", "openai"),
+        )
+        coEvery { api.getProviders(any(), null) } returns providersResponse
+
+        val manager = ModelAgentManager(workspaceClient, settingsDataStore, this, sessionId = "session-1")
+        manager.loadModels()
+        advanceUntilIdle()
+
+        assertEquals(sessionModel, manager.selectedModel.value)
+    }
+
+    @Test
+    fun `loadModels ignores unavailable model selected for this session`() = runTest {
+        coEvery { settingsDataStore.getSelectedModelForSession("session-1") } returns
+            ModelInput(providerID = "anthropic", modelID = "claude-3")
+        val defaultModel = ModelInput(providerID = "openai", modelID = "gpt-4")
+        coEvery { api.getProviders(any(), null) } returns ProvidersResponseDto(
+            all = listOf(
+                ProviderDto(
+                    id = "openai",
+                    name = "OpenAI",
+                    source = "env",
+                    models = mapOf("gpt-4" to makeModel("gpt-4", "openai")),
+                ),
+            ),
+            default = mapOf("openai" to "gpt-4"),
+            connected = listOf("openai"),
+        )
+
+        val manager = ModelAgentManager(workspaceClient, settingsDataStore, this, sessionId = "session-1")
+        manager.loadModels()
+        advanceUntilIdle()
+
+        assertEquals(defaultModel, manager.selectedModel.value)
+    }
+
+    @Test
+    fun `selectModel persists selection for this session`() = runTest {
+        val selected = ModelInput(providerID = "anthropic", modelID = "claude-3")
+        val manager = ModelAgentManager(workspaceClient, settingsDataStore, this, sessionId = "session-1")
+
+        manager.selectModel(selected)
+        advanceUntilIdle()
+
+        coVerify(exactly = 1) { settingsDataStore.setSelectedModelForSession("session-1", selected) }
+        coVerify(exactly = 1) { settingsDataStore.addRecentModel(selected) }
+    }
+
+    @Test
+    fun `loadModels restores persisted model and reasoning effort after manager recreation`() = runTest {
+        val model = ModelInput(providerID = "openai", modelID = "gpt-5")
+        coEvery {
+            settingsDataStore.getComposerSelectionForSession(workspaceClient.workspace, "session-1")
+        } returns SessionComposerSelection(model = model, variant = "high", pendingServerSync = true)
+        coEvery { api.getProviders(any(), null) } returns reasoningProviders()
+
+        val manager = ModelAgentManager(workspaceClient, settingsDataStore, this, sessionId = "session-1")
+        manager.loadModels()
+        advanceUntilIdle()
+
+        assertEquals(model, manager.selectedModel.value)
+        assertEquals("high", manager.currentReasoningEffort())
+    }
+
+    @Test
+    fun `server session model and variant override synced local selection`() = runTest {
+        val localModel = ModelInput(providerID = "openai", modelID = "gpt-5")
+        coEvery {
+            settingsDataStore.getComposerSelectionForSession(workspaceClient.workspace, "session-1")
+        } returns SessionComposerSelection(model = localModel, variant = "low", pendingServerSync = false)
+        coEvery { api.getProviders(any(), null) } returns reasoningProviders()
+        val manager = ModelAgentManager(workspaceClient, settingsDataStore, this, sessionId = "session-1")
+
+        manager.applyServerSessionModel(SessionModelDto(id = "gpt-5", providerID = "openai", variant = "high"))
+        manager.loadModels()
+        advanceUntilIdle()
+
+        assertEquals(localModel, manager.selectedModel.value)
+        assertEquals("high", manager.currentReasoningEffort())
+    }
+
+    @Test
+    fun `pending local selection wins over stale server session until sent`() = runTest {
+        val model = ModelInput(providerID = "openai", modelID = "gpt-5")
+        coEvery {
+            settingsDataStore.getComposerSelectionForSession(workspaceClient.workspace, "session-1")
+        } returns SessionComposerSelection(model = model, variant = "high", pendingServerSync = true)
+        coEvery { api.getProviders(any(), null) } returns reasoningProviders()
+        val manager = ModelAgentManager(workspaceClient, settingsDataStore, this, sessionId = "session-1")
+
+        manager.applyServerSessionModel(SessionModelDto(id = "gpt-5", providerID = "openai", variant = "low"))
+        manager.loadModels()
+        advanceUntilIdle()
+
+        assertEquals("high", manager.currentReasoningEffort())
+    }
+
+    @Test
+    fun `unsupported persisted reasoning effort is restored as default`() = runTest {
+        val model = ModelInput(providerID = "openai", modelID = "gpt-5")
+        coEvery {
+            settingsDataStore.getComposerSelectionForSession(workspaceClient.workspace, "session-1")
+        } returns SessionComposerSelection(model = model, variant = "obsolete", pendingServerSync = true)
+        coEvery { api.getProviders(any(), null) } returns reasoningProviders()
+        val manager = ModelAgentManager(workspaceClient, settingsDataStore, this, sessionId = "session-1")
+
+        manager.loadModels()
+        advanceUntilIdle()
+
+        assertEquals(model, manager.selectedModel.value)
+        assertNull(manager.currentReasoningEffort())
+    }
+
+    @Test
+    fun `loadModels skips disconnected provider default observed in OpenCode 1 18 16`() = runTest {
+        val providersResponse = ProvidersResponseDto(
+            all = listOf(
+                ProviderDto(
+                    id = "zhipuai",
+                    name = "Zhipu AI",
+                    source = "models.dev",
+                    models = mapOf(
+                        "glm-5v-turbo" to makeModel("glm-5v-turbo", "zhipuai")
+                    )
+                ),
+                ProviderDto(
+                    id = "opencode",
+                    name = "OpenCode",
+                    source = "env",
+                    models = mapOf(
+                        "big-pickle" to makeModel("big-pickle", "opencode")
+                    )
+                )
+            ),
+            default = linkedMapOf(
+                "zhipuai" to "glm-5v-turbo",
+                "opencode" to "big-pickle",
+            ),
+            connected = listOf("opencode")
+        )
+        coEvery { api.getProviders(any(), null) } returns providersResponse
+
+        val manager = ModelAgentManager(workspaceClient, settingsDataStore, this)
+        manager.loadModels()
+        advanceUntilIdle()
+
+        assertEquals(ModelInput(providerID = "opencode", modelID = "big-pickle"), manager.selectedModel.value)
+    }
+
+    private fun reasoningProviders() = ProvidersResponseDto(
+        all = listOf(
+            ProviderDto(
+                id = "openai",
+                name = "OpenAI",
+                source = "env",
+                models = mapOf(
+                    "gpt-5" to ModelDto(
+                        id = "gpt-5",
+                        providerId = "openai",
+                        name = "GPT-5",
+                        variants = kotlinx.serialization.json.buildJsonObject {
+                            put("low", kotlinx.serialization.json.buildJsonObject {})
+                            put("high", kotlinx.serialization.json.buildJsonObject {})
+                        },
+                    )
+                ),
+            )
+        ),
+        default = mapOf("openai" to "gpt-5"),
+        connected = listOf("openai"),
+    )
 
     @Test
     fun `loadModels keeps explicit user selected model when still available`() = runTest {
