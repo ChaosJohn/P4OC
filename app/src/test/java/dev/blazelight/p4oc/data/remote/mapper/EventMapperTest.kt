@@ -474,6 +474,28 @@ class EventMapperTest {
         assertEquals("anthropic", (event as OpenCodeEvent.SessionError).error?.providerID)
     }
 
+    @Test
+    fun `maps session_error retry metadata for rate limit feedback`() {
+        val properties = buildJsonObject {
+            put("sessionID", "sess-1")
+            putJsonObject("error") {
+                put("name", "APIError")
+                putJsonObject("data") {
+                    put("message", "Rate limit exceeded")
+                    put("statusCode", 429)
+                    put("isRetryable", true)
+                }
+            }
+        }
+
+        val event = eventMapper.mapToEvent(EventDataDto(type = "session.error", properties = properties))
+
+        assertTrue(event is OpenCodeEvent.SessionError)
+        val error = (event as OpenCodeEvent.SessionError).error
+        assertEquals(429, error?.statusCode)
+        assertTrue(error?.isRetryable == true)
+    }
+
     // ── Unknown type ────────────────────────────────────────────────────────
 
     @Test

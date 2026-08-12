@@ -21,12 +21,14 @@ import dev.blazelight.p4oc.data.remote.dto.RevertSessionRequest
 import dev.blazelight.p4oc.data.remote.dto.SendMessageRequest
 import dev.blazelight.p4oc.data.remote.dto.SessionDto
 import dev.blazelight.p4oc.data.remote.dto.SessionRevertDto
+import dev.blazelight.p4oc.data.remote.dto.SessionStatusDto
 import dev.blazelight.p4oc.data.remote.dto.TimeDto
 import dev.blazelight.p4oc.data.remote.mapper.MessageMapper
 import dev.blazelight.p4oc.data.server.ActiveServerApiProvider
 import dev.blazelight.p4oc.data.session.SessionRepositoryImpl
 import dev.blazelight.p4oc.data.workspace.WorkspaceClient
 import dev.blazelight.p4oc.domain.model.Message
+import dev.blazelight.p4oc.domain.model.MessageError
 import dev.blazelight.p4oc.domain.model.MessageWithParts
 import dev.blazelight.p4oc.domain.model.OpenCodeEvent
 import dev.blazelight.p4oc.domain.model.Part
@@ -81,6 +83,7 @@ import retrofit2.HttpException
 import retrofit2.Response
 
 @OptIn(ExperimentalCoroutinesApi::class)
+@Suppress("LargeClass")
 class ChatViewModelTest {
 
     @get:Rule
@@ -274,6 +277,49 @@ class ChatViewModelTest {
     }
 
     @Test
+    fun sessionStatusChanged_usageLimitRetry_explainsWhyRunIsWaiting() = runTest {
+        val vm = createViewModel()
+
+        emitEvent(
+            OpenCodeEvent.SessionStatusChanged(
+                "session-1",
+                SessionStatus.Retry(
+                    attempt = 2,
+                    message = "Free usage exceeded, subscribe to Go",
+                    next = 0L,
+                ),
+            )
+        )
+        advanceUntilIdle()
+
+        assertTrue(vm.uiState.value.isBusy)
+        assertEquals(
+            "Model usage limit reached. OpenCode is retrying (attempt 2).",
+            vm.uiState.value.runNotice,
+        )
+    }
+
+    @Test
+    fun sessionError_rateLimitExplainsFailure_andClearsBusyState() = runTest {
+        val vm = createViewModel()
+        emitEvent(OpenCodeEvent.SessionStatusChanged("session-1", SessionStatus.Busy))
+
+        emitEvent(
+            OpenCodeEvent.SessionError(
+                "session-1",
+                MessageError(name = "APIError", message = "Rate limit exceeded", statusCode = 429),
+            )
+        )
+        advanceUntilIdle()
+
+        assertFalse(vm.uiState.value.isBusy)
+        assertEquals(
+            "Model usage limit reached. Try again later or choose another model.",
+            vm.uiState.value.error,
+        )
+    }
+
+    @Test
     fun sessionStatusChanged_idle_clearsStreamingFlags() = runTest {
         val vm = createViewModel()
         emitEvent(OpenCodeEvent.MessageUpdated(assistantMessage(id = "m1", sessionId = "session-1", createdAt = 1)))
@@ -410,6 +456,33 @@ class ChatViewModelTest {
         assertEquals("", vm.uiState.value.inputText)
         assertFalse(vm.uiState.value.isSending)
         assertTrue(vm.uiState.value.isBusy)
+    }
+
+    @Test
+    fun sendMessage_reconcilesEmptyCompletedResponse_whenTerminalSseIsMissing() = runTest {
+        coEvery { api.getMessages("session-1", 100, null, "/test", null) } returnsMany listOf(
+            emptyList(),
+            listOf(
+                userMessageDto("user-new", createdAt = 10),
+                assistantMessageDto("assistant-empty", createdAt = 11, completedAt = 12),
+            ),
+        )
+        coEvery { api.getSessionStatuses("/test", null) } returns mapOf(
+            "session-1" to SessionStatusDto(type = "idle")
+        )
+        coEvery { api.sendMessageAsync(any(), any(), any(), null) } returns Unit
+        val vm = createViewModel()
+        vm.updateInput("hello")
+
+        vm.sendMessage()
+        advanceUntilIdle()
+
+        assertFalse(vm.uiState.value.isBusy)
+        assertEquals(
+            "The model returned no response. The provider may be unavailable or rate-limited.",
+            vm.uiState.value.error,
+        )
+        assertEquals(listOf("user-new", "assistant-empty"), vm.currentMessages().map { it.message.id })
     }
 
     @Test
@@ -686,12 +759,16 @@ class ChatViewModelTest {
         )
     }
 
-    private fun assistantMessageDto(id: String, createdAt: Long): MessageWrapperDto {
+    private fun assistantMessageDto(
+        id: String,
+        createdAt: Long,
+        completedAt: Long? = null,
+    ): MessageWrapperDto {
         return MessageWrapperDto(
             info = MessageInfoDto(
                 id = id,
                 sessionID = "session-1",
-                time = MessageTimeDto(created = createdAt),
+                time = MessageTimeDto(created = createdAt, completed = completedAt),
                 role = "assistant",
                 parentID = "",
                 providerID = "provider",

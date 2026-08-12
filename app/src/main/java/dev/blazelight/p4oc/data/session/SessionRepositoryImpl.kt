@@ -14,6 +14,7 @@ import dev.blazelight.p4oc.data.remote.mapper.mapQuestionRequestDtoToDomain
 import dev.blazelight.p4oc.data.workspace.SessionWorkspaceClient
 import dev.blazelight.p4oc.data.workspace.WorkspaceClient
 import dev.blazelight.p4oc.domain.model.Message
+import dev.blazelight.p4oc.domain.model.MessageError
 import dev.blazelight.p4oc.domain.model.MessageWithParts
 import dev.blazelight.p4oc.domain.model.OpenCodeEvent
 import dev.blazelight.p4oc.domain.model.Part
@@ -290,7 +291,7 @@ class SessionRepositoryImpl(
                 updateSession(event.sessionID) { state ->
                     state.copy(
                         status = event.status,
-                        error = null,
+                        error = if (event.status is SessionStatus.Busy) null else state.error,
                         responseCompletedToken = if (event.status.isTerminalIdle()) state.responseCompletedToken + 1 else state.responseCompletedToken,
                     )
                 }
@@ -300,7 +301,6 @@ class SessionRepositoryImpl(
                 updateSession(event.sessionID) { state ->
                     state.copy(
                         status = SessionStatus.Idle,
-                        error = null,
                         responseCompletedToken = state.responseCompletedToken + 1,
                     )
                 }
@@ -308,14 +308,10 @@ class SessionRepositoryImpl(
             }
             is OpenCodeEvent.SessionError -> {
                 val eventSessionId = event.sessionID ?: return
-                updateSession(eventSessionId) { state ->
-                    state.copy(
-                        status = SessionStatus.Idle,
-                        error = event.error,
-                        responseCompletedToken = state.responseCompletedToken + 1,
-                    )
-                }
-                clearStreamingFlags(SessionId(eventSessionId))
+                applySessionError(
+                    eventSessionId,
+                    event.error ?: MessageError(name = "UnknownError"),
+                )
             }
             is OpenCodeEvent.PermissionRequested -> {
                 updateOwnedSession(event.permission.sessionID) { state ->
@@ -345,7 +341,11 @@ class SessionRepositoryImpl(
             is OpenCodeEvent.QuestionReplied -> resolveQuestion(event.sessionID, event.requestID)
             is OpenCodeEvent.QuestionRejected -> resolveQuestion(event.sessionID, event.requestID)
             is OpenCodeEvent.TodoUpdated -> updateSession(event.sessionID) { it.copy(todos = event.todos) }
-            is OpenCodeEvent.MessageUpdated -> upsertMessage(event.message)
+            is OpenCodeEvent.MessageUpdated -> {
+                upsertMessage(event.message)
+                val assistant = event.message as? Message.Assistant
+                assistant?.error?.let { error -> applySessionError(assistant.sessionID, error) }
+            }
             is OpenCodeEvent.MessagePartUpdated -> upsertPart(event.part, event.delta)
             is OpenCodeEvent.MessagePartDelta -> applyPartDelta(event)
             is OpenCodeEvent.MessageRemoved -> removeMessage(event.sessionID, event.messageID)
@@ -730,6 +730,22 @@ class SessionRepositoryImpl(
 
     override fun abortSession(sessionId: SessionId): Deferred<Result<Boolean>> = scope.async {
         runMutationCatching { client.abortSession(sessionId.value) }
+    }
+
+    private fun applySessionError(sessionId: String, error: MessageError) {
+        updateSession(sessionId) { state ->
+            val alreadyApplied = state.status is SessionStatus.Idle && state.error == error
+            state.copy(
+                status = SessionStatus.Idle,
+                error = error,
+                responseCompletedToken = if (alreadyApplied) {
+                    state.responseCompletedToken
+                } else {
+                    state.responseCompletedToken + 1
+                },
+            )
+        }
+        clearStreamingFlags(SessionId(sessionId))
     }
 
     override fun clearStreamingFlags(sessionId: SessionId) {

@@ -697,6 +697,21 @@ class SessionRepositoryImplTest {
     }
 
     @Test
+    fun `assistant message error terminates busy session without separate session error event`() = runTest {
+        val repository =
+            SessionRepositoryImpl(FakeWorkspaceClient(), dispatcher = StandardTestDispatcher(testScheduler))
+        repository.acceptEvent(OpenCodeEvent.SessionStatusChanged("s1", SessionStatus.Busy))
+        val error = MessageError(name = "APIError", message = "Rate limit exceeded", statusCode = 429)
+
+        repository.acceptEvent(OpenCodeEvent.MessageUpdated(assistantMessage("m1", "s1", error)))
+
+        val state = repository.sessionUiState(SessionId("s1")).value
+        assertEquals(SessionStatus.Idle, state.status)
+        assertEquals(error, state.error)
+        assertEquals(1L, state.responseCompletedToken)
+    }
+
+    @Test
     fun `permission request without callID is still exposed in session UI state`() = runTest {
         val client = FakeWorkspaceClient().apply {
             projects = emptyList()
@@ -767,7 +782,11 @@ class SessionRepositoryImplTest {
         updatedAt = 1L,
     )
 
-    private fun assistantMessage(id: String, sessionId: String): Message.Assistant = Message.Assistant(
+    private fun assistantMessage(
+        id: String,
+        sessionId: String,
+        error: MessageError? = null,
+    ): Message.Assistant = Message.Assistant(
         id = id,
         sessionID = sessionId,
         createdAt = 1L,
@@ -778,6 +797,7 @@ class SessionRepositoryImplTest {
         agent = "assistant",
         cost = 0.0,
         tokens = TokenUsage(input = 0, output = 0),
+        error = error,
     )
 
     private fun textPart(id: String, messageId: String, sessionId: String, text: String): Part.Text = Part.Text(
