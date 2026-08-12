@@ -251,6 +251,11 @@ fun ToolCallExpanded(
             onToolDeny = onToolDeny,
             modifier = modifier,
         )
+        "apply_patch" -> ApplyPatchWidgetExpanded(
+            tool = tool,
+            onClick = onClick,
+            modifier = modifier,
+        )
         else -> DefaultWidgetExpanded(
             tool = tool,
             onClick = onClick,
@@ -295,6 +300,7 @@ internal fun getToolCompactDescription(tool: Part.Tool): String {
         name in GREP_TOOLS -> patternDescription("grep", input, "substring_pattern", 40, quoted = true)
             ?: tool.toolName
         name in TODO_TOOLS -> todoCompactDescription(tool)
+        name == "apply_patch" -> applyPatchCompactDescription(tool)
         else -> tool.toolName
     }
 }
