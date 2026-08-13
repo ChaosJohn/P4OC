@@ -20,6 +20,7 @@ import androidx.compose.ui.graphics.RectangleShape
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalFocusManager
 import androidx.compose.ui.platform.LocalSoftwareKeyboardController
+import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.semantics.Role
@@ -115,7 +116,8 @@ fun ChatScreen(
     onProviderAuthRequired: ((String) -> Unit)? = null,
     onSessionLoaded: ((sessionId: String, sessionTitle: String) -> Unit)? = null,
     onConnectionStateChanged: ((SessionConnectionState?) -> Unit)? = null,
-    isActiveTab: Boolean = true
+    isActiveTab: Boolean = true,
+    requestInitialInputFocus: Boolean = false,
 ) {
     val uiState by viewModel.uiState.collectAsStateWithLifecycle()
     val messages by viewModel.messages.collectAsStateWithLifecycle()
@@ -205,6 +207,11 @@ fun ChatScreen(
         findChatMatches(messageBlocks, scrollRestorationState.searchQuery)
     }
     val coroutineScope = rememberCoroutineScope()
+    val density = LocalDensity.current
+    val imeBottom = WindowInsets.ime.getBottom(density)
+    val isImeVisible = imeBottom > 0
+    var wasImeVisible by remember(uiState.session?.id) { mutableStateOf(false) }
+    var keepTailVisibleDuringImeOpen by remember(uiState.session?.id) { mutableStateOf(false) }
 
     // Derived state: check if the bottom edge of the last rendered item is visible.
     val isAtBottom by remember {
@@ -269,6 +276,24 @@ fun ChatScreen(
         if (scrollRestorationState.onTailContentChanged(messages.isNotEmpty() || pendingQuestionId != null)) {
             listState.scrollChatToBottom()
         }
+    }
+
+    // When the user opens the composer keyboard, keep the latest conversation content visible.
+    // This is an explicit input action, so it intentionally returns a previously scrolled chat
+    // to the tail instead of leaving the keyboard covering the newest messages.
+    LaunchedEffect(imeBottom) {
+        if (!isImeVisible) {
+            wasImeVisible = false
+            keepTailVisibleDuringImeOpen = false
+            return@LaunchedEffect
+        }
+        if (!wasImeVisible) {
+            keepTailVisibleDuringImeOpen = scrollRestorationState.onKeyboardOpened(messageCount > 0)
+        }
+        if (keepTailVisibleDuringImeOpen) {
+            listState.scrollChatToBottom()
+        }
+        wasImeVisible = true
     }
 
     // Permissions can arrive for a tool rendered far above the current viewport without changing
@@ -405,7 +430,7 @@ fun ChatScreen(
                         commandLoadError = uiState.commandLoadError,
                         onRetryCommands = { viewModel.refreshCommandsIfNeeded(force = true) },
                         onCommandSelected = { /* Command text is already updated via onValueChange */ },
-                        requestFocus = isActiveTab,
+                        requestFocus = isActiveTab && requestInitialInputFocus,
                         enterToSend = chatSettings.enterToSend,
                     )
                 }

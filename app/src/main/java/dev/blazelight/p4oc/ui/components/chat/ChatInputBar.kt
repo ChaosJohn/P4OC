@@ -96,8 +96,9 @@ fun ChatInputBar(
         snapshotFlow { textState.text.toString() }.collect { onValueChange(it) }
     }
 
-    // Request focus when triggered
-    LaunchedEffect(requestFocus) {
+    // Initial focus is a navigation decision. Do not reopen the keyboard when the user returns
+    // to this tab or after they dismiss it manually.
+    LaunchedEffect(Unit) {
         if (requestFocus) {
             try {
                 focusRequester.requestFocus()

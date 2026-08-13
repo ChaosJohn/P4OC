@@ -231,7 +231,7 @@ fun TabNavHost(
                     onNewSession = { sessionId, directory ->
                         val selection = directory.toNavigationWorkspaceSelection()
                             ?: return@SessionListScreen
-                        val chatRoute = Screen.Chat.createRoute(sessionId)
+                        val chatRoute = Screen.Chat.createRoute(sessionId, focusInput = true)
                         if (selection.directory != workspaceOwner.workspace.directory) {
                             pendingRoute = chatRoute
                             tabManager.updateTabWorkspace(tabId, selection.workspaceKey)
@@ -310,7 +310,7 @@ fun TabNavHost(
                     onNewSession = { sessionId, directory ->
                         val selection = directory.toNavigationWorkspaceSelection()
                             ?: return@SessionListScreen
-                        val chatRoute = Screen.Chat.createRoute(sessionId)
+                        val chatRoute = Screen.Chat.createRoute(sessionId, focusInput = true)
                         if (selection.directory != workspaceOwner.workspace.directory) {
                             pendingRoute = chatRoute
                             tabManager.updateTabWorkspace(tabId, selection.workspaceKey)
@@ -353,7 +353,13 @@ fun TabNavHost(
             // Chat screen
             composable(
                 route = Screen.Chat.route,
-                arguments = listOf(navArgument(Screen.Chat.ARG_SESSION_ID) { type = NavType.StringType })
+                arguments = listOf(
+                    navArgument(Screen.Chat.ARG_SESSION_ID) { type = NavType.StringType },
+                    navArgument(Screen.Chat.ARG_FOCUS_INPUT) {
+                        type = NavType.BoolType
+                        defaultValue = false
+                    },
+                )
             ) { backStackEntry ->
                 val workspaceViewModel = TouchWorkspaceViewModel(
                     backStackEntry,
@@ -408,7 +414,10 @@ fun TabNavHost(
                         tabManager.updateTabSession(tabId, sessionId, sessionTitle)
                     },
                     onConnectionStateChanged = onConnectionStateChanged,
-                    isActiveTab = isActiveTab
+                    isActiveTab = isActiveTab,
+                    requestInitialInputFocus = backStackEntry.arguments
+                        ?.getBoolean(Screen.Chat.ARG_FOCUS_INPUT)
+                        ?: false,
                 )
             }
 

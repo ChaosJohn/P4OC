@@ -48,6 +48,12 @@ internal class ChatScrollRestorationState(
         hasNewContentWhileAway = false
     }
 
+    fun onKeyboardOpened(hasRenderableTail: Boolean): Boolean {
+        if (!hasRenderableTail) return false
+        onJumpToBottom()
+        return true
+    }
+
     fun onContentReady(hasRenderableTail: Boolean): InitialTailDecision {
         val decision = when {
             !hasRenderableTail -> InitialTailDecision.NoContent

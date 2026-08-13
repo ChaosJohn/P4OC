@@ -75,6 +75,28 @@ class ChatScrollRestorationTest {
     }
 
     @Test
+    fun openingKeyboardReturnsExistingConversationToTail() {
+        val state = ChatScrollRestorationState()
+        state.onContentReady(hasRenderableTail = true)
+        state.onScrollSettled(isAtBottom = false)
+        state.onTailContentChanged(hasRenderableTail = true)
+
+        val shouldScroll = state.onKeyboardOpened(hasRenderableTail = true)
+
+        assertTrue(shouldScroll)
+        assertTrue(state.shouldFollowTail)
+        assertFalse(state.hasNewContentWhileAway)
+    }
+
+    @Test
+    fun openingKeyboardDoesNotRequestScrollForEmptyConversation() {
+        val state = ChatScrollRestorationState()
+
+        assertFalse(state.onKeyboardOpened(hasRenderableTail = false))
+        assertTrue(state.shouldFollowTail)
+    }
+
+    @Test
     fun contentNotReadyDoesNotConsumeInitialTailRestoration() {
         val state = ChatScrollRestorationState()
 

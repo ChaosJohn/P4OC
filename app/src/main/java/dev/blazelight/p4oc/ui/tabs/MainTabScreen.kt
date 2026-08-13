@@ -843,7 +843,7 @@ private fun mainTabPendingStartWorkEffect(
                     is ApiResult.Success -> {
                         uiState.pendingStartWork = null
                         deps.tabManager.createTab(
-                            startRoute = Screen.Chat.createRoute(result.data.id),
+                            startRoute = Screen.Chat.createRoute(result.data.id, focusInput = true),
                             workspaceKey = target.workspaceKey,
                             serverRef = target.serverRef,
                             focus = true,
