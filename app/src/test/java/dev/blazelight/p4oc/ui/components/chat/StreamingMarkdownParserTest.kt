@@ -87,8 +87,33 @@ class StreamingMarkdownParserTest {
         val list = blocks.single() as MarkdownBlock.ListBlock
         assertEquals(
             listOf(
-                MarkdownListItem("4.", "first visible item"),
-                MarkdownListItem("7.", "skipped number from model"),
+                MarkdownListItem("4.", "first visible item", ordered = true),
+                MarkdownListItem("7.", "skipped number from model", ordered = true),
+            ),
+            list.items,
+        )
+    }
+
+    @Test
+    fun `preserves nested list indentation`() {
+        val blocks = parseMarkdownBlocks(
+            """
+            - **Home**
+              - project tree
+              - recent workspaces
+            - **Settings**
+              - grouped sections
+            """.trimIndent()
+        )
+
+        val list = blocks.single() as MarkdownBlock.ListBlock
+        assertEquals(
+            listOf(
+                MarkdownListItem("•", "**Home**", indentLevel = 0),
+                MarkdownListItem("•", "project tree", indentLevel = 1),
+                MarkdownListItem("•", "recent workspaces", indentLevel = 1),
+                MarkdownListItem("•", "**Settings**", indentLevel = 0),
+                MarkdownListItem("•", "grouped sections", indentLevel = 1),
             ),
             list.items,
         )
