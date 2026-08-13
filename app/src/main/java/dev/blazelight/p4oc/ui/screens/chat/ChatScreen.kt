@@ -608,7 +608,10 @@ fun ChatScreen(
                 }
                 if (uiState.isLoading || activeLoadSteps.isNotEmpty()) {
                     TuiLoadingScreen(
-                        modifier = Modifier.align(Alignment.Center),
+                        modifier = Modifier
+                            .matchParentSize()
+                            .background(LocalOpenCodeTheme.current.background)
+                            .testTag("chat_loading_overlay"),
                         text = activeLoadSteps.ifEmpty { listOf("Loading session") }.joinToString("\n")
                     )
                 }
