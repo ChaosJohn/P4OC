@@ -11,6 +11,7 @@
 
 # Generated files
 bin/
+!demo/**/bin/
 gen/
 out/
 
@@ -79,3 +80,6 @@ local-adb-screenshots/
 .opencode/package-lock.json
 *.png
 !screenshots/*.png
+
+# Local Docker demo credentials
+.env.demo
