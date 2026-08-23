@@ -2,6 +2,7 @@ package dev.blazelight.p4oc.ui.components.chat
 
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
+import androidx.compose.foundation.clickable
 import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.rememberScrollState
@@ -17,6 +18,7 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.focus.FocusRequester
 import androidx.compose.ui.focus.focusRequester
+import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.RectangleShape
 import androidx.compose.ui.graphics.SolidColor
 import androidx.compose.ui.input.key.Key
@@ -26,6 +28,7 @@ import androidx.compose.ui.input.key.onPreviewKeyEvent
 import androidx.compose.ui.input.key.type
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.res.stringResource
+import androidx.compose.ui.semantics.Role
 import androidx.compose.ui.semantics.contentDescription
 import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.text.TextStyle
@@ -33,6 +36,7 @@ import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.input.ImeAction
 import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.text.style.TextOverflow
+import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
 import dev.blazelight.p4oc.R
 import dev.blazelight.p4oc.domain.model.Command
@@ -113,6 +117,7 @@ fun ChatInputBar(
     val emptyDescription = stringResource(R.string.chat_disabled_empty)
     val attachDescription = stringResource(R.string.chat_action_attach)
     val stopDescription = stringResource(R.string.chat_action_stop)
+    val inputPlaceholder = stringResource(R.string.chat_input_placeholder)
     val sendContentDescription = when {
         isLoading -> loadingDescription
         canSubmit -> sendDescription
@@ -165,7 +170,7 @@ fun ChatInputBar(
 
     Box(modifier = modifier.fillMaxWidth()) {
         Surface(
-            color = theme.backgroundElement,
+            color = theme.background,
             shape = RectangleShape
         ) {
             Column {
@@ -238,51 +243,63 @@ fun ChatInputBar(
 
                 Row(
                     modifier = Modifier
-                        .padding(horizontal = Spacing.md, vertical = Spacing.xs)
+                        .padding(horizontal = Spacing.md, vertical = Spacing.sm)
                         .fillMaxWidth(),
                     verticalAlignment = Alignment.CenterVertically,
-                    horizontalArrangement = Arrangement.spacedBy(Spacing.xs)
+                    horizontalArrangement = Arrangement.spacedBy(Spacing.sm)
                 ) {
+                    // The controls rest on the same visual height. The field may grow
+                    // to four lines while the button visuals remain square.
+                    val controlSize = Sizing.iconButtonLg
+
                     if (enabled) {
-                        IconButton(
+                        ComposerSquareButton(
+                            glyph = "+",
+                            glyphColor = theme.textMuted,
+                            fillColor = Color.Transparent,
+                            borderColor = theme.border,
+                            size = controlSize,
                             onClick = onAttachClick,
-                            modifier = Modifier
-                                .size(Sizing.iconButtonMd)
-                                .semantics { contentDescription = attachDescription }
-                                .testTag("chat_attach_button")
-                        ) {
-                            Text(
-                                text = "+",
-                                color = theme.accent,
-                                fontFamily = FontFamily.Monospace,
-                                style = MaterialTheme.typography.titleMedium
-                            )
-                        }
+                            contentDescription = attachDescription,
+                            testTag = "chat_attach_button",
+                        )
                     }
 
                     Box(
                         modifier = Modifier
                             .weight(1f)
-                            .heightIn(min = Sizing.textFieldHeightSm)
+                            .heightIn(min = controlSize)
                             .border(
                                 width = Sizing.strokeMd,
                                 color = theme.border,
                                 shape = RectangleShape
                             )
                             .background(
-                                theme.background,
+                                theme.backgroundPanel,
                                 RectangleShape
                             )
-                            .padding(horizontal = Spacing.lg, vertical = Spacing.md),
+                            .padding(horizontal = Spacing.md),
                         contentAlignment = Alignment.CenterStart
                     ) {
                         if (currentText.isEmpty()) {
-                            Text(
-                                "> Message...",
-                                style = MaterialTheme.typography.bodyMedium,
-                                fontFamily = FontFamily.Monospace,
-                                color = theme.textMuted
-                            )
+                            Row(verticalAlignment = Alignment.CenterVertically) {
+                                Text(
+                                    "▷ ",
+                                    style = MaterialTheme.typography.bodyMedium.copy(
+                                        fontSize = TuiCodeFontSize.xxl
+                                    ),
+                                    fontFamily = FontFamily.Monospace,
+                                    color = theme.primary
+                                )
+                                Text(
+                                    inputPlaceholder,
+                                    style = MaterialTheme.typography.bodyMedium.copy(
+                                        fontSize = TuiCodeFontSize.xxl
+                                    ),
+                                    fontFamily = FontFamily.Monospace,
+                                    color = theme.textMuted
+                                )
+                            }
                         }
                         BasicTextField(
                             state = textState,
@@ -348,46 +365,36 @@ fun ChatInputBar(
                     }
 
                     if (isBusy) {
-                        IconButton(
+                        ComposerSquareButton(
+                            glyph = "■",
+                            glyphColor = theme.error,
+                            fillColor = Color.Transparent,
+                            borderColor = theme.border,
+                            size = controlSize,
                             onClick = onAbort,
-                            modifier = Modifier
-                                .size(Sizing.iconButtonMd)
-                                .semantics { contentDescription = stopDescription }
-                                .testTag("chat_abort_button")
-                        ) {
-                            Text(
-                                text = "■",
-                                color = theme.error,
-                                fontFamily = FontFamily.Monospace,
-                                style = MaterialTheme.typography.titleMedium
-                            )
-                        }
+                            contentDescription = stopDescription,
+                            testTag = "chat_abort_button",
+                        )
                     }
 
-                    IconButton(
+                    // Keep the filled design when actionable; disabled states remain
+                    // visibly muted and expose no click action.
+                    ComposerSquareButton(
+                        glyph = "↑",
+                        glyphColor = if (canSubmit) theme.background else theme.textMuted,
+                        fillColor = if (canSubmit) theme.primary else theme.backgroundPanel,
+                        borderColor = if (canSubmit) theme.primary else theme.border,
+                        size = controlSize,
+                        enabled = canSubmit,
                         onClick = {
-                            if (!canSubmit) return@IconButton
                             onSend()
                             clearInput()
                             focusRequester.requestFocus()
                         },
-                        enabled = canSubmit,
-                        modifier = Modifier
-                            .size(Sizing.iconButtonMd)
-                            .semantics { contentDescription = sendContentDescription }
-                            .testTag("send_button")
-                    ) {
-                        if (isLoading) {
-                            TuiLoadingIndicator()
-                        } else {
-                            Text(
-                                text = "↑",
-                                color = if (canSubmit) theme.accent else theme.textMuted,
-                                fontFamily = FontFamily.Monospace,
-                                style = MaterialTheme.typography.titleMedium
-                            )
-                        }
-                    }
+                        contentDescription = sendContentDescription,
+                        testTag = "send_button",
+                        loading = isLoading,
+                    )
                 }
             }
         }
@@ -415,6 +422,55 @@ fun ChatInputBar(
                     .fillMaxWidth()
                     .padding(horizontal = Spacing.md)
             )
+        }
+    }
+}
+
+/**
+ * Flat, perfectly-square composer control (attach / send / abort).
+ *
+ * The outer box owns the minimum touch target and semantics. The bordered
+ * inner box stays at [size], preserving the compact TUI visual.
+ */
+@Composable
+@Suppress("LongParameterList", "FunctionNaming")
+private fun ComposerSquareButton(
+    glyph: String,
+    glyphColor: Color,
+    fillColor: Color,
+    borderColor: Color,
+    size: Dp,
+    enabled: Boolean = true,
+    onClick: () -> Unit,
+    contentDescription: String,
+    testTag: String,
+    loading: Boolean = false,
+) {
+    Box(
+        modifier = Modifier
+            .size(Sizing.minTouchTarget)
+            .clickable(enabled = enabled, role = Role.Button, onClick = onClick)
+            .semantics { this.contentDescription = contentDescription }
+            .testTag(testTag),
+        contentAlignment = Alignment.Center
+    ) {
+        Box(
+            modifier = Modifier
+                .size(size)
+                .background(fillColor, RectangleShape)
+                .border(Sizing.strokeMd, borderColor, RectangleShape),
+            contentAlignment = Alignment.Center,
+        ) {
+            if (loading) {
+                TuiLoadingIndicator()
+            } else {
+                Text(
+                    text = glyph,
+                    color = glyphColor,
+                    fontFamily = FontFamily.Monospace,
+                    style = MaterialTheme.typography.titleMedium
+                )
+            }
         }
     }
 }

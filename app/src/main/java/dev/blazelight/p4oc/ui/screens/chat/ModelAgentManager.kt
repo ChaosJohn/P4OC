@@ -42,6 +42,10 @@ class ModelAgentManager(
     private val _availableModels = MutableStateFlow<List<Pair<String, ModelDto>>>(emptyList())
     val availableModels: StateFlow<List<Pair<String, ModelDto>>> = _availableModels.asStateFlow()
 
+    /** Provider id -> the provider's own display name ("llmproxy" -> "LLM Proxy"). */
+    private val _providerNames = MutableStateFlow<Map<String, String>>(emptyMap())
+    val providerNames: StateFlow<Map<String, String>> = _providerNames.asStateFlow()
+
     private val _selectedModel = MutableStateFlow<ModelInput?>(null)
     val selectedModel: StateFlow<ModelInput?> = _selectedModel.asStateFlow()
 
@@ -141,8 +145,10 @@ class ModelAgentManager(
             when (result) {
                 is ApiResult.Success -> {
                     val models = mutableListOf<Pair<String, ModelDto>>()
+                    val names = mutableMapOf<String, String>()
                     result.data.connected.forEach { providerId ->
                         val provider = result.data.all.find { it.id == providerId }
+                        provider?.name?.takeIf { it.isNotBlank() }?.let { names[providerId] = it }
                         provider?.models?.values?.forEach { model ->
                             models.add(providerId to model)
                         }
@@ -166,6 +172,7 @@ class ModelAgentManager(
                         }
                     } == true
                     _availableModels.value = models
+                    _providerNames.value = names
                     if (!selectedModelFromAgent && (!selectedModelExplicitly || !currentSelectionIsAvailable)) {
                         _selectedModel.value = fallbackModel
                         selectedModelExplicitly = false

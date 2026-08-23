@@ -5,7 +5,6 @@ import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material.icons.filled.*
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
@@ -23,6 +22,7 @@ import androidx.compose.ui.unit.dp
 import dev.blazelight.p4oc.R
 import dev.blazelight.p4oc.domain.model.Command
 import dev.blazelight.p4oc.domain.model.CommandSource
+import dev.blazelight.p4oc.ui.components.TuiBackButton
 import dev.blazelight.p4oc.ui.components.TuiButton
 import dev.blazelight.p4oc.ui.components.TuiLoadingIndicator
 import dev.blazelight.p4oc.ui.components.TuiTextField
@@ -435,17 +435,7 @@ private fun CommandArgumentsView(
             verticalAlignment = Alignment.CenterVertically,
             modifier = Modifier.padding(bottom = Spacing.md)
         ) {
-            IconButton(
-                onClick = onBack,
-                modifier = Modifier.size(Sizing.iconButtonSm)
-            ) {
-                Icon(
-                    Icons.AutoMirrored.Filled.ArrowBack,
-                    contentDescription = stringResource(R.string.back),
-                    tint = theme.textMuted,
-                    modifier = Modifier.size(Sizing.iconSm)
-                )
-            }
+            TuiBackButton(onClick = onBack, description = stringResource(R.string.back))
             Spacer(Modifier.width(Spacing.sm))
             Text(
                 text = "/${command.name}",

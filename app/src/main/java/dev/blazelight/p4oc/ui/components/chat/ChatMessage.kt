@@ -1,5 +1,6 @@
 package dev.blazelight.p4oc.ui.components.chat
 
+import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.ExperimentalFoundationApi
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
@@ -22,6 +23,7 @@ import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.semantics.Role
 import androidx.compose.ui.text.AnnotatedString
 import androidx.compose.ui.text.font.FontFamily
+import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import dev.blazelight.p4oc.R
 import dev.blazelight.p4oc.domain.model.*
@@ -29,6 +31,7 @@ import dev.blazelight.p4oc.ui.components.TuiLoadingIndicator
 import dev.blazelight.p4oc.ui.components.toolwidgets.ToolGroupWidget
 import dev.blazelight.p4oc.ui.components.toolwidgets.ToolWidgetState
 import dev.blazelight.p4oc.ui.theme.LocalOpenCodeTheme
+import dev.blazelight.p4oc.ui.theme.SemanticColors
 import dev.blazelight.p4oc.ui.theme.Sizing
 import dev.blazelight.p4oc.ui.theme.Spacing
 
@@ -125,25 +128,16 @@ private fun UserMessage(
     // Don't render anything if there's no visible text
     if (text.isBlank()) return
 
-    // TUI style: Distinct background with accent left border for user messages
-    Row(
+    // TUI style: flat panel surface with a "you" label — matches the design's user block.
+    Box(
         modifier = Modifier
             .fillMaxWidth()
             .padding(vertical = Spacing.xs)
     ) {
-        // Accent left border (thicker for user messages)
-        Box(
-            modifier = Modifier
-                .width(Spacing.xs)
-                .fillMaxHeight()
-                .background(theme.primary)
-        )
-
-        // Content with distinct background - use primary tint for better contrast
         Box(
             modifier = Modifier
                 .fillMaxWidth()
-                .background(theme.primary.copy(alpha = 0.12f))
+                .background(theme.backgroundPanel)
                 .combinedClickable(
                     onClick = {},
                     onLongClick = {
@@ -165,6 +159,13 @@ private fun UserMessage(
                     .fillMaxWidth()
                     .padding(end = revertEndInset)
             ) {
+                Text(
+                    text = stringResource(R.string.chat_user_label),
+                    style = MaterialTheme.typography.labelSmall,
+                    fontFamily = FontFamily.Monospace,
+                    color = theme.textMuted,
+                    modifier = Modifier.padding(bottom = Spacing.xxs)
+                )
                 StreamingMarkdown(text = text, modifier = Modifier.fillMaxWidth())
 
                 if (isQueued) {
@@ -216,6 +217,14 @@ private fun AssistantMessageContent(
         modifier = Modifier.fillMaxWidth(),
         verticalArrangement = Arrangement.spacedBy(Spacing.hairline)
     ) {
+        // Per-turn attribution header: `@build · claude-sonnet-4-5` (design 05).
+        (messageWithParts.message as? Message.Assistant)?.let { assistant ->
+            val attribution = assistantAttribution(assistant.agent, assistant.modelID)
+            if (partGroups.isNotEmpty() && attribution != null) {
+                AssistantAttributionHeader(attribution)
+            }
+        }
+
         // Render part groups in order
         partGroups.forEach { group ->
             when (group) {
@@ -282,6 +291,65 @@ private fun renderOtherPart(part: Part) {
     }
 }
 
+/**
+ * Assistant turn attribution header — `@build · claude-sonnet-4-5` (design 05).
+ * `@agent` takes the agent's accent color; the model id trails muted.
+ */
+internal data class AssistantAttribution(
+    val agent: String?,
+    val modelID: String?,
+) {
+    val showSeparator: Boolean get() = agent != null && modelID != null
+}
+
+internal fun assistantAttribution(agent: String, modelID: String): AssistantAttribution? {
+    val visibleAgent = agent.trim().takeIf(String::isNotEmpty)
+    val visibleModelID = modelID.trim().takeIf(String::isNotEmpty)
+    return if (visibleAgent == null && visibleModelID == null) {
+        null
+    } else {
+        AssistantAttribution(visibleAgent, visibleModelID)
+    }
+}
+
+@Composable
+@Suppress("FunctionNaming")
+private fun AssistantAttributionHeader(attribution: AssistantAttribution) {
+    val theme = LocalOpenCodeTheme.current
+    Row(
+        modifier = Modifier
+            .fillMaxWidth()
+            .padding(top = Spacing.xs, bottom = Spacing.xxs),
+        horizontalArrangement = Arrangement.spacedBy(Spacing.sm),
+        verticalAlignment = Alignment.CenterVertically
+    ) {
+        attribution.agent?.let { agent ->
+            Text(
+                text = "@${agent.lowercase()}",
+                style = MaterialTheme.typography.labelMedium.copy(fontFamily = FontFamily.Monospace),
+                fontWeight = FontWeight.SemiBold,
+                color = SemanticColors.AgentSelector.forName(agent)
+            )
+        }
+        if (attribution.showSeparator) {
+            Text(
+                text = "·",
+                style = MaterialTheme.typography.labelMedium,
+                color = theme.textMuted
+            )
+        }
+        attribution.modelID?.let { modelID ->
+            Text(
+                text = modelID,
+                style = MaterialTheme.typography.labelMedium.copy(fontFamily = FontFamily.Monospace),
+                color = theme.textMuted,
+                maxLines = 1,
+                overflow = androidx.compose.ui.text.style.TextOverflow.Ellipsis
+            )
+        }
+    }
+}
+
 @Composable
 private fun activityMarker(label: String) {
     val theme = LocalOpenCodeTheme.current
@@ -297,35 +365,77 @@ private fun activityMarker(label: String) {
 @Suppress("FunctionNaming")
 private fun AssistantError(error: MessageError, onProviderAuthRequired: ((String) -> Unit)? = null) {
     val theme = LocalOpenCodeTheme.current
-    val message = when {
-        error.name == "MessageAbortedError" -> stringResource(R.string.chat_run_aborted)
-        error.name == "ProviderAuthError" -> stringResource(R.string.chat_provider_auth_required)
-        error.isRetryable -> stringResource(R.string.chat_run_retryable_error)
-        else -> stringResource(R.string.chat_run_failed)
-    }
+    val isAuth = error.name == "ProviderAuthError"
+    val isAborted = error.name == "MessageAbortedError"
+    val message = assistantErrorMessage(error, isAuth, isAborted)
+    val accent = if (isAborted) theme.warning else theme.error
+    val header = assistantErrorHeader(error, isAuth, isAborted)
 
-    Box(
+    // Left-border error card, matching design 20's provider-auth banner.
+    Row(
         modifier = Modifier
             .fillMaxWidth()
-            .background(theme.error.copy(alpha = 0.1f))
-            .padding(horizontal = Spacing.sm, vertical = Spacing.xs)
+            .height(IntrinsicSize.Min)
+            .background(theme.backgroundElement)
     ) {
-        Row(
-            modifier = Modifier.fillMaxWidth(),
-            verticalAlignment = Alignment.CenterVertically,
-            horizontalArrangement = Arrangement.spacedBy(Spacing.sm)
+        Box(
+            modifier = Modifier
+                .width(Sizing.strokeThick)
+                .fillMaxHeight()
+                .background(accent)
+        )
+        Column(
+            modifier = Modifier.padding(Spacing.md),
+            verticalArrangement = Arrangement.spacedBy(Spacing.sm)
         ) {
             Text(
-                text = message,
-                modifier = Modifier.weight(1f),
-                style = MaterialTheme.typography.bodySmall,
-                color = theme.error
+                text = header,
+                style = MaterialTheme.typography.labelMedium.copy(fontFamily = FontFamily.Monospace),
+                color = accent
             )
-            if (error.name == "ProviderAuthError" && error.providerID != null && onProviderAuthRequired != null) {
-                TextButton(onClick = { onProviderAuthRequired(error.providerID) }) {
-                    Text(stringResource(R.string.provider_auth_action))
+            Text(
+                text = message,
+                style = MaterialTheme.typography.bodySmall,
+                color = theme.text
+            )
+            if (isAuth && error.providerID != null && onProviderAuthRequired != null) {
+                OutlinedButton(
+                    onClick = { onProviderAuthRequired(error.providerID) },
+                    shape = RectangleShape,
+                    contentPadding = PaddingValues(horizontal = Spacing.md, vertical = Spacing.none),
+                    border = BorderStroke(Sizing.strokeMd, theme.primary),
+                    colors = ButtonDefaults.outlinedButtonColors(contentColor = theme.primary)
+                ) {
+                    Text(
+                        stringResource(R.string.provider_auth_action),
+                        style = MaterialTheme.typography.labelSmall
+                    )
                 }
             }
+        }
+    }
+}
+
+@Composable
+private fun assistantErrorMessage(error: MessageError, isAuth: Boolean, isAborted: Boolean): String = when {
+    isAborted -> stringResource(R.string.chat_run_aborted)
+    isAuth -> stringResource(R.string.chat_provider_auth_required)
+    error.isRetryable -> stringResource(R.string.chat_run_retryable_error)
+    else -> stringResource(R.string.chat_run_failed)
+}
+
+private fun assistantErrorHeader(error: MessageError, isAuth: Boolean, isAborted: Boolean): String {
+    val title = when {
+        isAuth -> "provider auth error"
+        isAborted -> "run aborted"
+        error.isRetryable -> "run error · retryable"
+        else -> "run failed"
+    }
+    return buildString {
+        append(title)
+        error.statusCode?.let {
+            append(" · ")
+            append(it)
         }
     }
 }

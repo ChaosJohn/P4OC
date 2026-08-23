@@ -253,7 +253,7 @@ class StartWorkContextTest {
     }
 
     @Test
-    fun `picker filter scopes directories to selected server and pins global`() {
+    fun `picker search keeps only servers with matching workspaces and expands them`() {
         val groups = buildStartWorkPickerGroups(
             servers = listOf(
                 Triple(alpha.endpointKey, "Alpha", "A"),
@@ -261,23 +261,31 @@ class StartWorkContextTest {
             ),
             openTargets = listOf(
                 StartWorkTarget(alpha, WorkspaceKey.Directory("/repo/needle-alpha")),
-                StartWorkTarget(beta, WorkspaceKey.Directory("/repo/needle-beta")),
+                StartWorkTarget(beta, WorkspaceKey.Directory("/repo/other")),
             ),
             knownHomeTargets = emptyList(),
         )
 
-        val filtered = StartWorkPickerState(alpha.endpointKey, "needle").filteredTargets(groups)
-
-        assertEquals(WorkspaceKey.Global, filtered.first().workspaceKey)
-        assertEquals(
-            listOf(WorkspaceKey.Global, WorkspaceKey.Directory("/repo/needle-alpha")),
-            filtered.map { it.workspaceKey },
+        val rows = buildStartWorkPickerRows(
+            groups,
+            StartWorkPickerViewState(
+                query = "needle",
+                // A collapse the user made earlier must not hide a search hit.
+                expandedOverrides = mapOf(alpha.endpointKey to false),
+            ),
         )
-        assertTrue(filtered.all { it.serverRef.endpointKey == alpha.endpointKey })
+
+        assertEquals(1, rows.size)
+        assertEquals(alpha.endpointKey, rows[0].group.server.endpointKey)
+        assertTrue(rows[0].expanded)
+        assertEquals(
+            listOf(WorkspaceKey.Directory("/repo/needle-alpha")),
+            rows[0].visibleTargets.map { it.workspaceKey },
+        )
     }
 
     @Test
-    fun `picker filter matches workspace path case insensitively`() {
+    fun `picker search matches workspace path case insensitively`() {
         val groups = buildStartWorkPickerGroups(
             servers = listOf(Triple(alpha.endpointKey, "Alpha", "A")),
             openTargets = listOf(
@@ -287,12 +295,86 @@ class StartWorkContextTest {
             knownHomeTargets = emptyList(),
         )
 
-        val filtered = StartWorkPickerState(alpha.endpointKey, "p4oc").filteredTargets(groups)
+        val rows = buildStartWorkPickerRows(groups, StartWorkPickerViewState(query = "p4oc"))
 
         assertEquals(
-            listOf(WorkspaceKey.Global, WorkspaceKey.Directory("/Projects/Android/P4OC")),
-            filtered.map { it.workspaceKey },
+            listOf(WorkspaceKey.Directory("/Projects/Android/P4OC")),
+            rows.single().visibleTargets.map { it.workspaceKey },
         )
+    }
+
+    @Test
+    fun `collapsed server hides its workspaces but keeps the match count`() {
+        val groups = buildStartWorkPickerGroups(
+            servers = listOf(
+                Triple(alpha.endpointKey, "Alpha", "A"),
+                Triple(beta.endpointKey, "Beta", "B"),
+            ),
+            openTargets = listOf(StartWorkTarget(alpha, WorkspaceKey.Directory("/repo"))),
+            knownHomeTargets = emptyList(),
+        )
+
+        val rows = buildStartWorkPickerRows(
+            groups,
+            StartWorkPickerViewState(defaultExpandedEndpointKey = beta.endpointKey),
+        )
+
+        val alphaRow = rows.single { it.group.server.endpointKey == alpha.endpointKey }
+        assertTrue(!alphaRow.expanded)
+        assertTrue(alphaRow.visibleTargets.isEmpty())
+        assertEquals(0, alphaRow.hiddenCount)
+        // Global + /repo are still counted so the header can show "2 workspaces".
+        assertEquals(2, alphaRow.matchCount)
+        assertTrue(rows.single { it.group.server.endpointKey == beta.endpointKey }.expanded)
+    }
+
+    @Test
+    fun `expanded server pages workspaces and show-all lifts the cap`() {
+        val directories = (1..PICKER_WORKSPACE_PAGE_SIZE + 5).map {
+            StartWorkTarget(alpha, WorkspaceKey.Directory("/repo/p$it"))
+        }
+        val groups = buildStartWorkPickerGroups(
+            servers = listOf(Triple(alpha.endpointKey, "Alpha", "A")),
+            openTargets = directories,
+            knownHomeTargets = emptyList(),
+        )
+        val total = PICKER_WORKSPACE_PAGE_SIZE + 6 // directories + the global entry
+
+        val capped = buildStartWorkPickerRows(groups, StartWorkPickerViewState()).single()
+        assertEquals(PICKER_WORKSPACE_PAGE_SIZE, capped.visibleTargets.size)
+        assertEquals(total - PICKER_WORKSPACE_PAGE_SIZE, capped.hiddenCount)
+
+        val expanded = buildStartWorkPickerRows(
+            groups,
+            StartWorkPickerViewState(showAllEndpointKeys = setOf(alpha.endpointKey)),
+        ).single()
+        assertEquals(total, expanded.visibleTargets.size)
+        assertEquals(0, expanded.hiddenCount)
+    }
+
+    @Test
+    fun `a single server is expanded without an explicit default`() {
+        val groups = buildStartWorkPickerGroups(
+            servers = listOf(Triple(alpha.endpointKey, "Alpha", "A")),
+            openTargets = listOf(StartWorkTarget(alpha, WorkspaceKey.Directory("/repo"))),
+            knownHomeTargets = emptyList(),
+        )
+
+        assertTrue(buildStartWorkPickerRows(groups, StartWorkPickerViewState()).single().expanded)
+    }
+
+    @Test
+    fun `picker selection uses only the current invocation action`() {
+        val target = StartWorkTarget(alpha, workspace)
+
+        val browse = resolveStartWorkPickerSelection(target, StartWorkAction.BrowseSessions)
+        assertEquals(StartWorkAction.BrowseSessions, browse.action)
+        assertNull(browse.context.defaultAction)
+
+        val chooseTarget = resolveStartWorkPickerSelection(target, invocationAction = null)
+        assertNull(chooseTarget.action)
+        assertNull(chooseTarget.context.defaultAction)
+        assertEquals(target, chooseTarget.context.selectedTarget)
     }
 
     @Test

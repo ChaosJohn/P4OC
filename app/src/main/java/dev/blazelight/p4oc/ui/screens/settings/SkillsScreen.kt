@@ -271,7 +271,9 @@ private fun SkillCard(
     val theme = LocalOpenCodeTheme.current
     Card(
         modifier = Modifier.fillMaxWidth(),
-        onClick = onClick
+        onClick = onClick,
+        shape = RectangleShape,
+        colors = CardDefaults.cardColors(containerColor = theme.backgroundElement)
     ) {
         Row(
             modifier = Modifier

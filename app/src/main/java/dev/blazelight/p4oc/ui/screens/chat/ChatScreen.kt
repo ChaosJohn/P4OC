@@ -24,10 +24,13 @@ import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.semantics.Role
 import androidx.compose.ui.text.font.FontFamily
+import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import dev.blazelight.p4oc.R
 import dev.blazelight.p4oc.core.network.ConnectionState
+import dev.blazelight.p4oc.data.remote.dto.ModelInput
+import dev.blazelight.p4oc.domain.model.Message
 import dev.blazelight.p4oc.domain.model.Part
 import dev.blazelight.p4oc.domain.model.MessageWithParts
 import dev.blazelight.p4oc.domain.model.Permission
@@ -131,6 +134,7 @@ fun ChatScreen(
     val availableAgents by viewModel.modelAgentManager.availableAgents.collectAsStateWithLifecycle()
     val selectedAgent by viewModel.modelAgentManager.selectedAgent.collectAsStateWithLifecycle()
     val availableModels by viewModel.modelAgentManager.availableModels.collectAsStateWithLifecycle()
+    val providerNames by viewModel.modelAgentManager.providerNames.collectAsStateWithLifecycle()
     val selectedModel by viewModel.modelAgentManager.selectedModel.collectAsStateWithLifecycle()
     val selectedReasoningEffort by viewModel.modelAgentManager.selectedReasoningEffort.collectAsStateWithLifecycle()
     val favoriteModels by viewModel.modelAgentManager.favoriteModels.collectAsStateWithLifecycle()
@@ -194,6 +198,9 @@ fun ChatScreen(
         saver = ChatScrollRestorationState.Saver
     ) { ChatScrollRestorationState() }
     val messageBlocks = remember(messages, uiState.isBusy) { groupMessagesIntoBlocks(messages, uiState.isBusy) }
+    // A streaming assistant is initially reported with all-zero token totals.
+    // Retain the newest meaningful usage until the live reply gains real usage.
+    val contextUsage = remember(messages) { latestAssistantContextUsage(messages) }
     val searchMatches = remember(messageBlocks, scrollRestorationState.searchQuery) {
         findChatMatches(messageBlocks, scrollRestorationState.searchQuery)
     }
@@ -350,6 +357,11 @@ fun ChatScreen(
                         .imePadding()
                         .navigationBarsPadding()
                 ) {
+                    // Hairline separating the flat composer from the chat above it.
+                    HorizontalDivider(
+                        color = LocalOpenCodeTheme.current.border,
+                        thickness = Sizing.strokeThin
+                    )
                     ModelAgentSelectorBar(
                         availableAgents = availableAgents,
                         selectedAgent = selectedAgent,
@@ -361,7 +373,12 @@ fun ChatScreen(
                         onReasoningEffortSelected = viewModel.modelAgentManager::selectReasoningEffort,
                         favoriteModels = favoriteModels,
                         recentModels = recentModels,
-                        onToggleFavorite = viewModel.modelAgentManager::toggleFavoriteModel
+                        onToggleFavorite = viewModel.modelAgentManager::toggleFavoriteModel,
+                        usedContextTokens = contextUsage?.tokens,
+                        contextUsageModel = contextUsage?.let {
+                            ModelInput(providerID = it.providerID, modelID = it.modelID)
+                        },
+                        providerNames = providerNames,
                     )
                     ChatInputBar(
                         value = uiState.inputText,
@@ -664,6 +681,30 @@ fun ChatScreen(
     }
 }
 
+internal data class AssistantContextUsage(
+    val tokens: Int,
+    val providerID: String,
+    val modelID: String,
+)
+
+internal fun latestAssistantContextUsage(messages: List<MessageWithParts>): AssistantContextUsage? =
+    messages.asReversed().firstNotNullOfOrNull { messageWithParts ->
+        val assistant = messageWithParts.message as? Message.Assistant
+            ?: return@firstNotNullOfOrNull null
+        val tokens = assistant.tokens.run {
+            input.toLong() + output + reasoning + cacheRead + cacheWrite
+        }
+        if (tokens <= 0L) {
+            null
+        } else {
+            AssistantContextUsage(
+                tokens = tokens.coerceAtMost(Int.MAX_VALUE.toLong()).toInt(),
+                providerID = assistant.providerID,
+                modelID = assistant.modelID,
+            )
+        }
+    }
+
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
 private fun ChatTopBar(
@@ -683,27 +724,38 @@ private fun ChatTopBar(
     var showOverflow by remember { mutableStateOf(false) }
 
     TuiTopBar(
-        title = title,
         onNavigateBack = onBack,
-        actions = {
-            // Compact status: connection dot + branch (no 40dp boxes)
-            ConnectionDot(state = connectionState)
-            branchName?.let { branch ->
-                Text(
-                    text = "${stringResource(R.string.vcs_branch_prefix)} $branch",
-                    style = MaterialTheme.typography.labelSmall.copy(
-                        fontFamily = FontFamily.Monospace
-                    ),
-                    color = theme.textMuted,
-                    maxLines = 1,
-                    overflow = TextOverflow.Ellipsis,
-                    modifier = Modifier
-                        .widthIn(max = Sizing.panelWidthSm) // 80dp — tighter
-                        .padding(start = Spacing.xxs)
-                )
+        titleContent = {
+            Column {
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    ConnectionDot(state = connectionState)
+                    Spacer(Modifier.width(Spacing.xs))
+                    Text(
+                        text = title,
+                        maxLines = 1,
+                        overflow = TextOverflow.Ellipsis,
+                        style = MaterialTheme.typography.titleSmall.copy(
+                            fontWeight = FontWeight.SemiBold
+                        )
+                    )
+                }
+                // Branch sits below the title so it gets full width instead of
+                // being squeezed/truncated in the actions row.
+                branchName?.let { branch ->
+                    Text(
+                        text = "${stringResource(R.string.vcs_branch_prefix)} $branch",
+                        style = MaterialTheme.typography.labelSmall.copy(
+                            fontFamily = FontFamily.Monospace
+                        ),
+                        color = theme.textMuted,
+                        maxLines = 1,
+                        overflow = TextOverflow.Ellipsis
+                    )
+                }
             }
-
-            Spacer(Modifier.width(Spacing.xs))
+        },
+        title = title,
+        actions = {
             // Todo count — only when there are todos (TUI glyph, no rounded badge)
             if (todoCount > 0) {
                 IconButton(
@@ -723,13 +775,13 @@ private fun ChatTopBar(
             Box {
                 IconButton(
                     onClick = { showOverflow = true },
-                    modifier = Modifier.size(Sizing.iconButtonMd).testTag("chat_overflow_button")
+                    modifier = Modifier.size(Sizing.iconButtonLg).testTag("chat_overflow_button")
                 ) {
                     Text(
                         text = "≡",
-                        color = theme.accent,
+                        color = theme.text,
                         fontFamily = FontFamily.Monospace,
-                        style = MaterialTheme.typography.titleMedium
+                        style = MaterialTheme.typography.headlineSmall
                     )
                 }
                 DropdownMenu(

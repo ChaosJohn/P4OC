@@ -1,20 +1,15 @@
 package dev.blazelight.p4oc.ui.screens.server
 
 import androidx.compose.animation.AnimatedVisibility
-import androidx.compose.animation.core.RepeatMode
-import androidx.compose.animation.core.animateFloat
-import androidx.compose.animation.core.infiniteRepeatable
-import androidx.compose.animation.core.rememberInfiniteTransition
-import androidx.compose.animation.core.tween
+import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.rememberScrollState
-import androidx.compose.foundation.selection.toggleable
+import androidx.compose.foundation.text.BasicTextField
 import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.automirrored.filled.Login
 import androidx.compose.material.icons.filled.*
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
@@ -22,43 +17,50 @@ import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.RectangleShape
+import androidx.compose.ui.graphics.SolidColor
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.semantics.Role
+import androidx.compose.ui.semantics.contentDescription
+import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.text.TextRange
+import androidx.compose.ui.text.TextStyle
 import androidx.compose.ui.text.font.FontFamily
+import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.text.input.PasswordVisualTransformation
 import androidx.compose.ui.text.input.TextFieldValue
 import androidx.compose.ui.text.input.VisualTransformation
 import androidx.compose.ui.text.style.TextOverflow
+import androidx.compose.ui.unit.sp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import dev.blazelight.p4oc.R
 import dev.blazelight.p4oc.core.datastore.SavedServer
-import dev.blazelight.p4oc.core.network.DiscoveredServer
 import dev.blazelight.p4oc.core.network.DiscoveryState
 import dev.blazelight.p4oc.core.network.ServerConnectionRegistry
 import dev.blazelight.p4oc.core.network.ServerUrl
 import dev.blazelight.p4oc.core.network.toServerRef
+import dev.blazelight.p4oc.ui.components.TuiAlertDialog
 import dev.blazelight.p4oc.ui.components.TuiConfirmDialog
-import dev.blazelight.p4oc.ui.components.TuiLoadingIndicator
-import dev.blazelight.p4oc.ui.components.status.serverStatusIndicator
+import dev.blazelight.p4oc.ui.components.TuiSectionHeader
+import dev.blazelight.p4oc.ui.components.TuiSwitch
+import dev.blazelight.p4oc.ui.components.TuiTopBar
+import dev.blazelight.p4oc.ui.components.status.serverStatusVisual
 import dev.blazelight.p4oc.ui.tabs.TabManager
 import dev.blazelight.p4oc.ui.theme.LocalOpenCodeTheme
 import dev.blazelight.p4oc.ui.theme.Sizing
 import dev.blazelight.p4oc.ui.theme.Spacing
+import dev.blazelight.p4oc.ui.theme.TuiCodeFontSize
 import org.koin.androidx.compose.koinViewModel
 import org.koin.compose.koinInject
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Suppress("LongMethod")
 @Composable
-fun serverScreen(
+internal fun serverScreen(
     onNavigateToSessions: () -> Unit,
-    onNavigateToProjects: () -> Unit,
     onSettings: () -> Unit,
-    autoReconnect: Boolean = true,
-    onConnectSavedServer: ((SavedServer) -> Unit)? = null,
+    config: ServerScreenConfig = ServerScreenConfig(),
 ) {
     val viewModel: ServerViewModel = koinViewModel()
     val theme = LocalOpenCodeTheme.current
@@ -73,12 +75,15 @@ fun serverScreen(
     val openTabsByEndpoint = tabs.filterNot { it.isPinnedHome }.groupBy { it.serverEndpointKey }
     val inventory = remember(uiState, registryStates) { buildServerInventory(uiState, registryStates) }
     var showManualForm by rememberSaveable {
-        mutableStateOf(uiState.savedServers.isEmpty() && uiState.discoveredServers.isEmpty())
+        mutableStateOf(
+            config.showManualFormInitially ||
+                (uiState.savedServers.isEmpty() && uiState.discoveredServers.isEmpty()),
+        )
     }
     var editingServerId by rememberSaveable { mutableStateOf<String?>(null) }
 
-    LaunchedEffect(autoReconnect) {
-        viewModel.start(autoReconnect)
+    LaunchedEffect(config.autoReconnect) {
+        viewModel.start(config.autoReconnect)
     }
 
     // Start/stop mDNS discovery with screen lifecycle
@@ -97,7 +102,7 @@ fun serverScreen(
             }
             is NavigationDestination.Projects -> {
                 viewModel.clearNavigationDestination()
-                onNavigateToProjects()
+                onNavigateToSessions()
             }
             null -> { /* waiting for connection */ }
         }
@@ -119,9 +124,10 @@ fun serverScreen(
             },
             onDismissEdit = { editingServerId = null },
             onNavigateToSessions = onNavigateToSessions,
-            onConnectSavedServer = onConnectSavedServer,
+            onConnectSavedServer = config.onConnectSavedServer,
         ),
         onSettings = onSettings,
+        onNavigateBack = config.onNavigateBack,
     )
 }
 
@@ -145,28 +151,30 @@ private data class ServerPresentation(
 private fun serverScaffold(
     presentation: ServerPresentation,
     onSettings: () -> Unit,
+    onNavigateBack: (() -> Unit)?,
 ) {
     val theme = LocalOpenCodeTheme.current
     Scaffold(
         topBar = {
-            TopAppBar(
-                title = {
-                    Text(
-                        "[ ${stringResource(R.string.server_connect_title)} ]",
-                        fontFamily = FontFamily.Monospace,
-                        color = theme.text,
-                    )
-                },
+            TuiTopBar(
+                title = stringResource(R.string.server_connect_title),
+                onNavigateBack = onNavigateBack,
                 actions = {
-                    IconButton(onClick = onSettings, modifier = Modifier.testTag("server_settings_button")) {
+                    // Sized to match the home header's settings button (48dp target, 20dp glyph).
+                    IconButton(
+                        onClick = onSettings,
+                        modifier = Modifier
+                            .size(Sizing.minTouchTarget)
+                            .testTag("server_settings_button"),
+                    ) {
                         Icon(
                             Icons.Default.Settings,
                             contentDescription = stringResource(R.string.server_settings_cd),
                             tint = theme.textMuted,
+                            modifier = Modifier.size(Sizing.iconMd),
                         )
                     }
                 },
-                colors = TopAppBarDefaults.topAppBarColors(containerColor = theme.backgroundElement),
             )
         },
         containerColor = LocalOpenCodeTheme.current.background,
@@ -238,6 +246,16 @@ private val serverContent: @Composable (Modifier, ServerPresentation) -> Unit = 
                 )
             }
         }
+        // The editor already owns a URL/credentials form bound to the same uiState, so the
+        // add-a-server section stays hidden until the editor is dismissed.
+        if (presentation.editingServerId == null) {
+            manualServerSection(
+                presentation.uiState,
+                presentation.viewModel,
+                presentation.showManualForm,
+                presentation.onShowManualForm,
+            )
+        }
         val showDiscovery = presentation.inventory.nearby.isNotEmpty() ||
             presentation.uiState.discoveryState == DiscoveryState.SCANNING
         if (showDiscovery) {
@@ -248,12 +266,6 @@ private val serverContent: @Composable (Modifier, ServerPresentation) -> Unit = 
                 presentation.viewModel::connectToDiscoveredServer,
             )
         }
-        manualServerSection(
-            presentation.uiState,
-            presentation.viewModel,
-            presentation.showManualForm,
-            presentation.onShowManualForm,
-        )
         serverFooter(presentation.uiState.error)
     }
 }
@@ -283,13 +295,7 @@ private fun manualServerSection(
         }
     } else {
         remoteServerSection(
-            state = RemoteServerState(
-                uiState.remoteUrl,
-                uiState.username,
-                uiState.password,
-                uiState.allowInsecure,
-                uiState.isConnecting,
-            ),
+            state = uiState.toRemoteServerState(),
             actions = RemoteServerActions(
                 viewModel::setRemoteUrl,
                 viewModel::setUsername,
@@ -333,6 +339,16 @@ private data class RemoteServerState(
     val password: String,
     val allowInsecure: Boolean,
     val isConnecting: Boolean,
+    val showTlsOptions: Boolean,
+)
+
+private fun ServerUiState.toRemoteServerState() = RemoteServerState(
+    url = remoteUrl,
+    username = username,
+    password = password,
+    allowInsecure = allowInsecure,
+    isConnecting = isConnecting,
+    showTlsOptions = showTlsOptions,
 )
 
 private data class RemoteServerActions(
@@ -348,9 +364,9 @@ private fun remoteServerSection(
     state: RemoteServerState,
     actions: RemoteServerActions,
 ) {
-    val theme = LocalOpenCodeTheme.current
     var passwordVisible by remember { mutableStateOf(false) }
-    var showCredentials by rememberSaveable { mutableStateOf(false) }
+    // Keep optional credentials visible so authenticated servers remain quick to configure.
+    var showCredentials by rememberSaveable { mutableStateOf(true) }
     var urlFieldValue by remember { mutableStateOf(serverUrlTextFieldValue(state.url)) }
 
     LaunchedEffect(state.url) {
@@ -359,60 +375,57 @@ private fun remoteServerSection(
         }
     }
 
-    Surface(
-        color = theme.backgroundElement,
-        shape = RectangleShape,
-    ) {
-        Column(
-            modifier = Modifier.padding(Spacing.md),
-            verticalArrangement = Arrangement.spacedBy(Spacing.sm),
-        ) {
-            Text(
-                text = "[ ${stringResource(R.string.server_remote_title)} ]",
-                style = MaterialTheme.typography.titleMedium,
-                fontFamily = FontFamily.Monospace,
-                color = theme.text,
-            )
-            Text(
-                text = stringResource(R.string.server_remote_description),
-                style = MaterialTheme.typography.bodyMedium,
-                fontFamily = FontFamily.Monospace,
-                color = theme.textMuted,
-            )
-            remoteUrlField(
-                value = urlFieldValue,
-                onValueChange = { value ->
-                    urlFieldValue = value
-                    actions.onUrlChange(value.text)
-                },
-            )
-            credentialsSection(
-                state = state,
-                actions = actions,
-                controls = CredentialControls(
-                    expanded = showCredentials,
-                    passwordVisible = passwordVisible,
-                    onToggleExpanded = { showCredentials = !showCredentials },
-                    onTogglePassword = { passwordVisible = !passwordVisible },
-                ),
-            )
-            cleartextCredentialWarning(state)
-            connectButton(state = state, onConnect = actions.onConnect)
-        }
+    Column(verticalArrangement = Arrangement.spacedBy(Spacing.lg)) {
+        remoteUrlField(
+            value = urlFieldValue,
+            onValueChange = { value ->
+                urlFieldValue = value
+                actions.onUrlChange(value.text)
+            },
+        )
+        credentialsSection(
+            state = state,
+            actions = actions,
+            controls = CredentialControls(
+                expanded = showCredentials,
+                passwordVisible = passwordVisible,
+                onToggleExpanded = { showCredentials = !showCredentials },
+                onTogglePassword = { passwordVisible = !passwordVisible },
+            ),
+        )
+        serverCleartextCredentialWarning(
+            url = state.url,
+            username = state.username,
+            password = state.password,
+        )
+        connectButton(state = state, onConnect = actions.onConnect)
     }
 }
 
+/**
+ * Pre-submit warning shown before CONNECT when a cleartext `http://` URL that the app considers a
+ * trusted loopback or private-LAN address is combined with actual credentials (both username and
+ * password present). Public-cleartext submissions are rejected outright, so this surfaces only the
+ * allowed-but-unencrypted case. Shared by the connect-to-server and first-run setup forms so the
+ * two cannot drift apart.
+ */
 @Composable
-private fun cleartextCredentialWarning(state: RemoteServerState) {
-    val usesCleartext = state.url.trimStart().startsWith("http://", ignoreCase = true)
-    val hasCredentials = state.username.isNotBlank() || state.password.isNotBlank()
-    val shouldWarn = usesCleartext && hasCredentials && ServerUrl.allowsCleartextCredentials(state.url)
+internal fun serverCleartextCredentialWarning(
+    url: String,
+    username: String,
+    password: String,
+    modifier: Modifier = Modifier,
+) {
+    val usesCleartext = url.trimStart().startsWith("http://", ignoreCase = true)
+    val hasCredentials = username.isNotBlank() && password.isNotBlank()
+    val shouldWarn = usesCleartext && hasCredentials && ServerUrl.allowsCleartextCredentials(url)
     if (!shouldWarn) return
     Text(
         text = stringResource(R.string.server_cleartext_credentials_warning),
         color = LocalOpenCodeTheme.current.warning,
         style = MaterialTheme.typography.bodySmall,
         fontFamily = FontFamily.Monospace,
+        modifier = modifier,
     )
 }
 
@@ -422,24 +435,60 @@ private fun remoteUrlField(
     onValueChange: (TextFieldValue) -> Unit,
 ) {
     val theme = LocalOpenCodeTheme.current
-    OutlinedTextField(
-        value = value,
-        onValueChange = onValueChange,
-        label = { Text(stringResource(R.string.field_server_url), fontFamily = FontFamily.Monospace) },
-        placeholder = {
-            Text(
-                stringResource(R.string.field_server_url_placeholder),
+    val contentDescription = stringResource(R.string.cd_server_url_field)
+    Column {
+        serverFieldLabel(
+            stringResource(R.string.setup_server_url_label),
+            stringResource(R.string.setup_field_required),
+        )
+        Spacer(Modifier.height(Spacing.sm))
+        BasicTextField(
+            value = value,
+            onValueChange = onValueChange,
+            modifier = Modifier
+                .fillMaxWidth()
+                .height(Sizing.buttonHeightLg)
+                .background(theme.backgroundPanel, RectangleShape)
+                .border(Sizing.strokeMd, theme.primary, RectangleShape)
+                .semantics { this.contentDescription = contentDescription }
+                .testTag("server_url_input"),
+            textStyle = TextStyle(
+                color = theme.text,
                 fontFamily = FontFamily.Monospace,
-            )
-        },
-        singleLine = true,
-        modifier = Modifier.fillMaxWidth().testTag("server_url_input"),
-        shape = RectangleShape,
-        colors = OutlinedTextFieldDefaults.colors(
-            focusedBorderColor = theme.accent,
-            unfocusedBorderColor = theme.border,
-        ),
-    )
+                fontSize = TuiCodeFontSize.xl,
+            ),
+            singleLine = true,
+            cursorBrush = SolidColor(theme.primary),
+            keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Uri),
+            decorationBox = { inner ->
+                Row(
+                    modifier = Modifier.fillMaxSize().padding(horizontal = Spacing.lg),
+                    verticalAlignment = Alignment.CenterVertically,
+                ) {
+                    Text(
+                        text = "/",
+                        color = theme.primary,
+                        fontFamily = FontFamily.Monospace,
+                        fontSize = TuiCodeFontSize.xl,
+                    )
+                    Spacer(Modifier.width(Spacing.md))
+                    Box(Modifier.weight(1f)) {
+                        if (value.text.isEmpty()) {
+                            Text(
+                                text = stringResource(R.string.field_server_url_placeholder),
+                                color = theme.textMuted,
+                                fontFamily = FontFamily.Monospace,
+                                fontSize = TuiCodeFontSize.xl,
+                                maxLines = 1,
+                                overflow = TextOverflow.Ellipsis,
+                            )
+                        }
+                        inner()
+                    }
+                }
+            },
+        )
+    }
 }
 
 private data class CredentialControls(
@@ -455,18 +504,55 @@ private fun credentialsSection(
     actions: RemoteServerActions,
     controls: CredentialControls,
 ) {
-    TextButton(
-        onClick = controls.onToggleExpanded,
-        modifier = Modifier.testTag("server_credentials_toggle"),
-    ) {
-        Icon(
-            if (controls.expanded) Icons.Default.ExpandLess else Icons.Default.ExpandMore,
-            contentDescription = null,
-        )
-        Text(stringResource(R.string.server_credentials), fontFamily = FontFamily.Monospace)
-    }
-    AnimatedVisibility(controls.expanded) {
-        credentialsFields(state, actions, controls.passwordVisible, controls.onTogglePassword)
+    val theme = LocalOpenCodeTheme.current
+    Column {
+        Row(
+            modifier = Modifier
+                .fillMaxWidth()
+                .height(Sizing.buttonHeightLg)
+                .background(theme.backgroundPanel, RectangleShape)
+                .border(Sizing.strokeMd, theme.backgroundElement, RectangleShape)
+                .clickable(role = Role.Button) { controls.onToggleExpanded() }
+                .padding(horizontal = Spacing.lg)
+                .testTag("server_credentials_toggle"),
+            verticalAlignment = Alignment.CenterVertically,
+            horizontalArrangement = Arrangement.spacedBy(Spacing.md),
+        ) {
+            Text(
+                text = if (controls.expanded) "▾" else "▸",
+                color = theme.secondary,
+                fontFamily = FontFamily.Monospace,
+                fontSize = TuiCodeFontSize.lg,
+            )
+            Text(
+                text = stringResource(R.string.server_credentials),
+                color = theme.text,
+                fontFamily = FontFamily.Monospace,
+                fontSize = TuiCodeFontSize.lg,
+                modifier = Modifier.weight(1f),
+            )
+            if (!controls.expanded) {
+                Text(
+                    text = if (state.password.isBlank()) {
+                        stringResource(
+                            R.string.setup_credentials_hint_no_password,
+                            state.username.ifBlank { ServerUrl.DEFAULT_USERNAME },
+                        )
+                    } else {
+                        stringResource(
+                            R.string.setup_credentials_hint,
+                            state.username.ifBlank { ServerUrl.DEFAULT_USERNAME },
+                        )
+                    },
+                    color = theme.textMuted,
+                    fontFamily = FontFamily.Monospace,
+                    fontSize = TuiCodeFontSize.sm,
+                )
+            }
+        }
+        AnimatedVisibility(controls.expanded) {
+            credentialsFields(state, actions, controls.passwordVisible, controls.onTogglePassword)
+        }
     }
 }
 
@@ -477,50 +563,148 @@ private fun credentialsFields(
     passwordVisible: Boolean,
     onTogglePassword: () -> Unit,
 ) {
-    val theme = LocalOpenCodeTheme.current
-    Column(verticalArrangement = Arrangement.spacedBy(Spacing.sm)) {
-        OutlinedTextField(
+    Column(Modifier.padding(top = Spacing.lg)) {
+        serverFieldLabel(
+            stringResource(R.string.setup_username_label),
+            stringResource(R.string.setup_field_default_opencode),
+        )
+        Spacer(Modifier.height(Spacing.sm))
+        serverFieldBox(
             value = state.username,
             onValueChange = actions.onUsernameChange,
-            label = { Text(stringResource(R.string.field_username), fontFamily = FontFamily.Monospace) },
-            singleLine = true,
-            modifier = Modifier.fillMaxWidth().testTag("server_username_input"),
-            shape = RectangleShape,
+            options = ServerFieldOptions(
+                testTag = "server_username_input",
+                contentDescription = stringResource(R.string.cd_username_field),
+            ),
         )
+        Spacer(Modifier.height(Spacing.lg))
+        serverFieldLabel(
+            stringResource(R.string.setup_password_label),
+            stringResource(R.string.setup_field_optional),
+        )
+        Spacer(Modifier.height(Spacing.sm))
         passwordField(state.password, actions.onPasswordChange, passwordVisible, onTogglePassword)
-        Row(
-            modifier = Modifier
-                .fillMaxWidth()
-                .toggleable(
-                    value = state.allowInsecure,
-                    role = Role.Checkbox,
-                    onValueChange = actions.onAllowInsecureChange,
-                )
-                .padding(vertical = Spacing.xs)
-                .testTag("server_allow_insecure_toggle"),
-            verticalAlignment = Alignment.CenterVertically,
-            horizontalArrangement = Arrangement.spacedBy(Spacing.sm),
-        ) {
-            Checkbox(
-                checked = state.allowInsecure,
-                onCheckedChange = null,
-                colors = CheckboxDefaults.colors(checkedColor = theme.accent),
-            )
-            Column(Modifier.weight(1f)) {
-                Text(
-                    stringResource(R.string.field_allow_insecure),
-                    fontFamily = FontFamily.Monospace,
-                    color = theme.text,
-                )
-                Text(
-                    stringResource(R.string.field_allow_insecure_desc),
-                    fontFamily = FontFamily.Monospace,
-                    color = theme.textMuted,
-                    style = MaterialTheme.typography.bodySmall,
-                )
-            }
+        if (state.showTlsOptions) {
+            Spacer(Modifier.height(Spacing.xl))
+            serverTlsSection(state.allowInsecure, actions.onAllowInsecureChange)
         }
     }
+}
+
+@Composable
+private fun serverFieldLabel(label: String, qualifier: String) {
+    val theme = LocalOpenCodeTheme.current
+    Row(horizontalArrangement = Arrangement.spacedBy(Spacing.xs)) {
+        Text(
+            text = label,
+            fontFamily = FontFamily.Monospace,
+            fontSize = TuiCodeFontSize.md,
+            color = theme.textMuted,
+        )
+        Text(
+            text = qualifier,
+            fontFamily = FontFamily.Monospace,
+            fontSize = TuiCodeFontSize.md,
+            color = theme.textMuted,
+        )
+    }
+}
+
+@Composable
+private fun serverTlsSection(allowInsecure: Boolean, onAllowInsecureChange: (Boolean) -> Unit) {
+    val theme = LocalOpenCodeTheme.current
+    Text(
+        text = stringResource(R.string.setup_tls_label),
+        fontFamily = FontFamily.Monospace,
+        fontSize = TuiCodeFontSize.sm,
+        color = theme.textMuted,
+        letterSpacing = 1.sp,
+    )
+    Spacer(Modifier.height(Spacing.md))
+    Row(
+        modifier = Modifier
+            .fillMaxWidth()
+            .padding(vertical = Spacing.md)
+            .testTag("server_allow_insecure_toggle"),
+        verticalAlignment = Alignment.CenterVertically,
+        horizontalArrangement = Arrangement.spacedBy(Spacing.lg),
+    ) {
+        Column(Modifier.weight(1f)) {
+            Text(
+                text = stringResource(R.string.field_allow_insecure),
+                color = theme.text,
+                fontSize = TuiCodeFontSize.xl,
+            )
+            Text(
+                text = stringResource(R.string.setup_tls_skip_verification),
+                color = theme.textMuted,
+                fontFamily = FontFamily.Monospace,
+                fontSize = TuiCodeFontSize.md,
+            )
+        }
+        TuiSwitch(checked = allowInsecure, onCheckedChange = onAllowInsecureChange)
+    }
+    Row(
+        modifier = Modifier.padding(top = Spacing.sm, bottom = Spacing.xl),
+        horizontalArrangement = Arrangement.spacedBy(Spacing.md),
+    ) {
+        Text("⚠", color = theme.warning, fontFamily = FontFamily.Monospace, fontSize = TuiCodeFontSize.md)
+        Text(
+            text = stringResource(R.string.setup_tls_warning),
+            color = theme.textMuted,
+            fontFamily = FontFamily.Monospace,
+            fontSize = TuiCodeFontSize.md,
+        )
+    }
+}
+
+private data class ServerFieldOptions(
+    val testTag: String,
+    val contentDescription: String,
+    val keyboardType: KeyboardType = KeyboardType.Text,
+    val visualTransformation: VisualTransformation = VisualTransformation.None,
+)
+
+@Composable
+private fun serverFieldBox(
+    value: String,
+    onValueChange: (String) -> Unit,
+    options: ServerFieldOptions,
+    trailing: (@Composable () -> Unit)? = null,
+) {
+    val theme = LocalOpenCodeTheme.current
+    BasicTextField(
+        value = value,
+        onValueChange = onValueChange,
+        modifier = Modifier
+            .fillMaxWidth()
+            .height(Sizing.textFieldHeightSm)
+            .background(theme.backgroundPanel, RectangleShape)
+            .border(Sizing.strokeMd, theme.borderSubtle, RectangleShape)
+            .semantics { contentDescription = options.contentDescription }
+            .testTag(options.testTag),
+        textStyle = TextStyle(
+            color = theme.text,
+            fontFamily = FontFamily.Monospace,
+            fontSize = TuiCodeFontSize.xl,
+        ),
+        singleLine = true,
+        cursorBrush = SolidColor(theme.primary),
+        visualTransformation = options.visualTransformation,
+        keyboardOptions = KeyboardOptions(keyboardType = options.keyboardType),
+        decorationBox = { inner ->
+            Row(
+                modifier = Modifier.fillMaxSize().padding(horizontal = Spacing.lg),
+                verticalAlignment = Alignment.CenterVertically,
+            ) {
+                Box(Modifier.weight(1f)) { inner() }
+                if (trailing != null) {
+                    Spacer(Modifier.width(Spacing.md))
+                    trailing()
+                }
+            }
+        },
+    )
 }
 
 @Composable
@@ -531,30 +715,33 @@ private fun passwordField(
     onTogglePassword: () -> Unit,
 ) {
     val theme = LocalOpenCodeTheme.current
-    OutlinedTextField(
+    serverFieldBox(
         value = password,
         onValueChange = onPasswordChange,
-        label = { Text(stringResource(R.string.field_password), fontFamily = FontFamily.Monospace) },
-        singleLine = true,
-        modifier = Modifier.fillMaxWidth().testTag("server_password_input"),
-        visualTransformation = if (passwordVisible) {
-            VisualTransformation.None
-        } else {
-            PasswordVisualTransformation()
-        },
-        keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Password),
-        shape = RectangleShape,
-        trailingIcon = {
-            IconButton(
-                onClick = onTogglePassword,
-                modifier = Modifier.testTag("server_password_visibility"),
-            ) {
-                Icon(
-                    if (passwordVisible) Icons.Default.VisibilityOff else Icons.Default.Visibility,
-                    contentDescription = stringResource(R.string.server_password_visibility_cd),
-                    tint = theme.textMuted,
-                )
-            }
+        options = ServerFieldOptions(
+            testTag = "server_password_input",
+            contentDescription = stringResource(R.string.cd_password_field),
+            keyboardType = KeyboardType.Password,
+            visualTransformation = if (passwordVisible) {
+                VisualTransformation.None
+            } else {
+                PasswordVisualTransformation()
+            },
+        ),
+        trailing = {
+            Text(
+                text = if (passwordVisible) {
+                    stringResource(R.string.setup_password_hide)
+                } else {
+                    stringResource(R.string.setup_password_show)
+                },
+                color = theme.secondary,
+                fontFamily = FontFamily.Monospace,
+                fontSize = TuiCodeFontSize.lg,
+                modifier = Modifier
+                    .clickable(role = Role.Button, onClick = onTogglePassword)
+                    .testTag("server_password_visibility"),
+            )
         },
     )
 }
@@ -562,175 +749,40 @@ private fun passwordField(
 @Composable
 private fun connectButton(state: RemoteServerState, onConnect: () -> Unit) {
     val theme = LocalOpenCodeTheme.current
-    Button(
-        onClick = onConnect,
-        enabled = state.url.isNotBlank() && !state.isConnecting,
-        modifier = Modifier.fillMaxWidth().testTag("server_connect_button"),
-        shape = RectangleShape,
-        colors = ButtonDefaults.buttonColors(
-            containerColor = theme.accent,
-            contentColor = theme.background,
-        ),
+    Box(
+        modifier = Modifier
+            .fillMaxWidth()
+            .height(Sizing.buttonHeightLg)
+            .background(theme.primary, RectangleShape)
+            .clickable(enabled = !state.isConnecting, role = Role.Button) { onConnect() }
+            .testTag("server_connect_button"),
+        contentAlignment = Alignment.Center,
     ) {
         if (state.isConnecting) {
-            TuiLoadingIndicator()
-            Spacer(Modifier.width(Spacing.md))
-            Text(stringResource(R.string.button_connecting), fontFamily = FontFamily.Monospace)
-        } else {
-            Icon(Icons.AutoMirrored.Filled.Login, contentDescription = null)
-            Spacer(Modifier.width(Spacing.sm))
-            Text(stringResource(R.string.button_connect), fontFamily = FontFamily.Monospace)
-        }
-    }
-}
-
-@Composable
-private fun serverSetupHelpSection() {
-    val theme = LocalOpenCodeTheme.current
-    var expanded by remember { mutableStateOf(false) }
-
-    Surface(
-        color = theme.backgroundElement,
-        shape = RectangleShape,
-    ) {
-        Column(
-            modifier = Modifier.padding(Spacing.md),
-            verticalArrangement = Arrangement.spacedBy(Spacing.sm),
-        ) {
-            // Header — always visible, acts as toggle
             Row(
-                modifier =
-                Modifier
-                    .fillMaxWidth()
-                    .clickable(role = Role.Button) { expanded = !expanded },
-                horizontalArrangement = Arrangement.SpaceBetween,
                 verticalAlignment = Alignment.CenterVertically,
+                horizontalArrangement = Arrangement.spacedBy(Spacing.md),
             ) {
-                Text(
-                    text = "[ ? ${stringResource(R.string.server_setup_title)} ]",
-                    style = MaterialTheme.typography.titleMedium,
-                    fontFamily = FontFamily.Monospace,
-                    color = theme.text,
+                CircularProgressIndicator(
+                    modifier = Modifier.size(Sizing.iconXs),
+                    color = theme.background,
+                    strokeWidth = Sizing.strokeThick,
                 )
                 Text(
-                    text = if (expanded) "▾" else "▸",
+                    text = stringResource(R.string.button_connecting),
+                    color = theme.background,
                     fontFamily = FontFamily.Monospace,
-                    color = theme.textMuted,
+                    fontWeight = FontWeight.SemiBold,
+                    fontSize = TuiCodeFontSize.xxl,
                 )
             }
-
-            setupHelpContent(expanded)
-        }
-    }
-}
-
-@Composable
-private fun setupHelpContent(expanded: Boolean) {
-    val theme = LocalOpenCodeTheme.current
-    Text(
-        text = stringResource(R.string.server_setup_subtitle),
-        style = MaterialTheme.typography.bodySmall,
-        fontFamily = FontFamily.Monospace,
-        color = theme.textMuted,
-    )
-    AnimatedVisibility(visible = expanded) {
-        Column(verticalArrangement = Arrangement.spacedBy(Spacing.md)) {
-            Spacer(Modifier.height(Spacing.xs))
-            setupStep(
-                number = "1",
-                title = stringResource(R.string.server_setup_step1_title),
-                command = stringResource(R.string.server_setup_step1_cmd),
-            )
-            setupStep(
-                number = "2",
-                title = stringResource(R.string.server_setup_step2_title),
-                command = stringResource(R.string.server_setup_step2_cmd),
-            )
-            setupStep(
-                number = "3",
-                title = stringResource(R.string.server_setup_step3_title),
-                command = stringResource(R.string.server_setup_step3_cmd),
-            )
-            setupHelpTip()
-        }
-    }
-}
-
-private val setupHelpTip: @Composable () -> Unit = {
-    val theme = LocalOpenCodeTheme.current
-    Surface(
-        color = theme.accent.copy(alpha = 0.08f),
-        shape = RectangleShape,
-        modifier = Modifier.border(
-            Sizing.strokeThin,
-            theme.accent.copy(alpha = 0.3f),
-            RectangleShape,
-        ),
-    ) {
-        Column(
-            modifier = Modifier.padding(Spacing.md),
-            verticalArrangement = Arrangement.spacedBy(Spacing.xs),
-        ) {
+        } else {
             Text(
-                text = "── ${stringResource(R.string.server_setup_tip_label)} ──",
-                fontFamily = FontFamily.Monospace,
-                color = theme.accent,
-                style = MaterialTheme.typography.labelMedium,
-            )
-            Text(
-                text = stringResource(R.string.server_setup_tip_text),
-                fontFamily = FontFamily.Monospace,
-                color = theme.textMuted,
-                style = MaterialTheme.typography.bodySmall,
-            )
-            Surface(
+                text = stringResource(R.string.button_connect).uppercase(),
                 color = theme.background,
-                shape = RectangleShape,
-                modifier = Modifier.border(Sizing.strokeThin, theme.border, RectangleShape),
-            ) {
-                Text(
-                    text = stringResource(R.string.server_setup_find_ip),
-                    modifier = Modifier.fillMaxWidth().padding(Spacing.sm),
-                    fontFamily = FontFamily.Monospace,
-                    color = theme.accent,
-                    style = MaterialTheme.typography.bodySmall,
-                )
-            }
-            Text(
-                text = stringResource(R.string.server_setup_test_hint),
-                fontFamily = FontFamily.Monospace,
-                color = theme.textMuted,
-                style = MaterialTheme.typography.bodySmall,
-            )
-        }
-    }
-}
-
-@Composable
-private fun setupStep(
-    number: String,
-    title: String,
-    command: String,
-) {
-    val theme = LocalOpenCodeTheme.current
-    Column(verticalArrangement = Arrangement.spacedBy(Spacing.xs)) {
-        Text(
-            text = "$number. $title",
-            fontFamily = FontFamily.Monospace,
-            color = theme.text,
-            style = MaterialTheme.typography.bodyMedium,
-        )
-        Surface(
-            color = theme.background,
-            shape = RectangleShape,
-            modifier = Modifier.border(Sizing.strokeThin, theme.border, RectangleShape),
-        ) {
-            Text(
-                text = command,
-                modifier = Modifier.fillMaxWidth().padding(Spacing.sm),
-                fontFamily = FontFamily.Monospace,
-                color = theme.accent,
-                style = MaterialTheme.typography.bodySmall,
+                fontWeight = FontWeight.SemiBold,
+                fontSize = TuiCodeFontSize.xxl,
+                letterSpacing = 0.5.sp,
             )
         }
     }
@@ -755,35 +807,18 @@ private fun savedServersSection(
     state: SavedServersState,
     actions: SavedServerActions,
 ) {
-    val theme = LocalOpenCodeTheme.current
     var pendingForget by remember { mutableStateOf<Pair<SavedServer, Int>?>(null) }
-    Surface(color = theme.backgroundElement, shape = RectangleShape) {
-        Column(
-            modifier = Modifier.padding(Spacing.md),
-            verticalArrangement = Arrangement.spacedBy(Spacing.xs),
-        ) {
-            Text(
-                text = "[ ${stringResource(R.string.server_saved_servers)} ]",
-                style = MaterialTheme.typography.titleMedium,
-                fontFamily = FontFamily.Monospace,
-                color = theme.text,
-            )
-            Text(
-                text = stringResource(R.string.server_saved_servers_desc),
-                style = MaterialTheme.typography.bodySmall,
-                fontFamily = FontFamily.Monospace,
-                color = theme.textMuted,
-            )
-            state.servers.forEach { entry ->
-                key(entry.server.id) {
-                    savedServerRow(
-                        entry = entry,
-                        isConnecting = state.isConnecting,
-                        openTabCount = state.openTabsByEndpoint[entry.server.endpointKey].orEmpty().size,
-                        actions = actions,
-                        onForget = { server, count -> pendingForget = server to count },
-                    )
-                }
+    Column {
+        TuiSectionHeader(text = stringResource(R.string.server_saved_servers))
+        state.servers.forEach { entry ->
+            key(entry.server.id) {
+                savedServerRow(
+                    entry = entry,
+                    isConnecting = state.isConnecting,
+                    openTabCount = state.openTabsByEndpoint[entry.server.endpointKey].orEmpty().size,
+                    actions = actions,
+                    onForget = { server, count -> pendingForget = server to count },
+                )
             }
         }
     }
@@ -807,18 +842,25 @@ private fun savedServerRow(
 ) {
     val theme = LocalOpenCodeTheme.current
     val server = entry.server
+    val statusVisual = serverStatusVisual(entry.status)
     var menuExpanded by remember { mutableStateOf(false) }
     Row(
         modifier = Modifier
             .fillMaxWidth()
+            .background(theme.backgroundPanel, RectangleShape)
             .clickable(enabled = !isConnecting, role = Role.Button) {
                 actions.onServerClick(server)
             }
-            .padding(vertical = Spacing.sm),
+            .padding(horizontal = Spacing.lg, vertical = Spacing.md),
         verticalAlignment = Alignment.CenterVertically,
-        horizontalArrangement = Arrangement.spacedBy(Spacing.md),
+        horizontalArrangement = Arrangement.spacedBy(Spacing.mdLg),
     ) {
-        Text("[${server.badgeLabel}]", fontFamily = FontFamily.Monospace, color = theme.textMuted)
+        Box(
+            modifier = Modifier
+                .size(Sizing.indicatorDotActive)
+                .background(statusVisual.color, RectangleShape)
+                .semantics { contentDescription = statusVisual.contentDescription },
+        )
         savedServerDetails(entry, openTabCount, Modifier.weight(1f))
         Box {
             IconButton(
@@ -862,41 +904,46 @@ private fun savedServerDetails(
     val theme = LocalOpenCodeTheme.current
     val server = entry.server
     Column(modifier) {
-        Text(server.displayName, fontFamily = FontFamily.Monospace, color = theme.text, maxLines = 1)
+        Text(
+            server.displayName,
+            color = theme.text,
+            fontSize = TuiCodeFontSize.xl,
+            maxLines = 1,
+            overflow = TextOverflow.Ellipsis,
+        )
         Text(
             server.endpoint,
-            style = MaterialTheme.typography.bodySmall,
             fontFamily = FontFamily.Monospace,
+            fontSize = TuiCodeFontSize.md,
             color = theme.textMuted,
             maxLines = 1,
             overflow = TextOverflow.Ellipsis,
         )
-        serverStatusIndicator(entry.status)
-        Text(
-            if (server.username.isNullOrBlank()) {
-                stringResource(R.string.server_auth_default)
-            } else {
-                stringResource(R.string.server_auth_configured)
-            },
-            style = MaterialTheme.typography.bodySmall,
-            color = theme.textMuted,
-        )
-        Text(
-            if (server.allowInsecure) {
-                stringResource(R.string.server_tls_checks_off)
-            } else {
-                stringResource(R.string.server_tls_checks_on)
-            },
-            style = MaterialTheme.typography.bodySmall,
-            color = if (server.allowInsecure) theme.warning else theme.textMuted,
-        )
-        if (openTabCount > 0) {
-            Text(
-                stringResource(R.string.server_open_tabs_count, openTabCount),
-                style = MaterialTheme.typography.bodySmall,
-                color = theme.warning,
+        val metaParts = buildList {
+            add(
+                if (server.username.isNullOrBlank()) {
+                    stringResource(R.string.server_auth_default)
+                } else {
+                    stringResource(R.string.server_auth_configured)
+                },
             )
+            add(
+                if (server.allowInsecure) {
+                    stringResource(R.string.server_tls_checks_off)
+                } else {
+                    stringResource(R.string.server_tls_checks_on)
+                },
+            )
+            if (openTabCount > 0) add(stringResource(R.string.server_open_tabs_count, openTabCount))
         }
+        Text(
+            metaParts.joinToString(" · "),
+            fontFamily = FontFamily.Monospace,
+            fontSize = TuiCodeFontSize.md,
+            color = if (server.allowInsecure) theme.warning else theme.textMuted,
+            maxLines = 1,
+            overflow = TextOverflow.Ellipsis,
+        )
     }
 }
 
@@ -923,19 +970,18 @@ private fun savedServerEditorForm(presentation: SavedServerEditorPresentation, o
     val theme = LocalOpenCodeTheme.current
     Column(Modifier.padding(Spacing.md), verticalArrangement = Arrangement.spacedBy(Spacing.sm)) {
         Row(Modifier.fillMaxWidth(), Arrangement.SpaceBetween, Alignment.CenterVertically) {
-            Text("[ ${server.displayName} ]", fontFamily = FontFamily.Monospace, color = theme.text)
+            Text(
+                server.displayName,
+                fontFamily = FontFamily.Monospace,
+                fontWeight = FontWeight.SemiBold,
+                color = theme.text,
+            )
             IconButton(onClick = presentation.onDismiss) {
                 Icon(Icons.Default.Close, stringResource(R.string.server_close_details))
             }
         }
         remoteServerSection(
-            RemoteServerState(
-                uiState.remoteUrl,
-                uiState.username,
-                uiState.password,
-                uiState.allowInsecure,
-                uiState.isConnecting,
-            ),
+            uiState.toRemoteServerState(),
             RemoteServerActions(
                 viewModel::setRemoteUrl,
                 viewModel::setUsername,
@@ -1014,10 +1060,10 @@ private fun forgetServerDialog(
             modifier = Modifier.testTag("saved_server_forget_dialog"),
         )
     } else {
-        AlertDialog(
+        TuiAlertDialog(
             onDismissRequest = onDismiss,
-            title = { Text(stringResource(R.string.server_forget_title, server.displayName)) },
-            text = { Text(stringResource(R.string.server_forget_message, openTabCount)) },
+            title = stringResource(R.string.server_forget_title, server.displayName),
+            modifier = Modifier.testTag("saved_server_forget_dialog"),
             confirmButton = {
                 TextButton(
                     onClick = {
@@ -1036,130 +1082,8 @@ private fun forgetServerDialog(
                     modifier = Modifier.testTag("server_close_tabs_forget"),
                 ) { Text(stringResource(R.string.server_close_tabs_forget), color = theme.error) }
             },
-            modifier = Modifier.testTag("saved_server_forget_dialog"),
-        )
-    }
-}
-
-@Composable
-private fun discoveredServersSection(
-    servers: List<DiscoveredServer>,
-    discoveryState: DiscoveryState,
-    isConnecting: Boolean,
-    onServerClick: (DiscoveredServer) -> Unit,
-) {
-    val theme = LocalOpenCodeTheme.current
-
-    Surface(
-        color = theme.backgroundElement,
-        shape = RectangleShape,
-    ) {
-        Column(
-            modifier = Modifier.padding(Spacing.md),
-            verticalArrangement = Arrangement.spacedBy(Spacing.xs),
         ) {
-            Row(
-                modifier = Modifier.fillMaxWidth(),
-                horizontalArrangement = Arrangement.SpaceBetween,
-                verticalAlignment = Alignment.CenterVertically,
-            ) {
-                Text(
-                    text = "[ ${stringResource(R.string.discovery_section_title)} ]",
-                    style = MaterialTheme.typography.titleMedium,
-                    fontFamily = FontFamily.Monospace,
-                    color = theme.text,
-                )
-                if (discoveryState == DiscoveryState.SCANNING) {
-                    scanningIndicator()
-                }
-            }
-
-            if (servers.isEmpty() && discoveryState == DiscoveryState.SCANNING) {
-                Text(
-                    text = stringResource(R.string.discovery_scanning_hint),
-                    style = MaterialTheme.typography.bodySmall,
-                    fontFamily = FontFamily.Monospace,
-                    color = theme.textMuted,
-                )
-            }
-
-            servers.forEach { server ->
-                discoveredServerRow(server, isConnecting, onServerClick)
-            }
+            Text(stringResource(R.string.server_forget_message, openTabCount))
         }
-    }
-}
-
-@Composable
-private fun discoveredServerRow(
-    server: DiscoveredServer,
-    isConnecting: Boolean,
-    onServerClick: (DiscoveredServer) -> Unit,
-) {
-    val theme = LocalOpenCodeTheme.current
-    Row(
-        modifier = Modifier
-            .fillMaxWidth()
-            .clickable(enabled = !isConnecting, role = Role.Button) {
-                onServerClick(server)
-            }
-            .testTag("discovered_server_${server.serviceName}")
-            .padding(vertical = Spacing.md),
-        verticalAlignment = Alignment.CenterVertically,
-        horizontalArrangement = Arrangement.spacedBy(Spacing.lg),
-    ) {
-        serverStatusIndicator(ServerConnectionStatus.AVAILABLE)
-        Column(modifier = Modifier.weight(1f)) {
-            Text(
-                text = server.serviceName,
-                style = MaterialTheme.typography.bodyMedium,
-                fontFamily = FontFamily.Monospace,
-                color = theme.text,
-                maxLines = 1,
-                overflow = TextOverflow.Ellipsis,
-            )
-            Text(
-                text = "${server.host}:${server.port}",
-                style = MaterialTheme.typography.bodySmall,
-                fontFamily = FontFamily.Monospace,
-                color = theme.textMuted,
-                maxLines = 1,
-                overflow = TextOverflow.Ellipsis,
-            )
-        }
-        Icon(
-            Icons.Default.ChevronRight,
-            contentDescription = stringResource(R.string.button_connect),
-            tint = theme.textMuted,
-        )
-    }
-}
-
-private val scanningIndicator: @Composable () -> Unit = {
-    val theme = LocalOpenCodeTheme.current
-    val infiniteTransition = rememberInfiniteTransition(label = "scanning")
-    val alpha by infiniteTransition.animateFloat(
-        initialValue = 0.3f,
-        targetValue = 1.0f,
-        animationSpec =
-        infiniteRepeatable(
-            animation = tween(durationMillis = 800),
-            repeatMode = RepeatMode.Reverse,
-        ),
-        label = "scanPulse",
-    )
-
-    Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(Spacing.xs)) {
-        CircularProgressIndicator(
-            Modifier.size(Sizing.indicatorDotActive),
-            color = theme.accent.copy(alpha = alpha),
-            strokeWidth = Sizing.strokeMd,
-        )
-        Text(
-            stringResource(R.string.discovery_scanning),
-            style = MaterialTheme.typography.bodySmall,
-            fontFamily = FontFamily.Monospace,
-            color = theme.accent.copy(alpha = alpha),
-        )
     }
 }

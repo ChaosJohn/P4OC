@@ -3,6 +3,7 @@ package dev.blazelight.p4oc.core.notification
 import androidx.lifecycle.DefaultLifecycleObserver
 import androidx.lifecycle.LifecycleOwner
 import androidx.lifecycle.ProcessLifecycleOwner
+import dev.blazelight.p4oc.core.datastore.NotificationRoutingMode
 import dev.blazelight.p4oc.core.datastore.NotificationSettings
 import dev.blazelight.p4oc.core.datastore.SettingsDataStore
 import dev.blazelight.p4oc.core.haptic.HapticFeedback
@@ -11,6 +12,8 @@ import dev.blazelight.p4oc.core.network.ServerConnectionRegistry
 import dev.blazelight.p4oc.domain.model.OpenCodeEvent
 import dev.blazelight.p4oc.domain.model.SessionStatus
 import dev.blazelight.p4oc.domain.server.ScopedEvent
+import dev.blazelight.p4oc.domain.server.ServerRef
+import dev.blazelight.p4oc.domain.server.WorkspaceKey
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
@@ -97,8 +100,14 @@ class NotificationEventObserver constructor(
         }
     }
 
+    /** Per-server routing gate; absent entry defaults to [NotificationRoutingMode.All]. */
+    private fun routingModeFor(serverRef: ServerRef): NotificationRoutingMode =
+        cachedSettings.serverRouting[serverRef.endpointKey] ?: NotificationRoutingMode.All
+
     private fun handlePermission(scopedEvent: ScopedEvent, event: OpenCodeEvent.PermissionRequested) {
         if (isInForeground || !cachedSettings.enabled || !cachedSettings.permissionRequests) return
+        // Awaiting-input events are "mentions": All and Mentions deliver, Off suppresses.
+        if (!shouldDeliverAwaitingInput(routingModeFor(scopedEvent.serverRef))) return
         AppLog.d(TAG, "Permission requested in background")
         notificationHelper.showPermissionNotification(
             sessionId = event.permission.sessionID,
@@ -110,6 +119,7 @@ class NotificationEventObserver constructor(
 
     private fun handleQuestion(scopedEvent: ScopedEvent, event: OpenCodeEvent.QuestionAsked) {
         if (isInForeground || !cachedSettings.enabled || !cachedSettings.questions) return
+        if (!shouldDeliverAwaitingInput(routingModeFor(scopedEvent.serverRef))) return
         AppLog.d(TAG, "Question asked in background")
         notificationHelper.showQuestionNotification(
             sessionId = event.request.sessionID,
@@ -137,6 +147,8 @@ class NotificationEventObserver constructor(
     }
 
     private fun showCompletionFeedback(route: NotificationRoute) {
+        // Turn-complete is not a "mention": only the All routing mode delivers it.
+        if (!shouldDeliverCompletion(routingModeFor(route.serverRef))) return
         if (cachedSettings.notifyOnCompletion) {
             hapticFeedback.vibrate(cachedSettings.vibrationPattern)
             notificationHelper.showCompletionNotification(
@@ -158,6 +170,14 @@ class NotificationEventObserver constructor(
 internal fun shouldEmitCompletionFeedback(settings: NotificationSettings, isInForeground: Boolean): Boolean =
     settings.enabled && settings.notifyOnCompletion && !isInForeground
 
+/** Awaiting-input (permission/question) notifications: delivered unless the server is routed Off. */
+internal fun shouldDeliverAwaitingInput(mode: NotificationRoutingMode): Boolean =
+    mode != NotificationRoutingMode.Off
+
+/** Turn-complete notifications: only the All routing mode delivers them (Mentions/Off suppress). */
+internal fun shouldDeliverCompletion(mode: NotificationRoutingMode): Boolean =
+    mode == NotificationRoutingMode.All
+
 internal class CompletionTracker {
     private val busySessions = mutableSetOf<NotificationRoute>()
 
@@ -171,13 +191,13 @@ internal class CompletionTracker {
         busySessions.clear()
     }
 
-    fun clearServer(serverRef: dev.blazelight.p4oc.domain.server.ServerRef) {
+    fun clearServer(serverRef: ServerRef) {
         busySessions.removeAll { it.serverRef == serverRef }
     }
 
     fun clearWorkspace(
-        serverRef: dev.blazelight.p4oc.domain.server.ServerRef,
-        workspaceKey: dev.blazelight.p4oc.domain.server.WorkspaceKey,
+        serverRef: ServerRef,
+        workspaceKey: WorkspaceKey,
     ) {
         busySessions.removeAll { it.serverRef == serverRef && it.workspaceKey == workspaceKey }
     }

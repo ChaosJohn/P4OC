@@ -3,6 +3,7 @@ package dev.blazelight.p4oc.ui.components.toolwidgets
 import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.animation.expandVertically
 import androidx.compose.animation.shrinkVertically
+import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.horizontalScroll
@@ -259,23 +260,11 @@ private fun PendingApprovalButtonsInline(
     Row(
         modifier = Modifier
             .fillMaxWidth()
-            .background(theme.secondary.copy(alpha = 0.2f))
-            .padding(horizontal = Spacing.md, vertical = Spacing.xs),
-        horizontalArrangement = Arrangement.spacedBy(Spacing.xs)
+            .background(theme.backgroundElement)
+            .padding(horizontal = Spacing.md, vertical = Spacing.sm),
+        horizontalArrangement = Arrangement.spacedBy(Spacing.sm)
     ) {
         OutlinedButton(
-            onClick = onDeny,
-            modifier = Modifier
-                .weight(1f)
-                .heightIn(min = Sizing.minTouchTarget)
-                .semantics { contentDescription = "Deny permission $requestId" }
-                .testTag("tool_permission_deny_$requestId"),
-            contentPadding = PaddingValues(horizontal = Spacing.xs, vertical = Spacing.none),
-            shape = RectangleShape
-        ) {
-            Text(stringResource(R.string.deny), style = MaterialTheme.typography.labelSmall)
-        }
-        Button(
             onClick = onApprove,
             modifier = Modifier
                 .weight(1f)
@@ -283,7 +272,9 @@ private fun PendingApprovalButtonsInline(
                 .semantics { contentDescription = "Allow permission once $requestId" }
                 .testTag("tool_permission_allow_once_$requestId"),
             contentPadding = PaddingValues(horizontal = Spacing.xs, vertical = Spacing.none),
-            shape = RectangleShape
+            shape = RectangleShape,
+            border = BorderStroke(Sizing.strokeMd, theme.success),
+            colors = ButtonDefaults.outlinedButtonColors(contentColor = theme.success)
         ) {
             Text(stringResource(R.string.allow), style = MaterialTheme.typography.labelSmall)
         }
@@ -296,8 +287,24 @@ private fun PendingApprovalButtonsInline(
                 .testTag("tool_permission_allow_always_$requestId"),
             contentPadding = PaddingValues(horizontal = Spacing.xs, vertical = Spacing.none),
             shape = RectangleShape,
+            border = BorderStroke(Sizing.strokeMd, theme.border),
+            colors = ButtonDefaults.outlinedButtonColors(contentColor = theme.textMuted)
         ) {
             Text(stringResource(R.string.always_allow), style = MaterialTheme.typography.labelSmall)
+        }
+        OutlinedButton(
+            onClick = onDeny,
+            modifier = Modifier
+                .weight(1f)
+                .heightIn(min = Sizing.minTouchTarget)
+                .semantics { contentDescription = "Deny permission $requestId" }
+                .testTag("tool_permission_deny_$requestId"),
+            contentPadding = PaddingValues(horizontal = Spacing.xs, vertical = Spacing.none),
+            shape = RectangleShape,
+            border = BorderStroke(Sizing.strokeMd, theme.error),
+            colors = ButtonDefaults.outlinedButtonColors(contentColor = theme.error)
+        ) {
+            Text(stringResource(R.string.deny), style = MaterialTheme.typography.labelSmall)
         }
     }
 }

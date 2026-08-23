@@ -89,6 +89,26 @@ internal fun updateLastUploadDirectories(
     return updated
 }
 
+private val notificationRoutingJson = Json { ignoreUnknownKeys = true }
+
+internal fun decodeServerRouting(stored: String?): Map<String, NotificationRoutingMode> {
+    if (stored.isNullOrBlank()) return emptyMap()
+    return runCatching {
+        notificationRoutingJson.decodeFromString<Map<String, String>>(stored)
+            .mapValues { NotificationRoutingMode.fromStorage(it.value) }
+    }.getOrDefault(emptyMap())
+}
+
+internal fun encodeServerRouting(routing: Map<String, NotificationRoutingMode>): String? {
+    val nonDefault = routing.filterValues { it != NotificationRoutingMode.All }
+    return nonDefault.takeIf { it.isNotEmpty() }?.let { values ->
+        notificationRoutingJson.encodeToString(values.mapValues { it.value.storageValue })
+    }
+}
+
+internal fun pruneServerRouting(stored: String?, endpointKey: String): String? =
+    encodeServerRouting(decodeServerRouting(stored) - endpointKey)
+
 class SettingsDataStore constructor(
     private val context: Context,
     private val credentialStore: CredentialStore
@@ -103,7 +123,7 @@ class SettingsDataStore constructor(
         private val KEY_THEME_NAME = stringPreferencesKey("theme_name")
         private val KEY_OLED_BLACK = booleanPreferencesKey("oled_black")
 
-        const val DEFAULT_THEME_NAME = "catppuccin"
+        const val DEFAULT_THEME_NAME = "opencode"
         private val KEY_ONBOARDING_COMPLETED = booleanPreferencesKey("onboarding_completed")
         private val KEY_RECENT_SERVERS = stringPreferencesKey("recent_servers")
         private val KEY_SAVED_SERVERS = stringPreferencesKey("saved_servers_v1")
@@ -137,6 +157,7 @@ class SettingsDataStore constructor(
         private val KEY_NOTIFY_VIBRATE_ON_COMPLETION = booleanPreferencesKey("notify_vibrate_on_completion")
         private val KEY_NOTIFY_VIBRATION_PATTERN = stringPreferencesKey("notify_vibration_pattern")
         private val KEY_NOTIFY_ON_COMPLETION = booleanPreferencesKey("notify_on_completion")
+        private val KEY_NOTIFY_SERVER_ROUTING = stringPreferencesKey("notify_server_routing")
 
         // Chat settings keys
         private val KEY_CHAT_ENTER_TO_SEND = booleanPreferencesKey("chat_enter_to_send")
@@ -443,6 +464,14 @@ class SettingsDataStore constructor(
             } else {
                 prefs[KEY_SAVED_SERVERS] = json.encodeToString(updated)
             }
+            removed?.endpointKey?.let { endpointKey ->
+                val updatedRouting = pruneServerRouting(prefs[KEY_NOTIFY_SERVER_ROUTING], endpointKey)
+                if (updatedRouting == null) {
+                    prefs.remove(KEY_NOTIFY_SERVER_ROUTING)
+                } else {
+                    prefs[KEY_NOTIFY_SERVER_ROUTING] = updatedRouting
+                }
+            }
         }
         if (removeCredentials) {
             removed?.let { server ->
@@ -551,6 +580,7 @@ class SettingsDataStore constructor(
             vibrationPattern = prefs[KEY_NOTIFY_VIBRATION_PATTERN]?.toVibrationPattern()
                 ?: if (prefs[KEY_NOTIFY_VIBRATE_ON_COMPLETION] == true) VibrationPattern.Tick else VibrationPattern.None,
             notifyOnCompletion = prefs[KEY_NOTIFY_ON_COMPLETION] ?: false,
+            serverRouting = decodeServerRouting(prefs[KEY_NOTIFY_SERVER_ROUTING]),
         )
     }
 
@@ -562,6 +592,12 @@ class SettingsDataStore constructor(
             prefs[KEY_NOTIFY_VIBRATION_PATTERN] = settings.vibrationPattern.storageValue
             prefs[KEY_NOTIFY_ON_COMPLETION] = settings.notifyOnCompletion
             prefs.remove(KEY_NOTIFY_VIBRATE_ON_COMPLETION)
+            val encodedRouting = encodeServerRouting(settings.serverRouting)
+            if (encodedRouting == null) {
+                prefs.remove(KEY_NOTIFY_SERVER_ROUTING)
+            } else {
+                prefs[KEY_NOTIFY_SERVER_ROUTING] = encodedRouting
+            }
         }
     }
 
@@ -995,7 +1031,26 @@ data class NotificationSettings(
     val questions: Boolean = true,
     val vibrationPattern: VibrationPattern = VibrationPattern.None,
     val notifyOnCompletion: Boolean = false,
+    /** Per-server notification routing, keyed by endpointKey. Absent = All (design 18). */
+    val serverRouting: Map<String, NotificationRoutingMode> = emptyMap(),
 )
+
+/**
+ * Per-server notification routing (design 18).
+ * - [All]: deliver every enabled notification type.
+ * - [Mentions]: only agent-awaiting-input (permission / question); suppress turn-complete.
+ * - [Off]: suppress all notifications for the server.
+ */
+enum class NotificationRoutingMode(val storageValue: String) {
+    All("all"),
+    Mentions("mentions"),
+    Off("off");
+
+    companion object {
+        fun fromStorage(value: String?): NotificationRoutingMode =
+            entries.firstOrNull { it.storageValue == value } ?: All
+    }
+}
 
 enum class VibrationPattern(val storageValue: String) {
     None("none"),

@@ -51,6 +51,8 @@ data class ModelInfo(
     val id: String,
     val name: String,
     val providerId: String,
+    /** The provider's own display name; falls back to [providerId] when the server omits one. */
+    val providerName: String = providerId,
     val contextLength: Int = 0,
     val inputCostPer1k: Double = 0.0,
     val outputCostPer1k: Double = 0.0,
@@ -104,6 +106,7 @@ class ModelControlsViewModel constructor(
                                 id = dto.id,
                                 name = dto.name,
                                 providerId = dto.providerId,
+                                providerName = provider.name.takeIf { it.isNotBlank() } ?: dto.providerId,
                                 contextLength = dto.limit?.context ?: dto.contextLength ?: 0,
                                 inputCostPer1k = dto.cost?.input ?: dto.inputCostPer1k ?: 0.0,
                                 outputCostPer1k = dto.cost?.output ?: dto.outputCostPer1k ?: 0.0,
@@ -193,7 +196,8 @@ internal enum class ModelListContentState { MODELS, EMPTY, NO_RESULTS }
 internal fun filteredModels(state: ModelControlsState): List<ModelInfo> = state.models.filter { model ->
     val matchesSearch = state.searchQuery.isBlank() ||
         model.name.contains(state.searchQuery, ignoreCase = true) ||
-        model.id.contains(state.searchQuery, ignoreCase = true)
+        model.id.contains(state.searchQuery, ignoreCase = true) ||
+        model.providerName.contains(state.searchQuery, ignoreCase = true)
     val matchesProvider = state.filterProvider == null || model.providerId == state.filterProvider
     matchesSearch && matchesProvider
 }.sortedByDescending { it.isFavorite }
@@ -221,7 +225,7 @@ fun ModelControlsScreen(
     }
 
     val providers = remember(state.models) {
-        state.models.map { it.providerId }.distinct()
+        state.models.map { it.providerId to it.providerName }.distinct().sortedBy { it.second.lowercase() }
     }
 
     val theme = LocalOpenCodeTheme.current
@@ -408,7 +412,7 @@ private fun SearchBar(
 
 @Composable
 private fun ProviderFilterChips(
-    providers: List<String>,
+    providers: List<Pair<String, String>>,
     selected: String?,
     onSelect: (String?) -> Unit,
     modifier: Modifier = Modifier
@@ -423,11 +427,11 @@ private fun ProviderFilterChips(
             label = { Text(stringResource(R.string.all)) },
             shape = RectangleShape
         )
-        providers.forEach { provider ->
+        providers.forEach { (providerId, label) ->
             FilterChip(
-                selected = selected == provider,
-                onClick = { onSelect(if (selected == provider) null else provider) },
-                label = { Text(provider) },
+                selected = selected == providerId,
+                onClick = { onSelect(if (selected == providerId) null else providerId) },
+                label = { Text(label) },
                 shape = RectangleShape
             )
         }
@@ -459,6 +463,7 @@ internal fun ModelCard(
             .semantics {
                 if (isSelected) stateDescription = currentModelDescription
             },
+        shape = RectangleShape,
         colors = CardDefaults.cardColors(
             containerColor = if (isSelected) {
                 theme.accent.copy(alpha = 0.2f)
@@ -488,7 +493,7 @@ internal fun ModelCard(
                         fontWeight = FontWeight.Medium
                     )
                     Text(
-                        text = model.providerId,
+                        text = model.providerName,
                         style = MaterialTheme.typography.bodySmall,
                         color = theme.textMuted
                     )
