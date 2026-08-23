@@ -349,9 +349,9 @@ class ConnectionManager constructor(
             .addInterceptor(createDiagnosticLoggingInterceptor())
             .build()
 
-    private fun buildSseOkHttpClient(base: OkHttpClient): OkHttpClient =
+    internal fun buildSseOkHttpClient(base: OkHttpClient): OkHttpClient =
         base.newBuilder()
-            .readTimeout(0, TimeUnit.SECONDS)
+            .readTimeout(60, TimeUnit.SECONDS)
             .addInterceptor(createDiagnosticLoggingInterceptor())
             .build()
 

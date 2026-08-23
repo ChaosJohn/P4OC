@@ -18,6 +18,7 @@ import okhttp3.RequestBody.Companion.toRequestBody
 import okhttp3.Response
 import okhttp3.ResponseBody.Companion.toResponseBody
 import org.junit.After
+import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
 import org.junit.Assert.assertTrue
 import org.junit.Before
@@ -35,6 +36,19 @@ class ConnectionManagerLoggingTest {
 
         assertFalse(client.followRedirects)
         assertFalse(client.followSslRedirects)
+    }
+
+    @Test
+    fun `sse client uses a finite read timeout to detect silent dead sockets`() {
+        val base = manager.buildBaseOkHttpClient(
+            ServerConfig(url = "https://opencode.test", username = "user"),
+            password = "secret",
+        )
+        val sseClient = manager.buildSseOkHttpClient(base)
+
+        // 60s finite read timeout so a half-open SSE socket that stops producing
+        // frames (heartbeats) eventually errors and the library reconnects (issue #14).
+        assertEquals(60_000, sseClient.readTimeoutMillis)
     }
 
     private val dispatcher = StandardTestDispatcher()

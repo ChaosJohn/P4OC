@@ -23,6 +23,7 @@ import kotlinx.coroutines.flow.SharedFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asSharedFlow
 import kotlinx.coroutines.flow.asStateFlow
+import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.launch
 import kotlinx.serialization.json.Json
 import okhttp3.OkHttpClient
@@ -58,6 +59,13 @@ class OpenCodeEventSource(
 
     private val _connectionState = MutableStateFlow<ConnectionState>(ConnectionState.Disconnected)
     val connectionState: StateFlow<ConnectionState> = _connectionState.asStateFlow()
+
+    // Monotonic reconnect counter. Increments on every active-generation onOpen, before
+    // Connected is published. It is the authoritative reconnect signal: rapid or conflated
+    // Connecting->Connected transitions that a StateFlow<ConnectionState> may coalesce
+    // remain individually observable here, and downstream owners can key recovery off it.
+    private val _connectionEpoch = MutableStateFlow(0L)
+    val connectionEpoch: StateFlow<Long> = _connectionEpoch.asStateFlow()
 
     // Lifecycle lock — guards backgroundEventSource reference only.
     // close() is called OUTSIDE the lock to avoid blocking other callers (~2s executor shutdown).
@@ -185,7 +193,6 @@ class OpenCodeEventSource(
 
         val connectStrategy = ConnectStrategy.http(URI(eventUrl))
             .httpClient(okHttpClient)
-            .readTimeout(0, TimeUnit.SECONDS)
 
         val eventSourceBuilder = EventSource.Builder(connectStrategy)
             .errorStrategy(ErrorStrategy.alwaysContinue())
@@ -302,6 +309,9 @@ class OpenCodeEventSource(
             AppLog.d(TAG, "SSE connected (onOpen)")
             errorFiredSinceOpen = false
             consecutiveErrors.set(0)
+            // Bump the reconnect epoch before publishing Connected so every successful
+            // (re)connection is observable even if the state transition is coalesced.
+            _connectionEpoch.update { it + 1 }
             _connectionState.value = ConnectionState.Connected
             enqueueEvent(OpenCodeEvent.Connected, gen)
         }

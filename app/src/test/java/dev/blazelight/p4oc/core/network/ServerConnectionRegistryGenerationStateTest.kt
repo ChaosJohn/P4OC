@@ -32,7 +32,7 @@ class ServerConnectionRegistryGenerationStateTest {
 
         assertSame(first, second)
         assertEquals(ConnectionState.Connected, first.value)
-        assertEquals(1, fixture.registry.generationStateCount())
+        assertEquals(1, fixture.registry.generationStateCount)
     }
 
     @Test
@@ -53,7 +53,7 @@ class ServerConnectionRegistryGenerationStateTest {
 
         assertEquals(STALE_ERROR, oldFlow.value)
         assertEquals(ConnectionState.Connecting, newFlow.value)
-        assertEquals(1, fixture.registry.generationStateCount())
+        assertEquals(1, fixture.registry.generationStateCount)
     }
 
     @Test
@@ -69,7 +69,7 @@ class ServerConnectionRegistryGenerationStateTest {
         fixture.registry.disconnect(fixture.server.toServerRef())
 
         assertEquals(STALE_ERROR, heldFlow.value)
-        assertEquals(0, fixture.registry.generationStateCount())
+        assertEquals(0, fixture.registry.generationStateCount)
         assertEquals(ConnectionState.Disconnected, fixture.registry.connectionState(fixture.server.toServerRef()).value)
     }
 
@@ -85,7 +85,7 @@ class ServerConnectionRegistryGenerationStateTest {
             fixture.state.value = ConnectionState.Connected
             runCurrent()
             fixture.registry.connectionState(fixture.server.toServerRef(), generation)
-            assertEquals(1, fixture.registry.generationStateCount())
+            assertEquals(1, fixture.registry.generationStateCount)
         }
     }
 

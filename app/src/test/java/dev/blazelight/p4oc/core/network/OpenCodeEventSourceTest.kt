@@ -7,24 +7,25 @@ import dev.blazelight.p4oc.domain.model.OpenCodeEvent
 import io.mockk.every
 import io.mockk.mockkObject
 import io.mockk.unmockkObject
+import kotlinx.coroutines.CompletableDeferred
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.ExperimentalCoroutinesApi
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.channels.Channel
 import kotlinx.coroutines.delay
+import kotlinx.coroutines.flow.onSubscription
 import kotlinx.coroutines.launch
-import kotlinx.coroutines.test.runTest
+import kotlinx.coroutines.runBlocking
 import kotlinx.coroutines.withTimeout
-import kotlinx.coroutines.yield
 import kotlinx.serialization.json.Json
 import okhttp3.OkHttpClient
+import java.util.concurrent.atomic.AtomicInteger
 import org.junit.After
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
 import org.junit.Assert.assertTrue
 import org.junit.Before
 import org.junit.Test
-import java.util.concurrent.atomic.AtomicInteger
 
 @OptIn(ExperimentalCoroutinesApi::class)
 class OpenCodeEventSourceTest {
@@ -49,7 +50,7 @@ class OpenCodeEventSourceTest {
     }
 
     @Test
-    fun `slow collector receives more than previous delta buffer capacity without loss`() = runTest {
+    fun `slow collector receives more than previous delta buffer capacity without loss`() = runBlocking {
         val source = OpenCodeEventSource(
             okHttpClient = OkHttpClient(),
             json = json,
@@ -58,16 +59,20 @@ class OpenCodeEventSourceTest {
         )
         val collected = mutableListOf<String>()
         var collector: Job? = null
+        val subscribed = CompletableDeferred<Unit>()
 
         try {
             collector = launch {
-                source.events.collect { event ->
+                source.events.onSubscription { subscribed.complete(Unit) }.collect { event ->
                     val delta = (event as? OpenCodeEvent.MessagePartUpdated)?.delta ?: return@collect
                     delay(1)
                     collected += delta
                 }
             }
-            yield()
+            // Barrier: production delivery runs on Dispatchers.IO into a replay=0 SharedFlow,
+            // so we must not emit until the collector is actually subscribed, else events are
+            // dropped before collection and the no-loss assertion can never hold.
+            subscribed.await()
             val emit = source.javaClass.getDeclaredMethod(
                 "parseAndEmitEvent",
                 String::class.java,
@@ -87,6 +92,7 @@ class OpenCodeEventSourceTest {
             }
         } finally {
             collector?.cancel()
+            collector?.join()
             source.shutdown()
         }
 
