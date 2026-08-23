@@ -1,21 +1,18 @@
 # Local dev convenience — not part of the project's standard build (see mise.toml).
-# Machine-specific paths below; adjust if yours differ.
-
-JAVA_HOME    := /usr/lib/jvm/java-17-openjdk-amd64
-ANDROID_HOME ?= /home/melloss/Android/Sdk
+# Override these through the caller environment when the defaults do not apply.
+JAVA_HOME     ?= /usr/lib/jvm/java-17-openjdk-amd64
+ANDROID_HOME  ?= $(HOME)/Android/Sdk
 APP_ID       := dev.blazelight.p4oc.debug
 MAIN_ACTIVITY := dev.blazelight.p4oc.MainActivity
 PORT         ?= 4096
 PORT2        ?= 4097
-
-
 
 export JAVA_HOME
 export ANDROID_HOME
 
 .DEFAULT_GOAL := run
 
-.PHONY: run install build uninstall logcat serve clean
+.PHONY: run install build uninstall logcat serve serve2 clean
 
 build:
 	./gradlew :app:assembleDebug

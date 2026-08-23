@@ -89,6 +89,26 @@ internal fun updateLastUploadDirectories(
     return updated
 }
 
+private val notificationRoutingJson = Json { ignoreUnknownKeys = true }
+
+internal fun decodeServerRouting(stored: String?): Map<String, NotificationRoutingMode> {
+    if (stored.isNullOrBlank()) return emptyMap()
+    return runCatching {
+        notificationRoutingJson.decodeFromString<Map<String, String>>(stored)
+            .mapValues { NotificationRoutingMode.fromStorage(it.value) }
+    }.getOrDefault(emptyMap())
+}
+
+internal fun encodeServerRouting(routing: Map<String, NotificationRoutingMode>): String? {
+    val nonDefault = routing.filterValues { it != NotificationRoutingMode.All }
+    return nonDefault.takeIf { it.isNotEmpty() }?.let { values ->
+        notificationRoutingJson.encodeToString(values.mapValues { it.value.storageValue })
+    }
+}
+
+internal fun pruneServerRouting(stored: String?, endpointKey: String): String? =
+    encodeServerRouting(decodeServerRouting(stored) - endpointKey)
+
 class SettingsDataStore constructor(
     private val context: Context,
     private val credentialStore: CredentialStore
@@ -444,6 +464,14 @@ class SettingsDataStore constructor(
             } else {
                 prefs[KEY_SAVED_SERVERS] = json.encodeToString(updated)
             }
+            removed?.endpointKey?.let { endpointKey ->
+                val updatedRouting = pruneServerRouting(prefs[KEY_NOTIFY_SERVER_ROUTING], endpointKey)
+                if (updatedRouting == null) {
+                    prefs.remove(KEY_NOTIFY_SERVER_ROUTING)
+                } else {
+                    prefs[KEY_NOTIFY_SERVER_ROUTING] = updatedRouting
+                }
+            }
         }
         if (removeCredentials) {
             removed?.let { server ->
@@ -556,14 +584,6 @@ class SettingsDataStore constructor(
         )
     }
 
-    private fun decodeServerRouting(stored: String?): Map<String, NotificationRoutingMode> {
-        if (stored.isNullOrBlank()) return emptyMap()
-        return runCatching {
-            json.decodeFromString<Map<String, String>>(stored)
-                .mapValues { NotificationRoutingMode.fromStorage(it.value) }
-        }.getOrDefault(emptyMap())
-    }
-
     suspend fun updateNotificationSettings(settings: NotificationSettings) {
         context.dataStore.edit { prefs ->
             prefs[KEY_NOTIFICATIONS_ENABLED] = settings.enabled
@@ -572,12 +592,11 @@ class SettingsDataStore constructor(
             prefs[KEY_NOTIFY_VIBRATION_PATTERN] = settings.vibrationPattern.storageValue
             prefs[KEY_NOTIFY_ON_COMPLETION] = settings.notifyOnCompletion
             prefs.remove(KEY_NOTIFY_VIBRATE_ON_COMPLETION)
-            val nonDefault = settings.serverRouting.filterValues { it != NotificationRoutingMode.All }
-            if (nonDefault.isEmpty()) {
+            val encodedRouting = encodeServerRouting(settings.serverRouting)
+            if (encodedRouting == null) {
                 prefs.remove(KEY_NOTIFY_SERVER_ROUTING)
             } else {
-                prefs[KEY_NOTIFY_SERVER_ROUTING] =
-                    json.encodeToString(nonDefault.mapValues { it.value.storageValue })
+                prefs[KEY_NOTIFY_SERVER_ROUTING] = encodedRouting
             }
         }
     }

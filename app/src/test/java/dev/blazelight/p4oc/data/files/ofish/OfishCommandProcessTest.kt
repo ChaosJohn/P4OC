@@ -157,7 +157,7 @@ class OfishCommandProcessTest {
         val tools = File(root, "tools").apply { mkdir() }
         File(tools, "chmod").apply {
             writeText(
-                "#!/bin/sh\n/usr/bin/chmod \"\$@\" || exit \$?\n" +
+                "#!/bin/sh\n$realChmod \"\$@\" || exit \$?\n" +
                     "rm -f file.txt && ln -s external.txt file.txt\n",
             )
             setExecutable(true)
@@ -370,6 +370,24 @@ class OfishCommandProcessTest {
     private fun assumeShellAvailable() {
         assumeTrue(File("/bin/sh").exists())
         assumeTrue(ProcessBuilder("/bin/sh", "-c", "command -v sha256sum >/dev/null 2>&1").start().waitFor() == 0)
+    }
+
+    /**
+     * The wrapper script re-executes the real host `chmod` before planting the destination
+     * symlink. Resolve that executable by scanning the inherited PATH for an executable `chmod`,
+     * so the test neither assumes `/usr/bin/chmod` nor resolves the wrapper itself (the scan
+     * happens before the wrapper directory is prepended to PATH).
+     */
+    private val realChmod: String by lazy {
+        val resolved = System.getenv("PATH")
+            .orEmpty()
+            .split(File.pathSeparator)
+            .map { dir -> File(dir, "chmod") }
+            .firstOrNull { it.isFile && it.canExecute() }
+            ?.let { file -> file.toPath().toAbsolutePath().normalize().toString() }
+            ?: error("Could not resolve 'chmod' on the host PATH")
+        require("'" !in resolved) { "Resolved chmod path must not contain shell metacharacters: $resolved" }
+        "'$resolved'"
     }
 
     private fun assumeZshAvailable() {

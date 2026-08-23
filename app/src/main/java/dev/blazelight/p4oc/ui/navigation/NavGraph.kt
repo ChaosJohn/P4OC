@@ -11,6 +11,7 @@ import androidx.navigation.compose.NavHost
 import androidx.navigation.compose.composable
 import dev.blazelight.p4oc.core.network.ServerConnectionRegistry
 import dev.blazelight.p4oc.core.notification.NotificationRoute
+import dev.blazelight.p4oc.ui.screens.server.ServerScreenConfig
 import dev.blazelight.p4oc.ui.screens.server.serverScreen
 import dev.blazelight.p4oc.ui.screens.settings.SettingsConnectionContext
 import dev.blazelight.p4oc.ui.screens.settings.SettingsScreen
@@ -94,13 +95,15 @@ fun NavGraph(
             serverScreen(
                 onNavigateToSessions = { navController.popBackStack() },
                 onSettings = { navController.navigate(Screen.Settings.route) },
-                autoReconnect = false,
-                showManualFormInitially = true,
-                onConnectSavedServer = { saved ->
-                    serverConnectionRegistry.connect(saved)
-                    navController.popBackStack()
-                },
-                onNavigateBack = { navController.popBackStack() },
+                config = ServerScreenConfig(
+                    autoReconnect = false,
+                    showManualFormInitially = true,
+                    onConnectSavedServer = { saved ->
+                        serverConnectionRegistry.connect(saved)
+                        navController.popBackStack()
+                    },
+                    onNavigateBack = { navController.popBackStack() },
+                ),
             )
         }
 
@@ -133,6 +136,9 @@ fun NavGraph(
                 onVisualSettings = {
                     navController.navigate(Screen.VisualSettings.route)
                 },
+                onChatSettings = {
+                    navController.navigate(Screen.ChatSettings.route)
+                },
                 onAgentsConfig = {},
                 onSkills = {},
                 onNotificationSettings = {
@@ -155,6 +161,12 @@ fun NavGraph(
 
         composable(Screen.VisualSettings.route) {
             VisualSettingsScreen(
+                onNavigateBack = { navController.popBackStack() }
+            )
+        }
+
+        composable(Screen.ChatSettings.route) {
+            dev.blazelight.p4oc.ui.screens.settings.ChatSettingsScreen(
                 onNavigateBack = { navController.popBackStack() }
             )
         }

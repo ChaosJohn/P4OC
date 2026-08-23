@@ -364,6 +364,20 @@ class StartWorkContextTest {
     }
 
     @Test
+    fun `picker selection uses only the current invocation action`() {
+        val target = StartWorkTarget(alpha, workspace)
+
+        val browse = resolveStartWorkPickerSelection(target, StartWorkAction.BrowseSessions)
+        assertEquals(StartWorkAction.BrowseSessions, browse.action)
+        assertNull(browse.context.defaultAction)
+
+        val chooseTarget = resolveStartWorkPickerSelection(target, invocationAction = null)
+        assertNull(chooseTarget.action)
+        assertNull(chooseTarget.context.defaultAction)
+        assertEquals(target, chooseTarget.context.selectedTarget)
+    }
+
+    @Test
     fun `scoped actions retain new chat files terminal order`() {
         assertEquals(
             listOf(StartWorkAction.NewChat, StartWorkAction.Files, StartWorkAction.Terminal),

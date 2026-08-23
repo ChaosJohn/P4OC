@@ -16,6 +16,7 @@ import androidx.compose.foundation.layout.fillMaxHeight
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.navigationBarsPadding
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
@@ -67,6 +68,8 @@ import dev.blazelight.p4oc.domain.model.SessionPresence
 import dev.blazelight.p4oc.domain.server.WorkspaceKey
 import dev.blazelight.p4oc.ui.components.TuiBackButton
 import dev.blazelight.p4oc.ui.components.status.SessionStatusDot
+import dev.blazelight.p4oc.ui.components.status.connectionStatusColor
+import dev.blazelight.p4oc.ui.components.status.connectionStatusDescription
 import dev.blazelight.p4oc.ui.tabs.StartWorkSelection
 import dev.blazelight.p4oc.ui.tabs.StartWorkTarget
 import dev.blazelight.p4oc.ui.theme.LocalOpenCodeTheme
@@ -77,7 +80,6 @@ import java.util.concurrent.TimeUnit
 
 private const val RECENT_DAY_LIMIT = 30
 private const val HOME_WORKSPACE_SHORTCUT_LIMIT = 3
-private const val CONNECTED_SERVER_LIST_THRESHOLD = 2
 private const val DASH_ON = 10f
 private const val DASH_OFF = 8f
 data class HomeActions(
@@ -98,11 +100,8 @@ data class HomeActions(
 
 private data class HomeOverviewInput(
     val summary: HomeSummaryState,
-    val enabledEndpointKeys: Set<String>,
     val searchQuery: String,
     val showAllWorkspaces: Boolean,
-    val onToggleServer: (String) -> Unit,
-    val onEnableAllServers: () -> Unit,
     val onSearchQueryChange: (String) -> Unit,
     val onToggleAllWorkspaces: () -> Unit,
     val onWorkspaceClick: (WorkspaceSummary) -> Unit,
@@ -112,7 +111,7 @@ private data class HomeOverviewInput(
 
 private data class WorkspaceDetailInput(
     val workspace: WorkspaceSummary,
-    val serverConnected: Boolean,
+    val connectionState: ConnectionState?,
     val openWork: List<OpenWorkSummary>,
     val sessions: List<SessionPreview>,
     val actions: HomeActions,
@@ -127,7 +126,6 @@ fun homeScreen(
     modifier: Modifier = Modifier,
 ) {
     var selectedWorkspace by remember { mutableStateOf<WorkspaceSummary?>(null) }
-    var disabledEndpointKeys by rememberSaveable { mutableStateOf(emptyList<String>()) }
     var searchQuery by rememberSaveable { mutableStateOf("") }
     var showAllWorkspaces by rememberSaveable { mutableStateOf(false) }
     val selected = selectedWorkspace
@@ -135,9 +133,9 @@ fun homeScreen(
         workspaceDetail(
             input = WorkspaceDetailInput(
                 workspace = selected,
-                serverConnected = summary.servers.firstOrNull {
+                connectionState = summary.servers.firstOrNull {
                     it.serverRef.endpointKey == selected.serverRef.endpointKey
-                }?.connectionState is ConnectionState.Connected,
+                }?.connectionState,
                 openWork = summary.openWork.filter {
                     it.serverRef.endpointKey == selected.serverRef.endpointKey &&
                         it.workspaceKey == selected.workspaceKey
@@ -158,13 +156,8 @@ fun homeScreen(
         homeOverview(
             input = HomeOverviewInput(
                 summary = summary,
-                enabledEndpointKeys = summary.enabledEndpointKeys(disabledEndpointKeys),
                 searchQuery = searchQuery,
                 showAllWorkspaces = showAllWorkspaces,
-                onToggleServer = { endpointKey ->
-                    disabledEndpointKeys = disabledEndpointKeys.toggleMembership(endpointKey)
-                },
-                onEnableAllServers = { disabledEndpointKeys = emptyList() },
                 onSearchQueryChange = { searchQuery = it },
                 onToggleAllWorkspaces = { showAllWorkspaces = !showAllWorkspaces },
                 onWorkspaceClick = {
@@ -185,8 +178,8 @@ fun homeScreen(
 @Composable
 private fun homeOverview(input: HomeOverviewInput, modifier: Modifier) {
     val summary = input.summary
-    val results by remember(summary, input.enabledEndpointKeys, input.searchQuery) {
-        derivedStateOf { summary.filteredHomeResults(input.enabledEndpointKeys, input.searchQuery) }
+    val results by remember(summary, input.searchQuery) {
+        derivedStateOf { summary.filteredHomeResults(input.searchQuery) }
     }
     LazyColumn(
         state = input.listState,
@@ -336,16 +329,21 @@ private fun LazyListScope.homeWorkspaces(input: HomeOverviewInput, filteredWorks
 /** Inline `+ N more` / `− show less` affordance under a capped Home list. */
 @Composable
 private fun homeMoreRow(label: String, onClick: () -> Unit, testTag: String) {
-    Text(
-        label,
-        style = MaterialTheme.typography.labelSmall.copy(fontFamily = FontFamily.Monospace),
-        color = LocalOpenCodeTheme.current.accent,
+    Box(
         modifier = Modifier
             .fillMaxWidth()
+            .heightIn(min = Sizing.minTouchTarget)
             .clickable(role = Role.Button, onClick = onClick)
-            .padding(horizontal = Spacing.sm, vertical = Spacing.sm)
+            .padding(horizontal = Spacing.sm)
             .testTag(testTag),
-    )
+        contentAlignment = Alignment.CenterStart,
+    ) {
+        Text(
+            label,
+            style = MaterialTheme.typography.labelSmall.copy(fontFamily = FontFamily.Monospace),
+            color = LocalOpenCodeTheme.current.accent,
+        )
+    }
 }
 
 @Composable
@@ -403,22 +401,18 @@ private fun LazyListScope.connectedServers(
     input: HomeOverviewInput,
     servers: List<ServerSummary>,
 ) {
-    val connected = connectedServersForLauncher(servers)
-    if (connected.isEmpty()) return
-    item { sectionLabel("Connected servers · ${connected.size}") }
-    items(connected, key = { "connected_${it.serverRef.endpointKey}" }) { server ->
+    if (servers.isEmpty()) return
+    item { sectionLabel("Servers") }
+    items(servers, key = { "server_${it.serverRef.endpointKey}" }) { server ->
         serverLauncherRow(server, input.actions.onManageServers)
     }
 }
 
-internal fun connectedServersForLauncher(servers: List<ServerSummary>): List<ServerSummary> =
-    servers.filter { it.connectionState is ConnectionState.Connected }
-        .takeIf { it.size > CONNECTED_SERVER_LIST_THRESHOLD }
-        .orEmpty()
-
 @Composable
 private fun serverLauncherRow(server: ServerSummary, onOpen: () -> Unit) {
     val theme = LocalOpenCodeTheme.current
+    val statusColor = connectionStatusColor(server.connectionState)
+    val statusLabel = connectionStatusDescription(server.connectionState)
     Surface(
         onClick = onOpen,
         shape = RectangleShape,
@@ -428,14 +422,17 @@ private fun serverLauncherRow(server: ServerSummary, onOpen: () -> Unit) {
             .testTag("home_connected_server_${server.serverRef.endpointKey}"),
     ) {
         Row(
-            Modifier.fillMaxWidth().height(Sizing.listItemHeightSm).padding(horizontal = Spacing.sm),
+            Modifier
+                .fillMaxWidth()
+                .heightIn(min = Sizing.minTouchTarget)
+                .padding(horizontal = Spacing.sm),
             verticalAlignment = Alignment.CenterVertically,
             horizontalArrangement = Arrangement.spacedBy(Spacing.sm),
         ) {
             Box(
                 Modifier.size(Sizing.indicatorDot)
-                    .background(theme.success, RectangleShape)
-                    .semantics { contentDescription = "Connected server" },
+                    .background(statusColor, RectangleShape)
+                    .semantics { contentDescription = statusLabel },
             )
             Text(
                 server.displayName,
@@ -519,7 +516,7 @@ private fun workspaceShortcut(
                     overflow = TextOverflow.Ellipsis,
                 )
                 Text(
-                    workspace.serverRef.displayName,
+                    "${workspace.serverRef.displayName} · ${workspace.workspaceKey.detailLabel()}",
                     style = MaterialTheme.typography.labelSmall.copy(fontFamily = FontFamily.Monospace),
                     color = theme.textMuted,
                     maxLines = 1,
@@ -674,15 +671,20 @@ private fun workspaceDetail(
                     verticalAlignment = Alignment.CenterVertically,
                 ) {
                     sectionLabel("Sessions")
-                    Text(
-                        "+ new",
-                        style = MaterialTheme.typography.labelSmall.copy(fontFamily = FontFamily.Monospace),
-                        color = theme.accent,
+                    Box(
                         modifier = Modifier
+                            .widthIn(min = Sizing.minTouchTarget)
+                            .heightIn(min = Sizing.minTouchTarget)
                             .clickable(role = Role.Button) { input.actions.onStartScopedWork(target) }
-                            .padding(horizontal = Spacing.xs, vertical = Spacing.xxs)
                             .testTag("home_workspace_detail_new"),
-                    )
+                        contentAlignment = Alignment.Center,
+                    ) {
+                        Text(
+                            "+ new",
+                            style = MaterialTheme.typography.labelSmall.copy(fontFamily = FontFamily.Monospace),
+                            color = theme.accent,
+                        )
+                    }
                 }
             }
             workspaceSessions(input)
@@ -694,6 +696,8 @@ private fun workspaceDetail(
 @Composable
 private fun workspaceDetailHeader(input: WorkspaceDetailInput) {
     val theme = LocalOpenCodeTheme.current
+    val statusColor = connectionStatusColor(input.connectionState)
+    val statusLabel = connectionStatusDescription(input.connectionState)
     Row(
         Modifier.fillMaxWidth().padding(horizontal = Spacing.md, vertical = Spacing.sm),
         verticalAlignment = Alignment.CenterVertically,
@@ -707,10 +711,8 @@ private fun workspaceDetailHeader(input: WorkspaceDetailInput) {
         Box(
             Modifier
                 .size(Sizing.indicatorDotActive)
-                .background(if (input.serverConnected) theme.success else theme.textMuted, RectangleShape)
-                .semantics {
-                    contentDescription = if (input.serverConnected) "Connected" else "Disconnected"
-                },
+                .background(statusColor, RectangleShape)
+                .semantics { contentDescription = statusLabel },
         )
         Text(
             input.workspace.workspaceKey.displayLabel(),
@@ -720,15 +722,21 @@ private fun workspaceDetailHeader(input: WorkspaceDetailInput) {
             overflow = TextOverflow.Ellipsis,
             modifier = Modifier.weight(1f),
         )
-        Icon(
-            Icons.Default.Refresh,
-            contentDescription = "Refresh",
-            tint = theme.textMuted,
+        Box(
             modifier = Modifier
+                .size(Sizing.minTouchTarget)
                 .clickable(role = Role.Button, onClick = input.actions.onRefresh)
-                .padding(Spacing.xs)
-                .size(Sizing.iconMd),
-        )
+                .semantics { contentDescription = "Refresh" }
+                .testTag("home_workspace_detail_refresh"),
+            contentAlignment = Alignment.Center,
+        ) {
+            Icon(
+                Icons.Default.Refresh,
+                contentDescription = null,
+                tint = theme.textMuted,
+                modifier = Modifier.size(Sizing.iconMd),
+            )
+        }
     }
 }
 
@@ -912,34 +920,22 @@ internal data class FilteredHomeResults(
     val sessions: List<SessionPreview>,
 )
 
-/** Applies enabled server filters when idle; a query searches every saved server. */
+/** Query-only Home search: every saved server's workspaces and sessions are searched. */
 internal fun HomeSummaryState.filteredHomeResults(
-    enabledEndpointKeys: Set<String>,
     query: String,
 ): FilteredHomeResults {
     val needle = query.trim()
-    val applyBrowseFilter = needle.isEmpty()
     val matchingWorkspaces = ArrayList<WorkspaceSummary>(workspaces.size)
     for (workspace in workspaces) {
-        if (applyBrowseFilter && workspace.serverRef.endpointKey !in enabledEndpointKeys) continue
         if (needle.isEmpty() || workspace.matchesSearch(needle)) matchingWorkspaces += workspace
     }
     val matchingSessions = ArrayList<SessionPreview>(sessions.size)
     for (session in sessions) {
-        if (applyBrowseFilter && session.serverRef.endpointKey !in enabledEndpointKeys) continue
         if (needle.isEmpty() || session.matchesSearch(needle)) matchingSessions += session
     }
     matchingSessions.sortByDescending { it.updatedAt }
     return FilteredHomeResults(matchingWorkspaces, matchingSessions)
 }
-
-private fun HomeSummaryState.enabledEndpointKeys(disabledEndpointKeys: Collection<String>): Set<String> =
-    servers.mapTo(LinkedHashSet(servers.size)) { it.serverRef.endpointKey }.apply {
-        removeAll(disabledEndpointKeys)
-    }
-
-private fun List<String>.toggleMembership(value: String): List<String> =
-    if (value in this) this - value else this + value
 
 private fun WorkspaceSummary.matchesSearch(query: String): Boolean =
     serverRef.displayName.contains(query, ignoreCase = true) ||

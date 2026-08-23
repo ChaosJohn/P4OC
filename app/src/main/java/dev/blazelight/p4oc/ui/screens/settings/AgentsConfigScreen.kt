@@ -42,7 +42,6 @@ data class AgentInfo(
     val description: String,
     val systemPrompt: String? = null,
     val tools: List<String> = emptyList(),
-    val isEnabled: Boolean = true,
     val isBuiltIn: Boolean = true
 )
 
@@ -86,7 +85,6 @@ class AgentsConfigViewModel constructor(
                             description = dto.description ?: "",
                             systemPrompt = dto.systemPrompt,
                             tools = dto.tools?.keys?.toList() ?: emptyList(),
-                            isEnabled = dto.isEnabled ?: true,
                             isBuiltIn = dto.isBuiltIn ?: dto.builtIn
                         )
                     }
@@ -353,53 +351,55 @@ private fun AgentDetailDialog(
         }
     ) {
         Text(agent.description)
+        AgentTools(agent.tools)
+        agent.systemPrompt?.let { AgentSystemPrompt(it, theme.backgroundElement) }
+    }
+}
 
-        if (agent.tools.isNotEmpty()) {
-            Text(
-                text = stringResource(R.string.agents_tools),
-                style = MaterialTheme.typography.labelLarge,
-                fontWeight = FontWeight.Medium
-            )
-            Column(verticalArrangement = Arrangement.spacedBy(Spacing.xs)) {
-                agent.tools.forEach { tool ->
-                    Row(
-                        horizontalArrangement = Arrangement.spacedBy(Spacing.md),
-                        verticalAlignment = Alignment.CenterVertically
-                    ) {
-                        Icon(
-                            Icons.Default.Build,
-                            contentDescription = stringResource(R.string.agents_tools),
-                            modifier = Modifier.size(Sizing.iconXs),
-                            tint = theme.textMuted
-                        )
-                        Text(
-                            text = tool,
-                            style = MaterialTheme.typography.bodySmall
-                        )
-                    }
-                }
-            }
-        }
-
-        agent.systemPrompt?.let { prompt ->
-            Text(
-                text = stringResource(R.string.agents_system_prompt),
-                style = MaterialTheme.typography.labelLarge,
-                fontWeight = FontWeight.Medium
-            )
-            Surface(
-                shape = RectangleShape,
-                color = theme.backgroundElement
+@Composable
+@Suppress("FunctionNaming")
+private fun AgentTools(tools: List<String>) {
+    if (tools.isEmpty()) return
+    val theme = LocalOpenCodeTheme.current
+    Text(
+        text = stringResource(R.string.agents_tools),
+        style = MaterialTheme.typography.labelLarge,
+        fontWeight = FontWeight.Medium,
+    )
+    Column(verticalArrangement = Arrangement.spacedBy(Spacing.xs)) {
+        tools.forEach { tool ->
+            Row(
+                horizontalArrangement = Arrangement.spacedBy(Spacing.md),
+                verticalAlignment = Alignment.CenterVertically,
             ) {
-                Text(
-                    text = prompt.take(500) + if (prompt.length > 500) "..." else "",
-                    style = MaterialTheme.typography.bodySmall.copy(
-                        fontFamily = androidx.compose.ui.text.font.FontFamily.Monospace
-                    ),
-                    modifier = Modifier.padding(Spacing.lg)
+                Icon(
+                    Icons.Default.Build,
+                    contentDescription = stringResource(R.string.agents_tools),
+                    modifier = Modifier.size(Sizing.iconXs),
+                    tint = theme.textMuted,
                 )
+                Text(text = tool, style = MaterialTheme.typography.bodySmall)
             }
         }
+    }
+}
+
+@Composable
+@Suppress("FunctionNaming")
+private fun AgentSystemPrompt(prompt: String, backgroundColor: Color) {
+    Text(
+        text = stringResource(R.string.agents_system_prompt),
+        style = MaterialTheme.typography.labelLarge,
+        fontWeight = FontWeight.Medium,
+    )
+    Surface(shape = RectangleShape, color = backgroundColor) {
+        Text(
+            text = prompt.take(500) + if (prompt.length > 500) "..." else "",
+            style = MaterialTheme.typography.bodySmall.copy(
+                fontFamily = androidx.compose.ui.text.font.FontFamily.Monospace,
+            ),
+            modifier = Modifier.padding(Spacing.lg),
+        )
     }
 }
 

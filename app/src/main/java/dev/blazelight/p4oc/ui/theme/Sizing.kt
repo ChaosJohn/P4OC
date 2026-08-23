@@ -8,7 +8,7 @@ import androidx.compose.ui.unit.dp
  *
  * Design principles:
  * - Smaller icons than Material defaults (20dp vs 24dp)
- * - Compact touch targets (44dp vs 48dp)
+ * - Compact visuals inside Android's 48dp minimum touch targets
  * - Dense list items and buttons
  */
 object Sizing {
@@ -73,7 +73,6 @@ object Sizing {
     val embeddedScrollMaxHeight: Dp = 360.dp
 
     // Component-specific
-    val switchCellWidth: Dp = 40.dp // TuiSwitch ON/OFF cell width
     // Knob-slider switch (design): 36x20 track, 14x14 sliding knob, 2dp inset
     val switchTrackWidth: Dp = 36.dp
     val switchTrackHeight: Dp = 20.dp
@@ -82,7 +81,6 @@ object Sizing {
     val tabBarHeight: Dp = 30.dp // Tab bar strip height (design)
     val treeIndent: Dp = 24.dp // Session tree indentation per level
     val chipMaxWidth: Dp = 150.dp // Project chip max width
-    val tabHeight: Dp = 22.dp // Tab bar item height
 
     // Progress indicators
     val progressBarHeight: Dp = 8.dp // Standard LinearProgressIndicator

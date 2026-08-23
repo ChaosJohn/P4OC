@@ -81,9 +81,9 @@
     <string name="server_setup_step1_title">Install OpenCode</string>
     <string name="server_setup_step1_cmd">$ npm install -g opencode</string>
     <string name="server_setup_step2_title">Start the server</string>
-    <string name="server_setup_step2_cmd">$ OPENCODE_SERVER_PASSWORD=&lt;password&gt; \\\n  opencode serve \\\n  --hostname 0.0.0.0 --port 4096</string>
+    <string name="server_setup_step2_cmd">$ opencode serve --hostname 0.0.0.0 --port 4096\n\nOptional authentication:\n$ OPENCODE_SERVER_PASSWORD=&lt;password&gt; opencode serve --hostname 0.0.0.0 --port 4096</string>
     <string name="server_setup_step3_title">Connect from this device</string>
-    <string name="server_setup_step3_cmd">Enter http://&lt;your-pc-ip&gt;:4096\nin the URL field above.\nUsername: opencode\nPassword: &lt;your password&gt;</string>
+    <string name="server_setup_step3_cmd">Enter http://&lt;your-pc-ip&gt;:4096\nin the URL field above.\nUsername defaults to opencode.\nPassword is optional.</string>
     <string name="server_setup_tip_label">Tip</string>
     <string name="server_setup_tip_text">--hostname 0.0.0.0 is required so the server is reachable from your phone, not just localhost. Use your computer\'s local IP (e.g. 192.168.x.x).</string>
     <!-- Substring of server_setup_tip_text highlighted in the accent colour; keep the two in sync. -->
@@ -135,6 +135,8 @@
     <string name="setup_brand_tagline">Pocket for OpenCode</string>
     <string name="setup_server_url_label">SERVER URL</string>
     <string name="setup_field_required">· required</string>
+    <string name="setup_field_optional">· optional</string>
+    <string name="setup_field_default_opencode">· default opencode</string>
     <string name="setup_username_label">USERNAME</string>
     <string name="setup_password_label">PASSWORD</string>
     <string name="setup_password_show">show</string>
@@ -142,7 +144,8 @@
     <string name="setup_tls_label">TLS</string>
     <string name="setup_tls_skip_verification">skip TLS verification</string>
     <string name="setup_tls_warning">The certificate is not verified. Use only on a network you trust.</string>
-    <string name="setup_credentials_hint">username · password</string>
+    <string name="setup_credentials_hint">%1$s · password set</string>
+    <string name="setup_credentials_hint_no_password">%1$s · no password</string>
     <string name="setup_scanning_nearby">scanning nearby servers</string>
     <string name="setup_retry">retry</string>
     <string name="server_use">use</string>
@@ -273,7 +276,7 @@
     <string name="chat_empty_title">Start a conversation</string>
     <string name="chat_empty_description">Type a message below to begin</string>
     <string name="chat_load_older_messages">Load older messages</string>
-    <string name="chat_input_placeholder">Type a message…</string>
+    <string name="chat_input_placeholder">Message OpenCode…</string>
     <string name="chat_input_placeholder_with_commands">Type a message or / for commands…</string>
     <string name="chat_send">Send</string>
     <string name="chat_action_send">Send</string>
@@ -282,6 +285,7 @@
     <string name="chat_action_remove_attachment">Remove file %1$s</string>
     <string name="chat_disabled_disconnected">Disconnected</string>
     <string name="chat_disabled_empty">Message is empty</string>
+    <string name="chat_user_label">you</string>
     <string name="chat_queued_prefix">queued</string>
     <string name="vcs_branch_prefix">◈</string>
     <string name="slash_command_compact_desc">Compact the conversation to reduce context size</string>
@@ -331,6 +335,8 @@
     <string name="context_input">Input</string>
     <string name="context_output">Output</string>
     <string name="context_cached">Cached</string>
+    <string name="context_usage_meter">%1$s %2$d%%</string>
+    <string name="context_usage_percent">Context usage %1$d percent</string>
     
     <!-- Expanded Widgets -->
     <string name="open_sub_agent">Open Sub-Agent</string>

@@ -29,6 +29,8 @@ import androidx.compose.ui.text.style.TextOverflow
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import dev.blazelight.p4oc.R
 import dev.blazelight.p4oc.core.network.ConnectionState
+import dev.blazelight.p4oc.data.remote.dto.ModelInput
+import dev.blazelight.p4oc.domain.model.Message
 import dev.blazelight.p4oc.domain.model.Part
 import dev.blazelight.p4oc.domain.model.MessageWithParts
 import dev.blazelight.p4oc.domain.model.Permission
@@ -196,13 +198,9 @@ fun ChatScreen(
         saver = ChatScrollRestorationState.Saver
     ) { ChatScrollRestorationState() }
     val messageBlocks = remember(messages, uiState.isBusy) { groupMessagesIntoBlocks(messages, uiState.isBusy) }
-    // Context-window usage for the composer meter — from the newest assistant reply's token totals.
-    val usedContextTokens = remember(messages) {
-        (
-            messages.lastOrNull { it.message is dev.blazelight.p4oc.domain.model.Message.Assistant }
-                ?.message as? dev.blazelight.p4oc.domain.model.Message.Assistant
-            )?.tokens?.let { it.input + it.output + it.reasoning + it.cacheRead + it.cacheWrite }
-    }
+    // A streaming assistant is initially reported with all-zero token totals.
+    // Retain the newest meaningful usage until the live reply gains real usage.
+    val contextUsage = remember(messages) { latestAssistantContextUsage(messages) }
     val searchMatches = remember(messageBlocks, scrollRestorationState.searchQuery) {
         findChatMatches(messageBlocks, scrollRestorationState.searchQuery)
     }
@@ -376,7 +374,10 @@ fun ChatScreen(
                         favoriteModels = favoriteModels,
                         recentModels = recentModels,
                         onToggleFavorite = viewModel.modelAgentManager::toggleFavoriteModel,
-                        usedContextTokens = usedContextTokens,
+                        usedContextTokens = contextUsage?.tokens,
+                        contextUsageModel = contextUsage?.let {
+                            ModelInput(providerID = it.providerID, modelID = it.modelID)
+                        },
                         providerNames = providerNames,
                     )
                     ChatInputBar(
@@ -679,6 +680,30 @@ fun ChatScreen(
         )
     }
 }
+
+internal data class AssistantContextUsage(
+    val tokens: Int,
+    val providerID: String,
+    val modelID: String,
+)
+
+internal fun latestAssistantContextUsage(messages: List<MessageWithParts>): AssistantContextUsage? =
+    messages.asReversed().firstNotNullOfOrNull { messageWithParts ->
+        val assistant = messageWithParts.message as? Message.Assistant
+            ?: return@firstNotNullOfOrNull null
+        val tokens = assistant.tokens.run {
+            input.toLong() + output + reasoning + cacheRead + cacheWrite
+        }
+        if (tokens <= 0L) {
+            null
+        } else {
+            AssistantContextUsage(
+                tokens = tokens.coerceAtMost(Int.MAX_VALUE.toLong()).toInt(),
+                providerID = assistant.providerID,
+                modelID = assistant.modelID,
+            )
+        }
+    }
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable

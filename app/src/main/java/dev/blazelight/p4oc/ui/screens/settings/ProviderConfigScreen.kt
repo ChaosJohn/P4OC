@@ -32,6 +32,7 @@ import dev.blazelight.p4oc.R
 import dev.blazelight.p4oc.data.remote.dto.ModelDto
 import dev.blazelight.p4oc.data.remote.dto.ProviderAuthMethodDto
 import dev.blazelight.p4oc.data.remote.dto.ProviderDto
+import dev.blazelight.p4oc.ui.components.TuiAlertDialog
 import dev.blazelight.p4oc.ui.components.TuiButton
 import dev.blazelight.p4oc.ui.components.TuiCard
 import dev.blazelight.p4oc.ui.components.TuiLoadingScreen
@@ -60,22 +61,9 @@ fun ProviderConfigScreen(
     var authorizationCode by remember(pendingAuthorization) { mutableStateOf("") }
 
     pendingAuthorization?.let { pending ->
-        AlertDialog(
+        TuiAlertDialog(
             onDismissRequest = viewModel::dismissAuthorization,
-            title = { Text(stringResource(R.string.provider_auth_title)) },
-            text = {
-                Column(verticalArrangement = Arrangement.spacedBy(Spacing.sm)) {
-                    Text(pending.authorization.instructions)
-                    if (pending.authorization.method == "code") {
-                        OutlinedTextField(
-                            value = authorizationCode,
-                            onValueChange = { authorizationCode = it },
-                            label = { Text(stringResource(R.string.provider_auth_code)) },
-                            singleLine = true,
-                        )
-                    }
-                }
-            },
+            title = stringResource(R.string.provider_auth_title),
             confirmButton = {
                 TuiButton(
                     onClick = {
@@ -105,7 +93,19 @@ fun ProviderConfigScreen(
                     Text(stringResource(R.string.provider_auth_open_browser))
                 }
             }
-        )
+        ) {
+            Column(verticalArrangement = Arrangement.spacedBy(Spacing.sm)) {
+                Text(pending.authorization.instructions)
+                if (pending.authorization.method == "code") {
+                    OutlinedTextField(
+                        value = authorizationCode,
+                        onValueChange = { authorizationCode = it },
+                        label = { Text(stringResource(R.string.provider_auth_code)) },
+                        singleLine = true,
+                    )
+                }
+            }
+        }
     }
 
     val theme = LocalOpenCodeTheme.current

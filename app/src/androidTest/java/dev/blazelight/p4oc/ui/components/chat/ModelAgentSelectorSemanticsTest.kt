@@ -30,10 +30,12 @@ class ModelAgentSelectorSemanticsTest {
         composeRule.setContent {
             PocketCodeTheme {
                 ModelPickerDialog(
-                    availableModels = listOf("provider" to model()),
-                    selectedModel = null,
-                    favoriteModels = emptySet(),
-                    recentModels = emptyList(),
+                    data = ModelPickerData(
+                        availableModels = listOf("provider" to model()),
+                        selectedModel = null,
+                        favoriteModels = emptySet(),
+                        recentModels = emptyList(),
+                    ),
                     onModelSelected = {},
                     onToggleFavorite = {},
                     onDismiss = {},
@@ -54,10 +56,12 @@ class ModelAgentSelectorSemanticsTest {
         composeRule.setContent {
             PocketCodeTheme {
                 ModelPickerDialog(
-                    availableModels = listOf("provider" to model()),
-                    selectedModel = modelInput,
-                    favoriteModels = setOf(modelInput),
-                    recentModels = emptyList(),
+                    data = ModelPickerData(
+                        availableModels = listOf("provider" to model()),
+                        selectedModel = modelInput,
+                        favoriteModels = setOf(modelInput),
+                        recentModels = emptyList(),
+                    ),
                     onModelSelected = {},
                     onToggleFavorite = {},
                     onDismiss = {},

@@ -6,6 +6,7 @@ import android.os.Build
 import android.provider.Settings
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
+import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.rememberScrollState
@@ -18,29 +19,31 @@ import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.alpha
+import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.RectangleShape
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.semantics.Role
+import androidx.compose.ui.semantics.selected
+import androidx.compose.ui.semantics.semantics
+import androidx.compose.ui.text.font.FontFamily
+import androidx.compose.ui.text.style.TextOverflow
 import androidx.core.content.ContextCompat
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.compose.LifecycleResumeEffect
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.lifecycle.viewModelScope
 import dev.blazelight.p4oc.R
-import androidx.compose.foundation.BorderStroke
-import androidx.compose.ui.graphics.Color
-import androidx.compose.ui.text.font.FontFamily
-import androidx.compose.ui.text.style.TextOverflow
 import dev.blazelight.p4oc.core.datastore.NotificationRoutingMode
 import dev.blazelight.p4oc.core.datastore.NotificationSettings
+import dev.blazelight.p4oc.core.datastore.SavedServer
 import dev.blazelight.p4oc.core.datastore.SettingsDataStore
 import dev.blazelight.p4oc.core.datastore.VibrationPattern
-import dev.blazelight.p4oc.ui.components.TuiDropdownMenuItem
 import dev.blazelight.p4oc.core.haptic.HapticFeedback
 import dev.blazelight.p4oc.ui.components.TuiAlertDialog
 import dev.blazelight.p4oc.ui.components.TuiButton
+import dev.blazelight.p4oc.ui.components.TuiDropdownMenuItem
 import dev.blazelight.p4oc.ui.components.TuiSwitch
 import dev.blazelight.p4oc.ui.components.TuiTextButton
 import dev.blazelight.p4oc.ui.components.TuiTopBar
@@ -53,6 +56,8 @@ import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.launch
 import org.koin.androidx.compose.koinViewModel
 
+private const val DISABLED_ROUTING_ALPHA = 0.4f
+
 class NotificationSettingsViewModel constructor(
     private val settingsDataStore: SettingsDataStore,
     private val hapticFeedback: HapticFeedback,
@@ -61,8 +66,8 @@ class NotificationSettingsViewModel constructor(
     private val _settings = MutableStateFlow(NotificationSettings())
     val settings: StateFlow<NotificationSettings> = _settings.asStateFlow()
 
-    private val _savedServers = MutableStateFlow<List<dev.blazelight.p4oc.core.datastore.SavedServer>>(emptyList())
-    val savedServers: StateFlow<List<dev.blazelight.p4oc.core.datastore.SavedServer>> = _savedServers.asStateFlow()
+    private val _savedServers = MutableStateFlow<List<SavedServer>>(emptyList())
+    val savedServers: StateFlow<List<SavedServer>> = _savedServers.asStateFlow()
 
     init {
         viewModelScope.launch {
@@ -77,7 +82,7 @@ class NotificationSettingsViewModel constructor(
         }
     }
 
-    fun setServerRouting(endpointKey: String, mode: dev.blazelight.p4oc.core.datastore.NotificationRoutingMode) {
+    fun setServerRouting(endpointKey: String, mode: NotificationRoutingMode) {
         val updatedRouting = _settings.value.serverRouting.toMutableMap().apply { put(endpointKey, mode) }
         val new = _settings.value.copy(serverRouting = updatedRouting)
         _settings.value = new
@@ -249,32 +254,12 @@ fun NotificationSettingsScreen(
                 testTag = "notify_on_completion_switch"
             )
 
-            // Per-server routing (design 18)
-            SectionHeader(title = stringResource(R.string.notification_routing_section))
-            if (savedServers.isEmpty()) {
-                Text(
-                    text = stringResource(R.string.notification_routing_empty),
-                    style = MaterialTheme.typography.bodySmall,
-                    color = theme.textMuted,
-                    modifier = Modifier.padding(horizontal = Spacing.lg, vertical = Spacing.md)
-                )
-            } else {
-                savedServers.forEach { server ->
-                    ServerRoutingRow(
-                        name = server.displayName,
-                        endpoint = server.endpointKey,
-                        mode = settings.serverRouting[server.endpointKey]
-                            ?: NotificationRoutingMode.All,
-                        enabled = settings.enabled,
-                        onSelect = { viewModel.setServerRouting(server.endpointKey, it) },
-                    )
-                }
-            }
-
             VibrationPatternRow(
                 pattern = settings.vibrationPattern,
                 onClick = { showVibrationPatternDialog = true }
             )
+
+            NotificationRoutingSection(savedServers, settings, viewModel::setServerRouting)
         }
     }
 
@@ -319,6 +304,35 @@ fun NotificationSettingsScreen(
                 showVibrationPatternDialog = false
             },
             onDismiss = { showVibrationPatternDialog = false }
+        )
+    }
+}
+
+@Composable
+@Suppress("FunctionNaming")
+private fun NotificationRoutingSection(
+    savedServers: List<SavedServer>,
+    settings: NotificationSettings,
+    onSelect: (String, NotificationRoutingMode) -> Unit,
+) {
+    val theme = LocalOpenCodeTheme.current
+    SectionHeader(title = stringResource(R.string.notification_routing_section))
+    if (savedServers.isEmpty()) {
+        Text(
+            text = stringResource(R.string.notification_routing_empty),
+            style = MaterialTheme.typography.bodySmall,
+            color = theme.textMuted,
+            modifier = Modifier.padding(horizontal = Spacing.lg, vertical = Spacing.md),
+        )
+        return
+    }
+    savedServers.forEach { server ->
+        ServerRoutingRow(
+            name = server.displayName,
+            endpoint = server.endpointKey,
+            mode = settings.serverRouting[server.endpointKey] ?: NotificationRoutingMode.All,
+            enabled = settings.enabled,
+            onSelect = { onSelect(server.endpointKey, it) },
         )
     }
 }
@@ -374,6 +388,7 @@ private fun SectionHeader(title: String) {
 }
 
 @Composable
+@Suppress("FunctionNaming")
 private fun routingModeColor(mode: NotificationRoutingMode): Color {
     val theme = LocalOpenCodeTheme.current
     return when (mode) {
@@ -384,6 +399,7 @@ private fun routingModeColor(mode: NotificationRoutingMode): Color {
 }
 
 @Composable
+@Suppress("FunctionNaming")
 private fun routingModeLabel(mode: NotificationRoutingMode): String = stringResource(
     when (mode) {
         NotificationRoutingMode.All -> R.string.notification_routing_all
@@ -393,6 +409,7 @@ private fun routingModeLabel(mode: NotificationRoutingMode): String = stringReso
 )
 
 @Composable
+@Suppress("FunctionNaming")
 private fun ServerRoutingRow(
     name: String,
     endpoint: String,
@@ -401,8 +418,7 @@ private fun ServerRoutingRow(
     onSelect: (NotificationRoutingMode) -> Unit,
 ) {
     val theme = LocalOpenCodeTheme.current
-    var expanded by remember { mutableStateOf(false) }
-    val contentAlpha = if (enabled) 1f else 0.4f
+    val contentAlpha = if (enabled) 1f else DISABLED_ROUTING_ALPHA
     Row(
         modifier = Modifier
             .fillMaxWidth()
@@ -426,34 +442,54 @@ private fun ServerRoutingRow(
                 overflow = TextOverflow.Ellipsis,
             )
         }
-        Box {
-            Surface(
-                onClick = { if (enabled) expanded = true },
-                shape = RectangleShape,
-                color = Color.Transparent,
-                border = BorderStroke(Sizing.strokeMd, theme.border),
-            ) {
-                Text(
-                    text = "${routingModeLabel(mode)} ▾",
-                    style = MaterialTheme.typography.labelMedium.copy(fontFamily = FontFamily.Monospace),
-                    color = routingModeColor(mode).copy(alpha = contentAlpha),
-                    modifier = Modifier.padding(horizontal = Spacing.sm, vertical = Spacing.xxs),
+        RoutingModePicker(endpoint, mode, enabled, contentAlpha, onSelect)
+    }
+    HorizontalDivider(thickness = Sizing.dividerThickness, color = theme.borderSubtle)
+}
+
+@Composable
+@Suppress("FunctionNaming")
+private fun RoutingModePicker(
+    endpoint: String,
+    mode: NotificationRoutingMode,
+    enabled: Boolean,
+    contentAlpha: Float,
+    onSelect: (NotificationRoutingMode) -> Unit,
+) {
+    val theme = LocalOpenCodeTheme.current
+    var expanded by remember { mutableStateOf(false) }
+    Box {
+        Surface(
+            onClick = { expanded = true },
+            modifier = Modifier
+                .heightIn(min = Sizing.minTouchTarget)
+                .testTag("notification_routing_$endpoint"),
+            enabled = enabled,
+            shape = RectangleShape,
+            color = Color.Transparent,
+            border = BorderStroke(Sizing.strokeMd, theme.border),
+        ) {
+            Text(
+                text = "${routingModeLabel(mode)} ▾",
+                style = MaterialTheme.typography.labelMedium.copy(fontFamily = FontFamily.Monospace),
+                color = routingModeColor(mode).copy(alpha = contentAlpha),
+                modifier = Modifier.padding(horizontal = Spacing.sm, vertical = Spacing.xxs),
+            )
+        }
+        DropdownMenu(expanded = expanded, onDismissRequest = { expanded = false }) {
+            NotificationRoutingMode.entries.forEach { option ->
+                TuiDropdownMenuItem(
+                    text = routingModeLabel(option),
+                    onClick = {
+                        onSelect(option)
+                        expanded = false
+                    },
+                    modifier = Modifier.semantics { selected = option == mode },
+                    trailingIcon = Icons.Default.Check.takeIf { option == mode },
                 )
-            }
-            DropdownMenu(expanded = expanded, onDismissRequest = { expanded = false }) {
-                NotificationRoutingMode.entries.forEach { option ->
-                    TuiDropdownMenuItem(
-                        text = routingModeLabel(option),
-                        onClick = {
-                            onSelect(option)
-                            expanded = false
-                        },
-                    )
-                }
             }
         }
     }
-    HorizontalDivider(thickness = Sizing.dividerThickness, color = theme.borderSubtle)
 }
 
 @Composable

@@ -160,7 +160,7 @@ private fun UserMessage(
                     .padding(end = revertEndInset)
             ) {
                 Text(
-                    text = "you",
+                    text = stringResource(R.string.chat_user_label),
                     style = MaterialTheme.typography.labelSmall,
                     fontFamily = FontFamily.Monospace,
                     color = theme.textMuted,
@@ -219,8 +219,9 @@ private fun AssistantMessageContent(
     ) {
         // Per-turn attribution header: `@build · claude-sonnet-4-5` (design 05).
         (messageWithParts.message as? Message.Assistant)?.let { assistant ->
-            if (partGroups.isNotEmpty()) {
-                AssistantAttributionHeader(agent = assistant.agent, modelID = assistant.modelID)
+            val attribution = assistantAttribution(assistant.agent, assistant.modelID)
+            if (partGroups.isNotEmpty() && attribution != null) {
+                AssistantAttributionHeader(attribution)
             }
         }
 
@@ -294,10 +295,27 @@ private fun renderOtherPart(part: Part) {
  * Assistant turn attribution header — `@build · claude-sonnet-4-5` (design 05).
  * `@agent` takes the agent's accent color; the model id trails muted.
  */
+internal data class AssistantAttribution(
+    val agent: String?,
+    val modelID: String?,
+) {
+    val showSeparator: Boolean get() = agent != null && modelID != null
+}
+
+internal fun assistantAttribution(agent: String, modelID: String): AssistantAttribution? {
+    val visibleAgent = agent.trim().takeIf(String::isNotEmpty)
+    val visibleModelID = modelID.trim().takeIf(String::isNotEmpty)
+    return if (visibleAgent == null && visibleModelID == null) {
+        null
+    } else {
+        AssistantAttribution(visibleAgent, visibleModelID)
+    }
+}
+
 @Composable
-private fun AssistantAttributionHeader(agent: String, modelID: String) {
+@Suppress("FunctionNaming")
+private fun AssistantAttributionHeader(attribution: AssistantAttribution) {
     val theme = LocalOpenCodeTheme.current
-    val agentColor = SemanticColors.AgentSelector.forName(agent)
     Row(
         modifier = Modifier
             .fillMaxWidth()
@@ -305,24 +323,30 @@ private fun AssistantAttributionHeader(agent: String, modelID: String) {
         horizontalArrangement = Arrangement.spacedBy(Spacing.sm),
         verticalAlignment = Alignment.CenterVertically
     ) {
-        Text(
-            text = "@${agent.lowercase()}",
-            style = MaterialTheme.typography.labelMedium.copy(fontFamily = FontFamily.Monospace),
-            fontWeight = FontWeight.SemiBold,
-            color = agentColor
-        )
-        Text(
-            text = "·",
-            style = MaterialTheme.typography.labelMedium,
-            color = theme.textMuted
-        )
-        Text(
-            text = modelID,
-            style = MaterialTheme.typography.labelMedium.copy(fontFamily = FontFamily.Monospace),
-            color = theme.textMuted,
-            maxLines = 1,
-            overflow = androidx.compose.ui.text.style.TextOverflow.Ellipsis
-        )
+        attribution.agent?.let { agent ->
+            Text(
+                text = "@${agent.lowercase()}",
+                style = MaterialTheme.typography.labelMedium.copy(fontFamily = FontFamily.Monospace),
+                fontWeight = FontWeight.SemiBold,
+                color = SemanticColors.AgentSelector.forName(agent)
+            )
+        }
+        if (attribution.showSeparator) {
+            Text(
+                text = "·",
+                style = MaterialTheme.typography.labelMedium,
+                color = theme.textMuted
+            )
+        }
+        attribution.modelID?.let { modelID ->
+            Text(
+                text = modelID,
+                style = MaterialTheme.typography.labelMedium.copy(fontFamily = FontFamily.Monospace),
+                color = theme.textMuted,
+                maxLines = 1,
+                overflow = androidx.compose.ui.text.style.TextOverflow.Ellipsis
+            )
+        }
     }
 }
 
@@ -343,24 +367,9 @@ private fun AssistantError(error: MessageError, onProviderAuthRequired: ((String
     val theme = LocalOpenCodeTheme.current
     val isAuth = error.name == "ProviderAuthError"
     val isAborted = error.name == "MessageAbortedError"
-    val message = when {
-        isAborted -> stringResource(R.string.chat_run_aborted)
-        isAuth -> stringResource(R.string.chat_provider_auth_required)
-        error.isRetryable -> stringResource(R.string.chat_run_retryable_error)
-        else -> stringResource(R.string.chat_run_failed)
-    }
+    val message = assistantErrorMessage(error, isAuth, isAborted)
     val accent = if (isAborted) theme.warning else theme.error
-    val header = buildString {
-        append(
-            when {
-                isAuth -> "provider auth error"
-                isAborted -> "run aborted"
-                error.isRetryable -> "run error · retryable"
-                else -> "run failed"
-            }
-        )
-        error.statusCode?.let { append(" · "); append(it) }
-    }
+    val header = assistantErrorHeader(error, isAuth, isAborted)
 
     // Left-border error card, matching design 20's provider-auth banner.
     Row(
@@ -403,6 +412,30 @@ private fun AssistantError(error: MessageError, onProviderAuthRequired: ((String
                     )
                 }
             }
+        }
+    }
+}
+
+@Composable
+private fun assistantErrorMessage(error: MessageError, isAuth: Boolean, isAborted: Boolean): String = when {
+    isAborted -> stringResource(R.string.chat_run_aborted)
+    isAuth -> stringResource(R.string.chat_provider_auth_required)
+    error.isRetryable -> stringResource(R.string.chat_run_retryable_error)
+    else -> stringResource(R.string.chat_run_failed)
+}
+
+private fun assistantErrorHeader(error: MessageError, isAuth: Boolean, isAborted: Boolean): String {
+    val title = when {
+        isAuth -> "provider auth error"
+        isAborted -> "run aborted"
+        error.isRetryable -> "run error · retryable"
+        else -> "run failed"
+    }
+    return buildString {
+        append(title)
+        error.statusCode?.let {
+            append(" · ")
+            append(it)
         }
     }
 }

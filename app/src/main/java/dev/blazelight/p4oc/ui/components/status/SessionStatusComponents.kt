@@ -13,9 +13,7 @@ import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.offset
 import androidx.compose.foundation.layout.size
 import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.filled.Circle
 import androidx.compose.material.icons.filled.PriorityHigh
-import androidx.compose.material.icons.filled.Refresh
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
@@ -26,11 +24,10 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.alpha
 import androidx.compose.ui.graphics.Color
-import androidx.compose.ui.graphics.vector.ImageVector
-import androidx.compose.ui.semantics.contentDescription
-import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.res.stringResource
+import androidx.compose.ui.semantics.contentDescription
+import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.unit.Dp
 import dev.blazelight.p4oc.R
 import dev.blazelight.p4oc.domain.model.SessionPresence
@@ -42,7 +39,6 @@ data class SessionStatusVisual(
     val color: Color,
     val label: String,
     val contentDescription: String,
-    val icon: ImageVector? = null,
     val showSpinner: Boolean = false,
     val shouldPulse: Boolean = false,
     val showAttentionBadge: Boolean = false,
@@ -62,7 +58,6 @@ object SessionStatusVisuals {
                 color = theme.warning,
                 label = stringResource(R.string.status_legend_retrying_label),
                 contentDescription = stringResource(R.string.status_cd_retrying),
-                icon = Icons.Default.Refresh,
                 shouldPulse = true,
             )
             SessionPresence.AWAITING_INPUT -> SessionStatusVisual(
@@ -111,6 +106,7 @@ fun SessionStatusDot(
         modifier = modifier
             .size(size)
             .alpha(pulseAlpha)
+            .semantics { contentDescription = visual.contentDescription }
             .testTag("session_status_dot_${presence.name.lowercase()}"),
         contentAlignment = Alignment.Center,
     ) {
@@ -125,8 +121,7 @@ fun SessionStatusDot(
             Box(
                 modifier = Modifier
                     .size(size)
-                    .background(visual.color, androidx.compose.ui.graphics.RectangleShape)
-                    .semantics { contentDescription = visual.contentDescription },
+                    .background(visual.color, androidx.compose.ui.graphics.RectangleShape),
             )
         }
 

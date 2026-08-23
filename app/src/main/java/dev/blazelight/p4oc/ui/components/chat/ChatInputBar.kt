@@ -117,6 +117,7 @@ fun ChatInputBar(
     val emptyDescription = stringResource(R.string.chat_disabled_empty)
     val attachDescription = stringResource(R.string.chat_action_attach)
     val stopDescription = stringResource(R.string.chat_action_stop)
+    val inputPlaceholder = stringResource(R.string.chat_input_placeholder)
     val sendContentDescription = when {
         isLoading -> loadingDescription
         canSubmit -> sendDescription
@@ -247,10 +248,8 @@ fun ChatInputBar(
                     verticalAlignment = Alignment.CenterVertically,
                     horizontalArrangement = Arrangement.spacedBy(Spacing.sm)
                 ) {
-                    // One shared FIXED height for the attach button, the field and the
-                    // send button so all three are exactly equal regardless of the
-                    // system font scale. (A text-driven field height diverges from the
-                    // fixed-dp buttons on devices with a large font setting.)
+                    // The controls rest on the same visual height. The field may grow
+                    // to four lines while the button visuals remain square.
                     val controlSize = Sizing.iconButtonLg
 
                     if (enabled) {
@@ -269,7 +268,7 @@ fun ChatInputBar(
                     Box(
                         modifier = Modifier
                             .weight(1f)
-                            .height(controlSize)
+                            .heightIn(min = controlSize)
                             .border(
                                 width = Sizing.strokeMd,
                                 color = theme.border,
@@ -293,7 +292,7 @@ fun ChatInputBar(
                                     color = theme.primary
                                 )
                                 Text(
-                                    "Message OpenCode…",
+                                    inputPlaceholder,
                                     style = MaterialTheme.typography.bodyMedium.copy(
                                         fontSize = TuiCodeFontSize.xxl
                                     ),
@@ -378,16 +377,16 @@ fun ChatInputBar(
                         )
                     }
 
-                    // Filled by default (design 05) — emptiness is enforced by the click
-                    // guard, not by dimming the button.
+                    // Keep the filled design when actionable; disabled states remain
+                    // visibly muted and expose no click action.
                     ComposerSquareButton(
                         glyph = "↑",
-                        glyphColor = theme.background,
-                        fillColor = theme.primary,
-                        borderColor = theme.primary,
+                        glyphColor = if (canSubmit) theme.background else theme.textMuted,
+                        fillColor = if (canSubmit) theme.primary else theme.backgroundPanel,
+                        borderColor = if (canSubmit) theme.primary else theme.border,
                         size = controlSize,
+                        enabled = canSubmit,
                         onClick = {
-                            if (!canSubmit) return@ComposerSquareButton
                             onSend()
                             clearInput()
                             focusRequester.requestFocus()
@@ -430,12 +429,8 @@ fun ChatInputBar(
 /**
  * Flat, perfectly-square composer control (attach / send / abort).
  *
- * Deliberately NOT a Material3 [IconButton]: that component forces a 48dp
- * `minimumInteractiveComponentSize` and its own internal state layer, which
- * overrides an explicit `.size(...)` and leaves the border floating inside a
- * taller slot. A plain clickable [Box] lays out at exactly [size] so the
- * attach button, the text field and the send button share one height and the
- * borders are true squares.
+ * The outer box owns the minimum touch target and semantics. The bordered
+ * inner box stays at [size], preserving the compact TUI visual.
  */
 @Composable
 @Suppress("LongParameterList", "FunctionNaming")
@@ -445,6 +440,7 @@ private fun ComposerSquareButton(
     fillColor: Color,
     borderColor: Color,
     size: Dp,
+    enabled: Boolean = true,
     onClick: () -> Unit,
     contentDescription: String,
     testTag: String,
@@ -452,23 +448,29 @@ private fun ComposerSquareButton(
 ) {
     Box(
         modifier = Modifier
-            .size(size)
-            .background(fillColor, RectangleShape)
-            .border(Sizing.strokeMd, borderColor, RectangleShape)
-            .clickable(role = Role.Button, onClick = onClick)
+            .size(Sizing.minTouchTarget)
+            .clickable(enabled = enabled, role = Role.Button, onClick = onClick)
             .semantics { this.contentDescription = contentDescription }
             .testTag(testTag),
         contentAlignment = Alignment.Center
     ) {
-        if (loading) {
-            TuiLoadingIndicator()
-        } else {
-            Text(
-                text = glyph,
-                color = glyphColor,
-                fontFamily = FontFamily.Monospace,
-                style = MaterialTheme.typography.titleMedium
-            )
+        Box(
+            modifier = Modifier
+                .size(size)
+                .background(fillColor, RectangleShape)
+                .border(Sizing.strokeMd, borderColor, RectangleShape),
+            contentAlignment = Alignment.Center,
+        ) {
+            if (loading) {
+                TuiLoadingIndicator()
+            } else {
+                Text(
+                    text = glyph,
+                    color = glyphColor,
+                    fontFamily = FontFamily.Monospace,
+                    style = MaterialTheme.typography.titleMedium
+                )
+            }
         }
     }
 }

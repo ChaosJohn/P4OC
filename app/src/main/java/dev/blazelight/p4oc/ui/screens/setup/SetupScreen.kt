@@ -27,6 +27,8 @@ import androidx.compose.ui.graphics.SolidColor
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.semantics.Role
+import androidx.compose.ui.semantics.contentDescription
+import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.text.TextStyle
 import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.font.FontWeight
@@ -40,15 +42,18 @@ import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import dev.blazelight.p4oc.R
 import dev.blazelight.p4oc.core.network.DiscoveredServer
 import dev.blazelight.p4oc.core.network.DiscoveryState
+import dev.blazelight.p4oc.core.network.ServerUrl
 import dev.blazelight.p4oc.ui.components.TuiSwitch
 import dev.blazelight.p4oc.ui.screens.server.ServerUiState
 import dev.blazelight.p4oc.ui.screens.server.ServerViewModel
+import dev.blazelight.p4oc.ui.screens.server.serverCleartextCredentialWarning
 import dev.blazelight.p4oc.ui.screens.server.serverSetupHelpContent
 import dev.blazelight.p4oc.ui.screens.server.serverSetupHelpToggle
 import dev.blazelight.p4oc.ui.theme.LocalOpenCodeTheme
 import dev.blazelight.p4oc.ui.theme.Sizing
 import dev.blazelight.p4oc.ui.theme.Spacing
 import dev.blazelight.p4oc.ui.theme.TuiCodeFontSize
+import dev.blazelight.p4oc.ui.theme.opencode.OpenCodeTheme
 import org.koin.androidx.compose.koinViewModel
 
 private const val SCAN_PULSE_MIN_ALPHA = 0.35f
@@ -61,6 +66,7 @@ private const val SCAN_PULSE_DURATION_MS = 700
  * [onConnected] once a connection succeeds.
  */
 @Composable
+@Suppress("FunctionNaming")
 fun SetupScreen(
     onConnected: () -> Unit
 ) {
@@ -95,20 +101,49 @@ fun SetupScreen(
                     .fillMaxWidth()
                     .verticalScroll(rememberScrollState())
                     .padding(horizontal = Spacing.xl),
-                verticalArrangement = Arrangement.Center,
+                verticalArrangement = Arrangement.spacedBy(Spacing.lg),
             ) {
+                // Top-aligned hero so expanding the help below never pushes it off screen.
+                Spacer(Modifier.height(Spacing.lg))
                 setupHero()
-                Spacer(Modifier.height(Spacing.xl + Spacing.sm))
+                Spacer(Modifier.height(Spacing.lg))
                 serverUrlField(uiState.remoteUrl, viewModel::setRemoteUrl)
-                Spacer(Modifier.height(Spacing.lg))
                 credentialsPanel(uiState, viewModel)
-                Spacer(Modifier.height(Spacing.lg))
+                serverCleartextCredentialWarning(
+                    url = uiState.remoteUrl,
+                    username = uiState.username,
+                    password = uiState.password,
+                )
                 connectButton(uiState, viewModel::connectToRemote)
                 setupError(uiState.error)
-                Spacer(Modifier.height(Spacing.xl))
                 discoverySection(uiState, viewModel)
+                setupHelpSection()
+                Spacer(Modifier.height(Spacing.lg))
             }
-            setupFooter()
+        }
+    }
+}
+
+/**
+ * "Server Setup" help inline in the same scrollable column as the connect form. Expanding it
+ * reveals the shared three-step guide and Tip inside one vertical scroll, so the full text stays
+ * reachable without a nested scroll region or a fixed-height footer that could collapse CONNECT.
+ */
+@Composable
+private fun setupHelpSection() {
+    val theme = LocalOpenCodeTheme.current
+    var expanded by rememberSaveable { mutableStateOf(false) }
+    Column(verticalArrangement = Arrangement.spacedBy(Spacing.md)) {
+        serverSetupHelpToggle(expanded = expanded, testTag = "setup_server_help_toggle") {
+            expanded = !expanded
+        }
+        if (expanded) {
+            serverSetupHelpContent(
+                Modifier
+                    .background(theme.backgroundElement, RectangleShape)
+                    .border(Sizing.strokeMd, theme.backgroundPanel, RectangleShape)
+                    .padding(Spacing.md),
+            )
         }
     }
 }
@@ -147,11 +182,9 @@ private fun setupHero() {
 @Composable
 private fun serverUrlField(value: String, onValueChange: (String) -> Unit) {
     val theme = LocalOpenCodeTheme.current
-    Text(
-        text = stringResource(R.string.setup_server_url_label),
-        fontFamily = FontFamily.Monospace,
-        fontSize = TuiCodeFontSize.md,
-        color = theme.textMuted,
+    fieldLabel(
+        stringResource(R.string.setup_server_url_label),
+        stringResource(R.string.setup_field_required),
     )
     Spacer(Modifier.height(Spacing.sm))
     setupInputBox(
@@ -161,6 +194,7 @@ private fun serverUrlField(value: String, onValueChange: (String) -> Unit) {
             placeholder = stringResource(R.string.field_server_url_placeholder),
             keyboardType = KeyboardType.Uri,
             testTag = "setup_url_input",
+            contentDescription = stringResource(R.string.cd_server_url_field),
         ),
         leading = {
             Text(
@@ -176,7 +210,7 @@ private fun serverUrlField(value: String, onValueChange: (String) -> Unit) {
 @Composable
 private fun credentialsPanel(uiState: ServerUiState, viewModel: ServerViewModel) {
     val theme = LocalOpenCodeTheme.current
-    // Credentials are required to reach an OpenCode server, so the panel starts open.
+    // Keep optional credentials visible so authenticated servers remain quick to configure.
     var expanded by rememberSaveable { mutableStateOf(true) }
     Column {
         Row(
@@ -206,8 +240,18 @@ private fun credentialsPanel(uiState: ServerUiState, viewModel: ServerViewModel)
             )
             if (!expanded) {
                 Text(
-                    text = stringResource(R.string.setup_credentials_hint),
-                    color = theme.border,
+                    text = if (uiState.password.isBlank()) {
+                        stringResource(
+                            R.string.setup_credentials_hint_no_password,
+                            uiState.username.ifBlank { ServerUrl.DEFAULT_USERNAME },
+                        )
+                    } else {
+                        stringResource(
+                            R.string.setup_credentials_hint,
+                            uiState.username.ifBlank { ServerUrl.DEFAULT_USERNAME },
+                        )
+                    },
+                    color = theme.textMuted,
                     fontFamily = FontFamily.Monospace,
                     fontSize = TuiCodeFontSize.sm,
                 )
@@ -220,60 +264,116 @@ private fun credentialsPanel(uiState: ServerUiState, viewModel: ServerViewModel)
 }
 
 @Composable
-private fun credentialsFields(uiState: ServerUiState, viewModel: ServerViewModel) {
+private fun credentialsFields(
+    uiState: ServerUiState,
+    viewModel: ServerViewModel,
+) {
     val theme = LocalOpenCodeTheme.current
     var passwordVisible by remember { mutableStateOf(false) }
-    Column(Modifier.padding(top = Spacing.lg)) {
-        fieldLabel(stringResource(R.string.setup_username_label))
-        Spacer(Modifier.height(Spacing.sm))
-        setupInputBox(
+    Column(
+        modifier = Modifier.padding(top = Spacing.lg),
+    ) {
+        usernameField(
             value = uiState.username,
             onValueChange = viewModel::setUsername,
-            options = SetupFieldOptions(
-                height = Sizing.textFieldHeightSm,
-                testTag = "setup_username_input",
-            ),
         )
-        Spacer(Modifier.height(Spacing.lg))
-
-        fieldLabel(stringResource(R.string.setup_password_label))
-        Spacer(Modifier.height(Spacing.sm))
-        setupInputBox(
+        Spacer(
+            modifier = Modifier.height(Spacing.lg),
+        )
+        passwordField(
             value = uiState.password,
+            visible = passwordVisible,
+            onToggleVisibility = { passwordVisible = !passwordVisible },
             onValueChange = viewModel::setPassword,
-            options = SetupFieldOptions(
-                height = Sizing.textFieldHeightSm,
-                keyboardType = KeyboardType.Password,
-                visualTransformation = if (passwordVisible) {
-                    VisualTransformation.None
-                } else {
-                    PasswordVisualTransformation()
-                },
-                testTag = "setup_password_input",
-            ),
-            trailing = {
-                Text(
-                    text = if (passwordVisible) {
-                        stringResource(R.string.setup_password_hide)
-                    } else {
-                        stringResource(R.string.setup_password_show)
-                    },
-                    color = theme.secondary,
-                    fontFamily = FontFamily.Monospace,
-                    fontSize = TuiCodeFontSize.lg,
-                    modifier = Modifier
-                        .clickable(role = Role.Button) { passwordVisible = !passwordVisible }
-                        .testTag("setup_password_visibility"),
-                )
-            },
+            theme = theme,
         )
         if (uiState.showTlsOptions) {
-            Spacer(Modifier.height(Spacing.xl))
-            credentialsTlsSection(uiState.allowInsecure, viewModel::setAllowInsecure)
+            Spacer(
+                modifier = Modifier.height(Spacing.xl),
+            )
+            credentialsTlsSection(
+                allowInsecure = uiState.allowInsecure,
+                onAllowInsecureChange = viewModel::setAllowInsecure,
+            )
         } else {
-            Spacer(Modifier.height(Spacing.lg))
+            Spacer(
+                modifier = Modifier.height(Spacing.lg),
+            )
         }
     }
+}
+
+@Composable
+private fun usernameField(
+    value: String,
+    onValueChange: (String) -> Unit,
+) {
+    fieldLabel(
+        stringResource(R.string.setup_username_label),
+        stringResource(R.string.setup_field_default_opencode),
+    )
+    Spacer(
+        modifier = Modifier.height(Spacing.sm),
+    )
+    setupInputBox(
+        value = value,
+        onValueChange = onValueChange,
+        options = SetupFieldOptions(
+            height = Sizing.textFieldHeightSm,
+            testTag = "setup_username_input",
+            contentDescription = stringResource(R.string.cd_username_field),
+        ),
+    )
+}
+
+@Composable
+private fun passwordField(
+    value: String,
+    visible: Boolean,
+    onToggleVisibility: () -> Unit,
+    onValueChange: (String) -> Unit,
+    theme: OpenCodeTheme,
+) {
+    fieldLabel(
+        stringResource(R.string.setup_password_label),
+        stringResource(R.string.setup_field_optional),
+    )
+    Spacer(
+        modifier = Modifier.height(Spacing.sm),
+    )
+    setupInputBox(
+        value = value,
+        onValueChange = onValueChange,
+        options = SetupFieldOptions(
+            height = Sizing.textFieldHeightSm,
+            keyboardType = KeyboardType.Password,
+            visualTransformation = if (visible) {
+                VisualTransformation.None
+            } else {
+                PasswordVisualTransformation()
+            },
+            testTag = "setup_password_input",
+            contentDescription = stringResource(R.string.cd_password_field),
+        ),
+        trailing = {
+            Text(
+                text = if (visible) {
+                    stringResource(R.string.setup_password_hide)
+                } else {
+                    stringResource(R.string.setup_password_show)
+                },
+                color = theme.secondary,
+                fontFamily = FontFamily.Monospace,
+                fontSize = TuiCodeFontSize.lg,
+                modifier = Modifier
+                    .clickable(
+                        role = Role.Button,
+                        onClick = onToggleVisibility,
+                    )
+                    .testTag("setup_password_visibility"),
+            )
+        },
+    )
 }
 
 @Composable
@@ -333,7 +433,7 @@ private fun credentialsTlsSection(allowInsecure: Boolean, onAllowInsecureChange:
 }
 
 @Composable
-private fun fieldLabel(label: String) {
+private fun fieldLabel(label: String, qualifier: String) {
     val theme = LocalOpenCodeTheme.current
     Row(horizontalArrangement = Arrangement.spacedBy(Spacing.xs)) {
         Text(
@@ -343,7 +443,7 @@ private fun fieldLabel(label: String) {
             color = theme.textMuted,
         )
         Text(
-            text = stringResource(R.string.setup_field_required),
+            text = qualifier,
             fontFamily = FontFamily.Monospace,
             fontSize = TuiCodeFontSize.md,
             color = theme.textMuted,
@@ -494,40 +594,13 @@ private fun discoveredRow(
     }
 }
 
-/**
- * Bottom-anchored "Server Setup" help. The toggle row stays pinned and the shared
- * [serverSetupHelpContent] expands upward above it, so the first-run screen shows the
- * same steps and networking tip as the connect-to-server screen.
- */
-@Composable
-private fun setupFooter() {
-    val theme = LocalOpenCodeTheme.current
-    var expanded by rememberSaveable { mutableStateOf(false) }
-    Column(modifier = Modifier.padding(horizontal = Spacing.xl, vertical = Spacing.lg)) {
-        AnimatedVisibility(expanded) {
-            serverSetupHelpContent(
-                Modifier
-                    .padding(bottom = Spacing.md)
-                    .background(theme.backgroundElement, RectangleShape)
-                    .border(Sizing.strokeMd, theme.backgroundPanel, RectangleShape)
-                    .verticalScroll(rememberScrollState())
-                    .heightIn(max = Sizing.embeddedScrollMaxHeight)
-                    .padding(Spacing.md),
-            )
-        }
-        serverSetupHelpToggle(
-            expanded = expanded,
-            testTag = "setup_server_help_toggle",
-        ) { expanded = !expanded }
-    }
-}
-
 private data class SetupFieldOptions(
     val placeholder: String = "",
     val height: Dp = Sizing.buttonHeightLg,
     val keyboardType: KeyboardType = KeyboardType.Text,
     val visualTransformation: VisualTransformation = VisualTransformation.None,
     val testTag: String = "",
+    val contentDescription: String = "",
 )
 
 @Composable
@@ -547,6 +620,13 @@ private fun setupInputBox(
             .height(options.height)
             .background(theme.backgroundPanel, RectangleShape)
             .border(Sizing.strokeMd, theme.borderSubtle, RectangleShape)
+            .then(
+                if (options.contentDescription.isNotEmpty()) {
+                    Modifier.semantics { contentDescription = options.contentDescription }
+                } else {
+                    Modifier
+                },
+            )
             .then(if (options.testTag.isNotEmpty()) Modifier.testTag(options.testTag) else Modifier),
         textStyle = TextStyle(
             color = theme.text,

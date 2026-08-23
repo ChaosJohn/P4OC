@@ -398,8 +398,8 @@ class ServerViewModel constructor(
     }
 
     fun connectToDiscoveredServer(server: DiscoveredServer) {
-        // Reuse a stored password when we already know this endpoint; otherwise the form fills in
-        // and connectToRemote stops with "enter the server password" rather than a 401 round-trip.
+        // Reuse a stored password when we already know this endpoint. A missing password is valid:
+        // passwordless OpenCode servers must still be allowed to attempt the connection.
         val savedPassword = credentialStore.getServerPassword(server.url).orEmpty()
         _uiState.update {
             it.copy(
@@ -429,13 +429,13 @@ class ServerViewModel constructor(
 }
 
 /**
- * Why the connect form cannot be submitted yet, or `null` when it is complete. OpenCode serves
- * behind basic auth, so a username and password are as required as the URL itself.
+ * Why the connect form cannot be submitted yet, or `null` when it is complete. Authentication is
+ * optional. The username defaults to OpenCode's conventional value, and is only required when a
+ * password is supplied.
  */
 internal fun ServerUiState.connectFormError(): String? = when {
     remoteUrl.isBlank() -> "Enter a server URL"
-    username.isBlank() -> "Enter a username (usually opencode)"
-    password.isBlank() -> "Enter the server password"
+    password.isNotBlank() && username.isBlank() -> "Enter a username (usually opencode)"
     else -> null
 }
 

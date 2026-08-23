@@ -28,11 +28,13 @@ class ConnectFormValidationTest {
     }
 
     @Test
-    fun `username and password are both required`() {
+    fun `passwordless connections are accepted and password requires a username`() {
         val base = ServerUiState(remoteUrl = "http://box.local:4096")
 
+        assertNull(base.connectFormError())
+        assertNull(base.copy(username = "", password = "").connectFormError())
         assertEquals("Enter a username (usually opencode)", base.copy(username = "", password = "p").connectFormError())
-        assertEquals("Enter the server password", base.copy(username = "opencode", password = "").connectFormError())
+        assertNull(base.copy(username = "opencode", password = "").connectFormError())
     }
 
     @Test

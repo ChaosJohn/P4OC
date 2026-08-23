@@ -17,11 +17,9 @@ import dev.blazelight.p4oc.core.datastore.SettingsDataStore
 import dev.blazelight.p4oc.core.notification.NotificationRoute
 import dev.blazelight.p4oc.core.notification.NotificationRouteCodec
 import dev.blazelight.p4oc.ui.navigation.NavGraph
-import dev.blazelight.p4oc.ui.navigation.Screen
 import dev.blazelight.p4oc.ui.theme.LocalOpenCodeTheme
 import dev.blazelight.p4oc.ui.theme.PocketCodeTheme
 import kotlinx.coroutines.flow.MutableStateFlow
-import kotlinx.coroutines.flow.first
 import org.koin.android.ext.android.inject
 
 class MainActivity : ComponentActivity() {
@@ -56,16 +54,15 @@ class MainActivity : ComponentActivity() {
                     color = LocalOpenCodeTheme.current.background
                 ) {
                     // First launch (onboarding not completed) shows the first-run Setup
-                    // screen; returning users land on the Server connect screen. Resolved
-                    // from persisted state before the NavGraph composes, so the start
-                    // destination is stable for the navigation back stack.
+                    // screen; returning users with any saved server land on the Server connect
+                    // screen even offline. Resolved from persisted state before the NavGraph
+                    // composes, so the start destination is stable for the navigation back stack.
                     val startDestination by produceState<String?>(initialValue = null) {
-                        value = if (settingsDataStore.onboardingCompleted.first()) {
-                            Screen.Server.route
-                        } else {
-                            Screen.Setup.route
+                        try {
+                            value = loadLaunchDestination(settingsDataStore)
+                        } finally {
+                            startDestinationResolved = true
                         }
-                        startDestinationResolved = true
                     }
                     startDestination?.let { destination ->
                         // Use NavGraph for initial Server/Setup screens,

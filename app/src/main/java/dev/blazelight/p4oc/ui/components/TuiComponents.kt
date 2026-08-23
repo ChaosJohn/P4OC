@@ -5,6 +5,7 @@ import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.interaction.MutableInteractionSource
 import androidx.compose.foundation.layout.*
+import androidx.compose.foundation.selection.selectable
 import androidx.compose.foundation.selection.toggleable
 import androidx.compose.foundation.text.KeyboardActions
 import androidx.compose.foundation.text.KeyboardOptions
@@ -529,21 +530,29 @@ fun TuiSection(
  * back control (TuiTopBar, dialogs, sub-views) routes through this.
  */
 @Composable
+@Suppress("FunctionNaming")
 fun TuiBackButton(
     onClick: () -> Unit,
     modifier: Modifier = Modifier,
     description: String = stringResource(R.string.cd_back),
 ) {
     val theme = LocalOpenCodeTheme.current
-    Text(
-        "←",
-        style = MaterialTheme.typography.titleMedium,
-        color = theme.text,
+    Box(
         modifier = modifier
+            .sizeIn(
+                minWidth = Sizing.minTouchTarget,
+                minHeight = Sizing.minTouchTarget,
+            )
             .clickable(role = Role.Button, onClick = onClick)
-            .semantics { contentDescription = description }
-            .padding(Spacing.xs),
-    )
+            .semantics { contentDescription = description },
+        contentAlignment = Alignment.Center,
+    ) {
+        Text(
+            text = "←",
+            style = MaterialTheme.typography.titleMedium,
+            color = theme.text,
+        )
+    }
 }
 
 /**
@@ -551,6 +560,7 @@ fun TuiBackButton(
  * panel-background bar (matches SERVERS·PROJECTS / RECENT / EVENT TYPES labels).
  */
 @Composable
+@Suppress("FunctionNaming")
 fun TuiSectionHeader(
     text: String,
     modifier: Modifier = Modifier,
@@ -583,6 +593,7 @@ fun TuiSectionHeader(
  * Matches the mode / tool-display / effort selectors.
  */
 @Composable
+@Suppress("FunctionNaming")
 fun TuiSegmentedControl(
     options: List<Pair<String, String>>,
     selectedId: String,
@@ -611,7 +622,12 @@ fun TuiSegmentedControl(
                     .weight(1f)
                     .fillMaxHeight()
                     .background(if (active) theme.backgroundElement else Color.Transparent)
-                    .clickable(role = Role.RadioButton) { onSelect(id) },
+                    // The whole highlighted cell is the target — no inset hit box to miss.
+                    .selectable(
+                        selected = active,
+                        role = Role.RadioButton,
+                        onClick = { onSelect(id) },
+                    ),
                 contentAlignment = Alignment.Center,
             ) {
                 Text(
@@ -969,15 +985,8 @@ fun TuiSnackbar(
 // =============================================================================
 
 /**
- * TUI-style two-cell segmented toggle switch.
- *
- * Renders as two adjacent rectangular cells — OFF (left) and ON (right).
- * The active cell is filled with accent color and inverted text;
- * the inactive cell is hollow with muted text. Fixed width in both states.
- *
- * ┌──────┬──────┐      ┌──────┬──────┐
- * │▓ OFF ▓│  ON  │  vs  │  OFF │▓ ON ▓│
- * └──────┴──────┘      └──────┴──────┘
+ * Compact TUI knob switch. The 36x20dp visual track is centered inside the
+ * platform-minimum 48x48dp toggleable target.
  */
 @Composable
 fun TuiSwitch(
@@ -996,31 +1005,40 @@ fun TuiSwitch(
 
     Box(
         modifier = modifier
-            .width(Sizing.switchTrackWidth)
-            .height(Sizing.switchTrackHeight)
-            .background(trackBg, RectangleShape)
-            .border(Sizing.strokeMd, trackBorder, RectangleShape)
+            .sizeIn(
+                minWidth = Sizing.minTouchTarget,
+                minHeight = Sizing.minTouchTarget,
+            )
             .then(
-                if (onCheckedChange != null && enabled) {
+                if (onCheckedChange != null) {
                     Modifier.toggleable(
                         value = checked,
+                        enabled = enabled,
                         interactionSource = remember { MutableInteractionSource() },
                         indication = null,
                         role = Role.Switch,
-                        onValueChange = onCheckedChange
+                        onValueChange = onCheckedChange,
                     )
                 } else {
                     Modifier
                 }
-            )
-            .padding(Sizing.switchKnobInset),
-        contentAlignment = if (checked) Alignment.CenterEnd else Alignment.CenterStart
+            ),
+        contentAlignment = Alignment.Center,
     ) {
         Box(
             modifier = Modifier
-                .size(Sizing.switchKnobSize)
-                .background(knobColor, RectangleShape)
-        )
+                .size(Sizing.switchTrackWidth, Sizing.switchTrackHeight)
+                .background(trackBg, RectangleShape)
+                .border(Sizing.strokeMd, trackBorder, RectangleShape)
+                .padding(Sizing.switchKnobInset),
+            contentAlignment = if (checked) Alignment.CenterEnd else Alignment.CenterStart,
+        ) {
+            Box(
+                modifier = Modifier
+                    .size(Sizing.switchKnobSize)
+                    .background(knobColor, RectangleShape),
+            )
+        }
     }
 }
 

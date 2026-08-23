@@ -26,6 +26,7 @@ import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.statusBars
 import androidx.compose.foundation.layout.statusBarsPadding
 import androidx.compose.foundation.layout.width
+import androidx.compose.foundation.layout.widthIn
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.LazyListScope
 import androidx.compose.foundation.lazy.items
@@ -102,6 +103,9 @@ import dev.blazelight.p4oc.domain.server.ServerRef
 import dev.blazelight.p4oc.domain.server.WorkspaceKey
 import dev.blazelight.p4oc.domain.session.SessionId
 import dev.blazelight.p4oc.domain.workspace.Workspace
+import dev.blazelight.p4oc.ui.components.status.connectionStatusColor
+import dev.blazelight.p4oc.ui.components.status.connectionStatusDescription
+import dev.blazelight.p4oc.ui.components.status.connectionStatusLabel
 import dev.blazelight.p4oc.ui.navigation.Screen
 import dev.blazelight.p4oc.ui.screens.home.HomeActions
 import dev.blazelight.p4oc.ui.screens.home.HomeSummaryBuilder
@@ -139,8 +143,8 @@ private class StartWorkUiState {
     var restoreError: String? by mutableStateOf(null)
     var startWorkContext: StartWorkContext? by mutableStateOf(null)
     var showStartWorkSheet: Boolean by mutableStateOf(false)
-    var showFilesTabPrompt: Boolean by mutableStateOf(false)
     var showStartWorkPicker: Boolean by mutableStateOf(false)
+    var pickerAction: StartWorkAction? by mutableStateOf(null)
     var homeDetailSelection: StartWorkSelection by mutableStateOf(StartWorkSelection.NeedsSelection)
     var pendingStartWork: Pair<StartWorkTarget, StartWorkAction>? by mutableStateOf(null)
     var pickerSearchQuery: String by mutableStateOf("")
@@ -232,6 +236,7 @@ private fun startWorkServerHeader(
     val resources = LocalResources.current
     val server = row.group.server
     val workspaceCount = row.matchCount
+    val statusDescription = connectionStatusDescription(connectionState)
     Row(
         modifier = Modifier
             .fillMaxWidth()
@@ -244,7 +249,7 @@ private fun startWorkServerHeader(
                     R.string.start_work_server_workspaces,
                     server.displayName,
                     workspaceCount,
-                )
+                ) + ", $statusDescription"
                 selected = row.expanded
             }
             .testTag("start_work_server_${server.endpointKey}"),
@@ -1100,8 +1105,7 @@ private fun mainTabScaffold(
                 onAddClick = {
                     if (params.deps.tabManager.activeTab?.isPinnedHome == true) {
                         params.uiState.startWorkContext = startWorkContextFor(params.deps.tabManager.activeTab)
-                            .copy(defaultAction = StartWorkAction.NewChat)
-                        params.uiState.showStartWorkPicker = true
+                        openStartWorkPicker(params.uiState, StartWorkAction.NewChat)
                     } else {
                         params.uiState.startWorkContext = startWorkContextFor(params.deps.tabManager.activeTab)
                         params.uiState.showStartWorkSheet = true
@@ -1177,7 +1181,9 @@ private fun mainTabHomeContent(
             onBrowseSessions = { target ->
                 requestScopedAction(params, target, StartWorkAction.BrowseSessions)
             },
-            onBrowseAllSessions = { params.uiState.showFilesTabPrompt = true },
+            onBrowseAllSessions = {
+                openStartWorkPicker(params.uiState, StartWorkAction.BrowseSessions)
+            },
             onManageServers = params.onDisconnect,
             onRefresh = params.onRefreshHome,
             onSettings = params.onSettings,
@@ -1204,7 +1210,9 @@ private fun mainTabHomeContent(
             onOpenTerminal = { target ->
                 requestScopedAction(params, target, StartWorkAction.Terminal)
             },
-            onChooseTarget = { params.uiState.showFilesTabPrompt = true },
+            onChooseTarget = {
+                openStartWorkPicker(params.uiState)
+            },
             onWorkspaceDetailChanged = { params.uiState.homeDetailSelection = it },
         ),
         modifier = Modifier.fillMaxSize(),
@@ -1235,7 +1243,7 @@ private fun mainTabTabNavHostContent(
             if (sr != null && wk != null) {
                 requestScopedAction(params, StartWorkTarget(sr, wk), StartWorkAction.Files)
             } else {
-                params.uiState.showStartWorkPicker = true
+                openStartWorkPicker(params.uiState, StartWorkAction.Files)
             }
         },
         onNewTerminalTab = {
@@ -1244,7 +1252,7 @@ private fun mainTabTabNavHostContent(
             if (sr != null && wk != null) {
                 requestScopedAction(params, StartWorkTarget(sr, wk), StartWorkAction.Terminal)
             } else {
-                params.uiState.showStartWorkPicker = true
+                openStartWorkPicker(params.uiState, StartWorkAction.Terminal)
             }
         },
         isActiveTab = isActive,
@@ -1301,8 +1309,13 @@ private fun requestScopedAction(
                 params.connectSavedServer(target.serverRef.endpointKey)
             }
         }
-        StartWorkAction.ChooseAnotherTarget -> uiState.showStartWorkPicker = true
+        StartWorkAction.ChooseAnotherTarget -> openStartWorkPicker(uiState)
     }
+}
+
+private fun openStartWorkPicker(uiState: StartWorkUiState, action: StartWorkAction? = null) {
+    uiState.pickerAction = action
+    uiState.showStartWorkPicker = true
 }
 
 private val startWorkSheets: @Composable (MainTabContentParams) -> Unit = { params ->
@@ -1310,7 +1323,7 @@ private val startWorkSheets: @Composable (MainTabContentParams) -> Unit = { para
     if (uiState.showStartWorkSheet) {
         startWorkSheet(params)
     }
-    if (uiState.showStartWorkPicker || uiState.showFilesTabPrompt) {
+    if (uiState.showStartWorkPicker) {
         startWorkPickerSheet(params)
     }
 }
@@ -1359,7 +1372,7 @@ private fun startWorkSheetContent(
         )
         if (target == null) {
             Text(stringResource(R.string.start_work_choose_context), color = theme.textMuted)
-            LaunchedEffect(Unit) { params.uiState.showStartWorkPicker = true }
+            LaunchedEffect(Unit) { openStartWorkPicker(params.uiState) }
         } else {
             startWorkSheetTargetCard(params, target)
             startWorkSectionHeader(stringResource(R.string.start_work_section_new))
@@ -1430,21 +1443,27 @@ private fun startWorkSheetTargetCard(
                 )
                 Spacer(Modifier.width(Spacing.sm))
                 Text(
-                    "· ${connectionStatusText(connectionState)}",
+                    "· ${connectionStatusLabel(connectionState)}",
                     color = theme.textMuted,
                     style = MaterialTheme.typography.bodySmall,
                     modifier = Modifier.weight(1f),
                     maxLines = 1,
                     overflow = TextOverflow.Ellipsis,
                 )
-                Text(
-                    text = stringResource(R.string.start_work_change).lowercase(),
-                    color = theme.accent,
-                    style = MaterialTheme.typography.bodySmall,
+                Box(
                     modifier = Modifier
-                        .clickable(role = Role.Button) { params.uiState.showStartWorkPicker = true }
-                        .padding(Spacing.xxs),
-                )
+                        .widthIn(min = Sizing.minTouchTarget)
+                        .heightIn(min = Sizing.minTouchTarget)
+                        .clickable(role = Role.Button) { openStartWorkPicker(params.uiState) }
+                        .padding(horizontal = Spacing.xs),
+                    contentAlignment = Alignment.Center,
+                ) {
+                    Text(
+                        text = stringResource(R.string.start_work_change).lowercase(),
+                        color = theme.accent,
+                        style = MaterialTheme.typography.bodySmall,
+                    )
+                }
             }
             Text(
                 text = workspaceName,
@@ -1456,25 +1475,6 @@ private fun startWorkSheetTargetCard(
                 style = MaterialTheme.typography.titleSmall,
             )
         }
-    }
-}
-
-private val connectionStatusColor: @Composable (ConnectionState?) -> Color = { state ->
-    val theme = LocalOpenCodeTheme.current
-    when (state) {
-        is ConnectionState.Connected -> theme.success
-        is ConnectionState.Connecting -> theme.warning
-        is ConnectionState.Error -> theme.error
-        else -> theme.textMuted
-    }
-}
-
-private val connectionStatusText: @Composable (ConnectionState?) -> String = { state ->
-    when (state) {
-        is ConnectionState.Connected -> stringResource(R.string.server_status_connected)
-        is ConnectionState.Connecting -> stringResource(R.string.server_status_connecting)
-        is ConnectionState.Error -> stringResource(R.string.server_status_error)
-        else -> stringResource(R.string.server_status_offline)
     }
 }
 
@@ -1523,7 +1523,7 @@ private fun startWorkPickerSheet(params: MainTabContentParams) {
     ModalBottomSheet(
         onDismissRequest = {
             uiState.showStartWorkPicker = false
-            uiState.showFilesTabPrompt = false
+            uiState.pickerAction = null
         },
         // Opening fully expanded gives the workspace list a bounded height to scroll inside;
         // a partially-expanded sheet clips the tail of a long server instead.
@@ -1552,7 +1552,7 @@ private fun startWorkPickerContent(
     }
     val viewState = StartWorkPickerViewState(
         query = uiState.pickerSearchQuery,
-        expandedOverrides = uiState.pickerExpandedServers,
+        expandedOverrides = uiState.pickerExpandedServers.toMap(),
         showAllEndpointKeys = uiState.pickerShowAllServers.filterValues { it }.keys,
         defaultExpandedEndpointKey = uiState.startWorkContext?.selectedTarget?.serverRef?.endpointKey
             ?: groups.firstOrNull()?.server?.endpointKey,
@@ -1597,20 +1597,35 @@ internal val createPtyRequestForWorkspace: (WorkspaceKey) -> CreatePtyRequest = 
 
 private val selectStartWorkPickerTarget: (MainTabContentParams, StartWorkTarget) -> Unit =
     { params, pickedTarget ->
-        params.uiState.startWorkContext = StartWorkContext(
-            StartWorkSource.OtherTab,
-            StartWorkSelection.Selected(pickedTarget),
-            params.uiState.startWorkContext?.defaultAction,
-        )
+        val selection = resolveStartWorkPickerSelection(pickedTarget, params.uiState.pickerAction)
+        params.uiState.startWorkContext = selection.context
         params.uiState.homeDetailSelection = StartWorkSelection.Selected(pickedTarget)
         params.uiState.showStartWorkPicker = false
-        params.uiState.showFilesTabPrompt = false
-        if (params.uiState.startWorkContext?.defaultAction == StartWorkAction.NewChat) {
-            requestScopedAction(params, pickedTarget, StartWorkAction.NewChat)
+        params.uiState.pickerAction = null
+        if (selection.action != null) {
+            requestScopedAction(params, pickedTarget, selection.action)
         } else {
             params.uiState.showStartWorkSheet = true
         }
     }
+
+internal data class StartWorkPickerSelection(
+    val context: StartWorkContext,
+    val action: StartWorkAction?,
+)
+
+/** Resolves only the intent attached to this picker opening; no prior context action is retained. */
+internal fun resolveStartWorkPickerSelection(
+    target: StartWorkTarget,
+    invocationAction: StartWorkAction?,
+): StartWorkPickerSelection = StartWorkPickerSelection(
+    context = StartWorkContext(
+        source = StartWorkSource.OtherTab,
+        selection = StartWorkSelection.Selected(target),
+        defaultAction = null,
+    ),
+    action = invocationAction,
+)
 
 private val terminalTitle: (WorkspaceKey) -> String? = { workspaceKey ->
     when (workspaceKey) {

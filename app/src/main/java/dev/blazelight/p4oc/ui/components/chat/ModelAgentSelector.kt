@@ -37,6 +37,13 @@ import dev.blazelight.p4oc.ui.theme.SemanticColors
 import dev.blazelight.p4oc.ui.theme.Sizing
 import dev.blazelight.p4oc.ui.theme.Spacing
 
+private const val MODEL_PICKER_HEIGHT_FRACTION = 0.7f
+private const val PERCENT_SCALE = 100
+private const val CONTEXT_METER_CELLS = 4
+private const val CONTEXT_METER_CEILING_OFFSET = PERCENT_SCALE - 1
+private const val CONTEXT_WARNING_PERCENT = 60
+private const val CONTEXT_ERROR_PERCENT = 90
+
 @Composable
 private fun getAgentColor(agent: AgentDto?): Color {
     if (agent == null) return SemanticColors.AgentSelector.build
@@ -59,10 +66,26 @@ data class EnhancedModelInfo(
     val contextWindow: Int?,
     val hasReasoning: Boolean,
     val hasTools: Boolean,
-    val reasoningEfforts: List<String> = emptyList(),
     val isFavorite: Boolean = false,
     val isRecent: Boolean = false
 )
+
+data class ModelPickerData(
+    val availableModels: List<Pair<String, ModelDto>>,
+    val selectedModel: ModelInput?,
+    val favoriteModels: Set<ModelInput>,
+    val recentModels: List<ModelInput>,
+    val providerNames: Map<String, String> = emptyMap(),
+)
+
+private data class ModelPickerGroups(
+    val providers: List<Pair<String, String>>,
+    val favorites: List<EnhancedModelInfo>,
+    val recents: List<EnhancedModelInfo>,
+    val others: List<EnhancedModelInfo>,
+) {
+    val count: Int = favorites.size + recents.size + others.size
+}
 
 @Composable
 @Suppress("CyclomaticComplexMethod", "LongParameterList", "LongMethod", "FunctionNaming")
@@ -79,6 +102,7 @@ fun ModelAgentSelectorBar(
     recentModels: List<ModelInput> = emptyList(),
     onToggleFavorite: (ModelInput) -> Unit = {},
     usedContextTokens: Int? = null,
+    contextUsageModel: ModelInput? = null,
     providerNames: Map<String, String> = emptyMap(),
     modifier: Modifier = Modifier
 ) {
@@ -102,6 +126,13 @@ fun ModelAgentSelectorBar(
     val selectedReasoningEfforts = remember(selectedModelDto) {
         selectedModelDto?.reasoningEfforts().orEmpty()
     }
+    val contextUsageModelDto = remember(contextUsageModel, availableModels) {
+        contextUsageModel?.let { usageModel ->
+            availableModels.find {
+                it.first == usageModel.providerID && it.second.id == usageModel.modelID
+            }?.second
+        }
+    }
 
     Surface(
         modifier = modifier.fillMaxWidth().testTag("agent_selector"),
@@ -116,34 +147,106 @@ fun ModelAgentSelectorBar(
             ),
             verticalAlignment = Alignment.CenterVertically
         ) {
-          Row(
-            modifier = Modifier
-                .weight(1f)
-                .horizontalScroll(rememberScrollState()),
-            horizontalArrangement = Arrangement.spacedBy(Spacing.md),
-            verticalAlignment = Alignment.CenterVertically
-        ) {
-            if (availableAgents.isNotEmpty()) {
-                val currentAgent = availableAgents.find { it.name == selectedAgent }
-                val agentColor = getAgentColor(currentAgent)
-                val currentAgentName = (selectedAgent ?: availableAgents.first().name).lowercase()
-                val agentSelectorDescription = stringResource(
-                    R.string.agent_selector_current,
-                    currentAgentName
-                )
+            Row(
+                modifier = Modifier
+                    .weight(1f)
+                    .horizontalScroll(rememberScrollState()),
+                horizontalArrangement = Arrangement.spacedBy(Spacing.md),
+                verticalAlignment = Alignment.CenterVertically,
+            ) {
+                if (availableAgents.isNotEmpty()) {
+                    val currentAgent = availableAgents.find { it.name == selectedAgent }
+                    val agentColor = getAgentColor(currentAgent)
+                    val currentAgentName = (selectedAgent ?: availableAgents.first().name).lowercase()
+                    val agentSelectorDescription = stringResource(
+                        R.string.agent_selector_current,
+                        currentAgentName
+                    )
 
-                Box {
+                    Box {
+                        Surface(
+                            onClick = { showAgentPicker = true },
+                            shape = RectangleShape,
+                            color = agentColor.copy(alpha = 0.1f),
+                            border = androidx.compose.foundation.BorderStroke(
+                                Sizing.strokeMd,
+                                agentColor.copy(alpha = 0.4f)
+                            ),
+                            modifier = Modifier
+                                .height(Sizing.buttonHeightMd)
+                                .semantics { contentDescription = agentSelectorDescription }
+                        ) {
+                            Row(
+                                modifier = Modifier.padding(horizontal = Spacing.lg),
+                                verticalAlignment = Alignment.CenterVertically,
+                                horizontalArrangement = Arrangement.spacedBy(Spacing.sm)
+                            ) {
+                                Text(
+                                    text = "@$currentAgentName",
+                                    style = MaterialTheme.typography.labelMedium,
+                                    fontFamily = androidx.compose.ui.text.font.FontFamily.Monospace,
+                                    color = agentColor
+                                )
+                                Text(
+                                    text = "▾",
+                                    color = agentColor,
+                                    fontFamily = androidx.compose.ui.text.font.FontFamily.Monospace
+                                )
+                            }
+                        }
+                        DropdownMenu(
+                            expanded = showAgentPicker,
+                            onDismissRequest = { showAgentPicker = false }
+                        ) {
+                            availableAgents.forEach { agent ->
+                                DropdownMenuItem(
+                                    text = {
+                                        Column(modifier = Modifier.widthIn(max = Sizing.panelWidthLg)) {
+                                            Text(
+                                                text = "@${agent.name.lowercase()}",
+                                                fontFamily = androidx.compose.ui.text.font.FontFamily.Monospace,
+                                                style = MaterialTheme.typography.labelLarge
+                                            )
+                                            agent.description?.takeIf { it.isNotBlank() }?.let { description ->
+                                                Text(
+                                                    text = description,
+                                                    style = MaterialTheme.typography.bodySmall,
+                                                    color = theme.textMuted,
+                                                    maxLines = 2,
+                                                    overflow = TextOverflow.Ellipsis
+                                                )
+                                            }
+                                        }
+                                    },
+                                    onClick = {
+                                        onAgentSelected(agent.name)
+                                        showAgentPicker = false
+                                    },
+                                    leadingIcon = if (agent.name == selectedAgent) {
+                                        { Text("✓", color = getAgentColor(agent)) }
+                                    } else {
+                                        null
+                                    }
+                                )
+                            }
+                        }
+                    }
+                }
+
+                if (availableAgents.isNotEmpty() && availableModels.isNotEmpty()) {
+                    VerticalDivider(
+                        modifier = Modifier.height(Sizing.iconLg),
+                        color = theme.border
+                    )
+                }
+
+                if (availableModels.isNotEmpty()) {
                     Surface(
-                        onClick = { showAgentPicker = true },
-                        shape = RectangleShape,
-                        color = agentColor.copy(alpha = 0.1f),
-                        border = androidx.compose.foundation.BorderStroke(
-                            Sizing.strokeMd,
-                            agentColor.copy(alpha = 0.4f)
-                        ),
-                        modifier = Modifier
-                            .height(Sizing.buttonHeightMd)
-                            .semantics { contentDescription = agentSelectorDescription }
+                        onClick = { showModelPicker = true },
+                        shape = androidx.compose.ui.graphics.RectangleShape,
+                        color = theme.background,
+                        border = androidx.compose.foundation.BorderStroke(Sizing.strokeMd, theme.border),
+                        modifier = Modifier.height(Sizing.buttonHeightMd)
                     ) {
                         Row(
                             modifier = Modifier.padding(horizontal = Spacing.lg),
@@ -151,120 +254,52 @@ fun ModelAgentSelectorBar(
                             horizontalArrangement = Arrangement.spacedBy(Spacing.sm)
                         ) {
                             Text(
-                                text = "@$currentAgentName",
+                                text = selectedModelName,
                                 style = MaterialTheme.typography.labelMedium,
                                 fontFamily = androidx.compose.ui.text.font.FontFamily.Monospace,
-                                color = agentColor
+                                color = theme.text,
+                                maxLines = 1,
+                                overflow = TextOverflow.Ellipsis,
+                                modifier = Modifier.widthIn(max = Sizing.panelWidthLg)
                             )
                             Text(
                                 text = "▾",
-                                color = agentColor,
+                                color = theme.textMuted,
                                 fontFamily = androidx.compose.ui.text.font.FontFamily.Monospace
                             )
                         }
                     }
-                    DropdownMenu(
-                        expanded = showAgentPicker,
-                        onDismissRequest = { showAgentPicker = false }
-                    ) {
-                        availableAgents.forEach { agent ->
-                            DropdownMenuItem(
-                                text = {
-                                    Column(modifier = Modifier.widthIn(max = Sizing.panelWidthLg)) {
-                                        Text(
-                                            text = "@${agent.name.lowercase()}",
-                                            fontFamily = androidx.compose.ui.text.font.FontFamily.Monospace,
-                                            style = MaterialTheme.typography.labelLarge
-                                        )
-                                        agent.description?.takeIf { it.isNotBlank() }?.let { description ->
-                                            Text(
-                                                text = description,
-                                                style = MaterialTheme.typography.bodySmall,
-                                                color = theme.textMuted,
-                                                maxLines = 2,
-                                                overflow = TextOverflow.Ellipsis
-                                            )
-                                        }
-                                    }
-                                },
-                                onClick = {
-                                    onAgentSelected(agent.name)
-                                    showAgentPicker = false
-                                },
-                                leadingIcon = if (agent.name == selectedAgent) {
-                                    { Text("✓", color = getAgentColor(agent)) }
-                                } else {
-                                    null
-                                }
-                            )
-                        }
-                    }
+                }
+
+                if (selectedReasoningEfforts.size > 1) {
+                    ReasoningEffortSelect(
+                        efforts = selectedReasoningEfforts,
+                        selectedEffort = selectedReasoningEffort,
+                        onEffortSelected = onReasoningEffortSelected,
+                    )
                 }
             }
-
-            if (availableAgents.isNotEmpty() && availableModels.isNotEmpty()) {
-                VerticalDivider(
-                    modifier = Modifier.height(Sizing.iconLg),
-                    color = theme.border
+            val ctxWindow = contextUsageModelDto?.limit?.context
+            if (usedContextTokens != null && ctxWindow != null && ctxWindow > 0) {
+                Spacer(Modifier.width(Spacing.sm))
+                ContextUsageMeter(
+                    percent = (usedContextTokens.toLong() * PERCENT_SCALE / ctxWindow)
+                        .toInt()
+                        .coerceIn(0, PERCENT_SCALE),
                 )
             }
-
-            if (availableModels.isNotEmpty()) {
-                Surface(
-                    onClick = { showModelPicker = true },
-                    shape = androidx.compose.ui.graphics.RectangleShape,
-                    color = theme.background,
-                    border = androidx.compose.foundation.BorderStroke(Sizing.strokeMd, theme.border),
-                    modifier = Modifier.height(Sizing.buttonHeightMd)
-                ) {
-                    Row(
-                        modifier = Modifier.padding(horizontal = Spacing.lg),
-                        verticalAlignment = Alignment.CenterVertically,
-                        horizontalArrangement = Arrangement.spacedBy(Spacing.sm)
-                    ) {
-                        Text(
-                            text = selectedModelName,
-                            style = MaterialTheme.typography.labelMedium,
-                            fontFamily = androidx.compose.ui.text.font.FontFamily.Monospace,
-                            color = theme.text,
-                            maxLines = 1,
-                            overflow = TextOverflow.Ellipsis,
-                            modifier = Modifier.widthIn(max = Sizing.panelWidthLg)
-                        )
-                        Text(
-                            text = "▾",
-                            color = theme.textMuted,
-                            fontFamily = androidx.compose.ui.text.font.FontFamily.Monospace
-                        )
-                    }
-                }
-            }
-
-            if (selectedReasoningEfforts.size > 1) {
-                ReasoningEffortSelect(
-                    efforts = selectedReasoningEfforts,
-                    selectedEffort = selectedReasoningEffort,
-                    onEffortSelected = onReasoningEffortSelected,
-                )
-            }
-          }
-          val ctxWindow = selectedModelDto?.limit?.context
-          if (usedContextTokens != null && ctxWindow != null && ctxWindow > 0) {
-              Spacer(Modifier.width(Spacing.sm))
-              ContextUsageMeter(
-                  percent = (usedContextTokens.toLong() * 100 / ctxWindow).toInt().coerceIn(0, 100)
-              )
-          }
         }
     }
 
     if (showModelPicker) {
         ModelPickerDialog(
-            availableModels = availableModels,
-            selectedModel = selectedModel,
-            favoriteModels = favoriteModels,
-            recentModels = recentModels,
-            providerNames = providerNames,
+            data = ModelPickerData(
+                availableModels = availableModels,
+                selectedModel = selectedModel,
+                favoriteModels = favoriteModels,
+                recentModels = recentModels,
+                providerNames = providerNames,
+            ),
             onModelSelected = {
                 onModelSelected(it)
                 showModelPicker = false
@@ -280,304 +315,300 @@ fun ModelAgentSelectorBar(
  * Matches design 05; four cells, warning/error tint as usage climbs.
  */
 @Composable
+@Suppress("FunctionNaming")
 private fun ContextUsageMeter(percent: Int) {
     val theme = LocalOpenCodeTheme.current
-    val filled = (percent * 4 + 99) / 100 // ceil to nearest of 4 cells
-    val bar = buildString { repeat(4) { append(if (it < filled) '▓' else '░') } }
+    val filled = (percent * CONTEXT_METER_CELLS + CONTEXT_METER_CEILING_OFFSET) / PERCENT_SCALE
+    val bar = buildString {
+        repeat(CONTEXT_METER_CELLS) { append(if (it < filled) '▓' else '░') }
+    }
+    val label = stringResource(R.string.context_usage_meter, bar, percent)
+    val description = stringResource(R.string.context_usage_percent, percent)
     val color = when {
-        percent >= 90 -> theme.error
-        percent >= 60 -> theme.warning
+        percent >= CONTEXT_ERROR_PERCENT -> theme.error
+        percent >= CONTEXT_WARNING_PERCENT -> theme.warning
         else -> theme.textMuted
     }
     Text(
-        text = "$bar $percent%",
+        text = label,
         style = MaterialTheme.typography.labelSmall,
         fontFamily = androidx.compose.ui.text.font.FontFamily.Monospace,
         color = color,
         maxLines = 1,
         modifier = Modifier.semantics {
-            contentDescription = "Context usage $percent percent"
+            contentDescription = description
         }
     )
 }
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
+@Suppress("FunctionNaming")
 fun ModelPickerDialog(
-    availableModels: List<Pair<String, ModelDto>>,
-    selectedModel: ModelInput?,
-    favoriteModels: Set<ModelInput>,
-    recentModels: List<ModelInput>,
+    data: ModelPickerData,
     onModelSelected: (ModelInput) -> Unit,
     onToggleFavorite: (ModelInput) -> Unit,
     onDismiss: () -> Unit,
-    providerNames: Map<String, String> = emptyMap()
 ) {
     val theme = LocalOpenCodeTheme.current
     var searchQuery by remember { mutableStateOf("") }
     var selectedCategory by remember { mutableStateOf<String?>(null) }
 
-    val enhancedModels = remember(availableModels, favoriteModels, recentModels, providerNames) {
-        availableModels.map { (providerId, model) ->
-            val modelInput = ModelInput(providerID = providerId, modelID = model.id)
-            EnhancedModelInfo(
-                model = modelInput,
-                name = model.name,
-                providerName = providerNames[providerId] ?: providerId,
-                contextWindow = model.limit?.context,
-                hasReasoning = model.capabilities?.reasoning == true,
-                hasTools = model.capabilities?.toolcall == true,
-                reasoningEfforts = model.reasoningEfforts(),
-                isFavorite = modelInput in favoriteModels,
-                isRecent = modelInput in recentModels
-            )
+    val groups = remember(data, searchQuery, selectedCategory) {
+        buildModelPickerGroups(data, searchQuery, selectedCategory)
+    }
+
+    Dialog(
+        onDismissRequest = onDismiss,
+        properties = DialogProperties(usePlatformDefaultWidth = false)
+    ) {
+        Box(modifier = Modifier.fillMaxSize()) {
+            Surface(
+                modifier = Modifier
+                    .align(Alignment.BottomCenter)
+                    .fillMaxWidth()
+                    .fillMaxHeight(MODEL_PICKER_HEIGHT_FRACTION)
+                    .testTag("model_picker_sheet"),
+                shape = RectangleShape,
+                color = theme.backgroundPanel,
+                border = androidx.compose.foundation.BorderStroke(Sizing.strokeMd, theme.border)
+            ) {
+                Column {
+                    ModelPickerHeader(onDismiss)
+                    ModelSearchField(searchQuery, onQueryChange = { searchQuery = it })
+                    ProviderFilterRow(groups.providers, selectedCategory) { selectedCategory = it }
+
+                    HorizontalDivider(color = theme.border, thickness = Sizing.dividerThickness)
+                    ModelPickerList(
+                        groups = groups,
+                        selectedModel = data.selectedModel,
+                        onModelSelected = onModelSelected,
+                        onToggleFavorite = onToggleFavorite,
+                    )
+
+                    HorizontalDivider(color = theme.border, thickness = Sizing.dividerThickness)
+
+                    // Footer with count
+                    Text(
+                        text = "${groups.count} models",
+                        style = MaterialTheme.typography.labelSmall,
+                        fontFamily = FontFamily.Monospace,
+                        color = theme.textMuted,
+                        modifier = Modifier.padding(horizontal = Spacing.md, vertical = Spacing.sm)
+                    )
+                }
+            }
         }
     }
+}
 
-    // Provider id paired with the label to show for it — the provider's own display
-    // name when it has one, so config-defined providers read "LLM Proxy", not "llmproxy".
-    val providers = remember(enhancedModels) {
-        enhancedModels
-            .map { it.model.providerID to it.providerName }
-            .distinct()
-            .sortedBy { it.second.lowercase() }
+private fun buildModelPickerGroups(
+    data: ModelPickerData,
+    searchQuery: String,
+    selectedCategory: String?,
+): ModelPickerGroups {
+    val enhancedModels = data.availableModels.map { (providerId, model) ->
+        val modelInput = ModelInput(providerID = providerId, modelID = model.id)
+        EnhancedModelInfo(
+            model = modelInput,
+            name = model.name,
+            providerName = data.providerNames[providerId] ?: providerId,
+            contextWindow = model.limit?.context,
+            hasReasoning = model.capabilities?.reasoning == true,
+            hasTools = model.capabilities?.toolcall == true,
+            isFavorite = modelInput in data.favoriteModels,
+            isRecent = modelInput in data.recentModels,
+        )
     }
-
-    val filteredModels = remember(enhancedModels, searchQuery, selectedCategory) {
-        enhancedModels.filter { model ->
+    val providers = enhancedModels
+        .map { it.model.providerID to it.providerName }
+        .distinct()
+        .sortedBy { it.second.lowercase() }
+    val filteredModels = enhancedModels
+        .filter { model ->
             val matchesSearch = searchQuery.isBlank() ||
                 model.name.contains(searchQuery, ignoreCase = true) ||
                 model.providerName.contains(searchQuery, ignoreCase = true) ||
                 model.model.providerID.contains(searchQuery, ignoreCase = true)
             val matchesCategory = selectedCategory == null || model.model.providerID == selectedCategory
             matchesSearch && matchesCategory
-        }.sortedWith(
+        }
+        .sortedWith(
             compareByDescending<EnhancedModelInfo> { it.isFavorite }
                 .thenByDescending { it.isRecent }
-                .thenBy { it.name }
+                .thenBy { it.name },
         )
-    }
+    return ModelPickerGroups(
+        providers = providers,
+        favorites = filteredModels.filter { it.isFavorite },
+        recents = filteredModels.filter { it.isRecent && !it.isFavorite },
+        others = filteredModels.filter { !it.isFavorite && !it.isRecent },
+    )
+}
 
-    val favorites = filteredModels.filter { it.isFavorite }
-    val recents = filteredModels.filter { it.isRecent && !it.isFavorite }
-    val others = filteredModels.filter { !it.isFavorite && !it.isRecent }
-
-    Dialog(
-        onDismissRequest = onDismiss,
-        properties = DialogProperties(usePlatformDefaultWidth = false)
+@Composable
+@Suppress("FunctionNaming")
+private fun ModelPickerHeader(onDismiss: () -> Unit) {
+    val theme = LocalOpenCodeTheme.current
+    Row(
+        modifier = Modifier
+            .fillMaxWidth()
+            .padding(start = Spacing.md, end = Spacing.xs, top = Spacing.sm, bottom = Spacing.sm),
+        horizontalArrangement = Arrangement.SpaceBetween,
+        verticalAlignment = Alignment.CenterVertically,
     ) {
-      Box(modifier = Modifier.fillMaxSize()) {
-        Surface(
-            modifier = Modifier
-                .align(Alignment.BottomCenter)
-                .fillMaxWidth()
-                .fillMaxHeight(0.7f)
-                .testTag("model_picker_sheet"),
-            shape = RectangleShape,
-            color = theme.backgroundPanel,
-            border = androidx.compose.foundation.BorderStroke(Sizing.strokeMd, theme.border)
+        Text(
+            text = stringResource(R.string.select_model),
+            style = MaterialTheme.typography.titleSmall.copy(fontWeight = FontWeight.SemiBold),
+            color = theme.text,
+        )
+        IconButton(onClick = onDismiss, modifier = Modifier.size(Sizing.iconButtonSm)) {
+            Text(
+                text = "×",
+                style = MaterialTheme.typography.titleMedium,
+                fontFamily = FontFamily.Monospace,
+                color = theme.textMuted,
+            )
+        }
+    }
+}
+
+@Composable
+@Suppress("FunctionNaming")
+private fun ModelSearchField(query: String, onQueryChange: (String) -> Unit) {
+    val theme = LocalOpenCodeTheme.current
+    Surface(
+        color = theme.backgroundElement,
+        shape = RectangleShape,
+        border = androidx.compose.foundation.BorderStroke(Sizing.strokeMd, theme.borderSubtle),
+        modifier = Modifier
+            .fillMaxWidth()
+            .height(Sizing.buttonHeightMd)
+            .padding(horizontal = Spacing.md, vertical = Spacing.xs),
+    ) {
+        Row(
+            modifier = Modifier.fillMaxSize().padding(horizontal = Spacing.md),
+            verticalAlignment = Alignment.CenterVertically,
+            horizontalArrangement = Arrangement.spacedBy(Spacing.sm),
         ) {
-            Column {
-                // Header: "Select Model" title + close — flush on the sheet's panel bg.
-                Row(
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .padding(start = Spacing.md, end = Spacing.xs, top = Spacing.sm, bottom = Spacing.sm),
-                    horizontalArrangement = Arrangement.SpaceBetween,
-                    verticalAlignment = Alignment.CenterVertically
-                ) {
-                    Text(
-                        text = stringResource(R.string.select_model),
-                        style = MaterialTheme.typography.titleSmall.copy(fontWeight = FontWeight.SemiBold),
-                        color = theme.text
-                    )
-                    IconButton(
-                        onClick = onDismiss,
-                        modifier = Modifier.size(Sizing.iconButtonSm)
-                    ) {
-                        Text(
-                            text = "×",
-                            style = MaterialTheme.typography.titleMedium,
-                            fontFamily = FontFamily.Monospace,
-                            color = theme.textMuted
-                        )
-                    }
-                }
-
-                // Search field — inset element-bg box with `/` prompt prefix.
-                // Height is pinned (not `heightIn`/intrinsic) so the box can't grow as text
-                // is typed — BasicTextField's measured height otherwise nudges the container.
-                Surface(
-                    color = theme.backgroundElement,
-                    shape = RectangleShape,
-                    border = androidx.compose.foundation.BorderStroke(Sizing.strokeMd, theme.borderSubtle),
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .height(Sizing.buttonHeightMd)
-                        .padding(horizontal = Spacing.md, vertical = Spacing.xs)
-                ) {
-                    Row(
-                        modifier = Modifier
-                            .fillMaxSize()
-                            .padding(horizontal = Spacing.md),
-                        verticalAlignment = Alignment.CenterVertically,
-                        horizontalArrangement = Arrangement.spacedBy(Spacing.sm)
-                    ) {
-                        Text(
-                            text = "/",
-                            style = MaterialTheme.typography.bodyMedium,
-                            fontFamily = FontFamily.Monospace,
-                            color = theme.primary
-                        )
-                        androidx.compose.foundation.text.BasicTextField(
-                            value = searchQuery,
-                            onValueChange = { searchQuery = it },
-                            modifier = Modifier.weight(1f).testTag("model_search_field"),
-                            textStyle = MaterialTheme.typography.bodyMedium.copy(
-                                color = theme.text,
-                                fontFamily = FontFamily.Monospace
-                            ),
-                            cursorBrush = androidx.compose.ui.graphics.SolidColor(theme.primary),
-                            singleLine = true,
-                            decorationBox = { innerTextField ->
-                                Box {
-                                    if (searchQuery.isEmpty()) {
-                                        Text(
-                                            text = stringResource(R.string.models_search_placeholder),
-                                            style = MaterialTheme.typography.bodyMedium,
-                                            fontFamily = FontFamily.Monospace,
-                                            color = theme.textMuted
-                                        )
-                                    }
-                                    innerTextField()
-                                }
-                            }
-                        )
-                        if (searchQuery.isNotEmpty()) {
-                            IconButton(
-                                onClick = { searchQuery = "" },
-                                modifier = Modifier.size(Sizing.iconButtonSm)
-                            ) {
-                                Icon(
-                                    Icons.Default.Clear,
-                                    contentDescription = stringResource(R.string.clear),
-                                    tint = theme.textMuted,
-                                    modifier = Modifier.size(Sizing.iconXs)
-                                )
-                            }
-                        }
-                    }
-                }
-
-                // Provider filter chips
-                Row(
-                    modifier = Modifier
-                        .horizontalScroll(rememberScrollState())
-                        .padding(horizontal = Spacing.md, vertical = Spacing.xs)
-                        .selectableGroup(),
-                    horizontalArrangement = Arrangement.spacedBy(Spacing.xs)
-                ) {
-                    TuiFilterTab(
-                        text = stringResource(R.string.all),
-                        selected = selectedCategory == null,
-                        onClick = { selectedCategory = null }
-                    )
-                    providers.forEach { (providerId, label) ->
-                        TuiFilterTab(
-                            text = label,
-                            selected = selectedCategory == providerId,
-                            onClick = {
-                                selectedCategory = if (selectedCategory == providerId) null else providerId
-                            }
-                        )
-                    }
-                }
-
-                HorizontalDivider(color = theme.border, thickness = Sizing.dividerThickness)
-
-                // Model list
-                LazyColumn(
-                    modifier = Modifier
-                        .weight(1f)
-                        .selectableGroup(),
-                    contentPadding = PaddingValues(vertical = Spacing.xs)
-                ) {
-                    if (favorites.isNotEmpty()) {
-                        item {
-                            TuiSectionHeader(text = "★ favorites")
-                        }
-                        items(favorites, key = { "${it.model.providerID}/${it.model.modelID}" }) { model ->
-                            TuiModelListItem(
-                                model = model,
-                                isSelected = model.model == selectedModel,
-                                onSelect = { onModelSelected(model.model) },
-                                onToggleFavorite = { onToggleFavorite(model.model) }
-                            )
-                        }
-                    }
-
-                    if (recents.isNotEmpty()) {
-                        item {
-                            TuiSectionHeader(text = "recent")
-                        }
-                        items(recents, key = { "${it.model.providerID}/${it.model.modelID}" }) { model ->
-                            TuiModelListItem(
-                                model = model,
-                                isSelected = model.model == selectedModel,
-                                onSelect = { onModelSelected(model.model) },
-                                onToggleFavorite = { onToggleFavorite(model.model) }
-                            )
-                        }
-                    }
-
-                    if (others.isNotEmpty()) {
-                        item {
-                            TuiSectionHeader(
-                                text = if (favorites.isEmpty() && recents.isEmpty()) "models" else "other"
-                            )
-                        }
-                        items(others, key = { "${it.model.providerID}/${it.model.modelID}" }) { model ->
-                            TuiModelListItem(
-                                model = model,
-                                isSelected = model.model == selectedModel,
-                                onSelect = { onModelSelected(model.model) },
-                                onToggleFavorite = { onToggleFavorite(model.model) }
-                            )
-                        }
-                    }
-
-                    if (filteredModels.isEmpty()) {
-                        item {
-                            Box(
-                                modifier = Modifier
-                                    .fillMaxWidth()
-                                    .padding(Spacing.xl),
-                                contentAlignment = Alignment.Center
-                            ) {
-                                Text(
-                                    text = "-- no models found --",
-                                    style = MaterialTheme.typography.bodyMedium,
-                                    fontFamily = FontFamily.Monospace,
-                                    color = theme.textMuted
-                                )
-                            }
-                        }
-                    }
-                }
-
-                HorizontalDivider(color = theme.border, thickness = Sizing.dividerThickness)
-
-                // Footer with count
-                Text(
-                    text = "${filteredModels.size} models",
-                    style = MaterialTheme.typography.labelSmall,
+            Text(
+                text = "/",
+                style = MaterialTheme.typography.bodyMedium,
+                fontFamily = FontFamily.Monospace,
+                color = theme.primary,
+            )
+            androidx.compose.foundation.text.BasicTextField(
+                value = query,
+                onValueChange = onQueryChange,
+                modifier = Modifier.weight(1f).testTag("model_search_field"),
+                textStyle = MaterialTheme.typography.bodyMedium.copy(
+                    color = theme.text,
                     fontFamily = FontFamily.Monospace,
-                    color = theme.textMuted,
-                    modifier = Modifier.padding(horizontal = Spacing.md, vertical = Spacing.sm)
-                )
+                ),
+                cursorBrush = androidx.compose.ui.graphics.SolidColor(theme.primary),
+                singleLine = true,
+                decorationBox = { innerTextField ->
+                    Box {
+                        if (query.isEmpty()) {
+                            Text(
+                                text = stringResource(R.string.models_search_placeholder),
+                                style = MaterialTheme.typography.bodyMedium,
+                                fontFamily = FontFamily.Monospace,
+                                color = theme.textMuted,
+                            )
+                        }
+                        innerTextField()
+                    }
+                },
+            )
+            if (query.isNotEmpty()) {
+                IconButton(
+                    onClick = { onQueryChange("") },
+                    modifier = Modifier.size(Sizing.iconButtonSm),
+                ) {
+                    Icon(Icons.Default.Clear, stringResource(R.string.clear), tint = theme.textMuted)
+                }
             }
         }
-      }
+    }
+}
+
+@Composable
+@Suppress("FunctionNaming")
+private fun ProviderFilterRow(
+    providers: List<Pair<String, String>>,
+    selectedProvider: String?,
+    onSelect: (String?) -> Unit,
+) {
+    Row(
+        modifier = Modifier
+            .horizontalScroll(rememberScrollState())
+            .padding(horizontal = Spacing.md, vertical = Spacing.xs)
+            .selectableGroup(),
+        horizontalArrangement = Arrangement.spacedBy(Spacing.xs),
+    ) {
+        TuiFilterTab(stringResource(R.string.all), selectedProvider == null) { onSelect(null) }
+        providers.forEach { (providerId, label) ->
+            TuiFilterTab(label, selectedProvider == providerId) {
+                onSelect(providerId.takeUnless { it == selectedProvider })
+            }
+        }
+    }
+}
+
+@Composable
+@Suppress("FunctionNaming")
+private fun ColumnScope.ModelPickerList(
+    groups: ModelPickerGroups,
+    selectedModel: ModelInput?,
+    onModelSelected: (ModelInput) -> Unit,
+    onToggleFavorite: (ModelInput) -> Unit,
+) {
+    val theme = LocalOpenCodeTheme.current
+    LazyColumn(
+        modifier = Modifier.weight(1f).selectableGroup(),
+        contentPadding = PaddingValues(vertical = Spacing.xs),
+    ) {
+        modelGroup("★ favorites", groups.favorites, selectedModel, onModelSelected, onToggleFavorite)
+        modelGroup("recent", groups.recents, selectedModel, onModelSelected, onToggleFavorite)
+        modelGroup(
+            if (groups.favorites.isEmpty() && groups.recents.isEmpty()) "models" else "other",
+            groups.others,
+            selectedModel,
+            onModelSelected,
+            onToggleFavorite,
+        )
+        if (groups.count == 0) {
+            item {
+                Box(Modifier.fillMaxWidth().padding(Spacing.xl), contentAlignment = Alignment.Center) {
+                    Text(
+                        "-- no models found --",
+                        style = MaterialTheme.typography.bodyMedium,
+                        fontFamily = FontFamily.Monospace,
+                        color = theme.textMuted,
+                    )
+                }
+            }
+        }
+    }
+}
+
+private fun androidx.compose.foundation.lazy.LazyListScope.modelGroup(
+    title: String,
+    models: List<EnhancedModelInfo>,
+    selectedModel: ModelInput?,
+    onModelSelected: (ModelInput) -> Unit,
+    onToggleFavorite: (ModelInput) -> Unit,
+) {
+    if (models.isEmpty()) return
+    item { TuiSectionHeader(title) }
+    items(models, key = { "${it.model.providerID}/${it.model.modelID}" }) { model ->
+        TuiModelListItem(
+            model = model,
+            isSelected = model.model == selectedModel,
+            onSelect = { onModelSelected(model.model) },
+            onToggleFavorite = { onToggleFavorite(model.model) },
+        )
     }
 }
 

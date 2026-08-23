@@ -6,13 +6,14 @@ import androidx.lifecycle.ProcessLifecycleOwner
 import dev.blazelight.p4oc.core.datastore.NotificationRoutingMode
 import dev.blazelight.p4oc.core.datastore.NotificationSettings
 import dev.blazelight.p4oc.core.datastore.SettingsDataStore
-import dev.blazelight.p4oc.domain.server.ServerRef
 import dev.blazelight.p4oc.core.haptic.HapticFeedback
 import dev.blazelight.p4oc.core.log.AppLog
 import dev.blazelight.p4oc.core.network.ServerConnectionRegistry
 import dev.blazelight.p4oc.domain.model.OpenCodeEvent
 import dev.blazelight.p4oc.domain.model.SessionStatus
 import dev.blazelight.p4oc.domain.server.ScopedEvent
+import dev.blazelight.p4oc.domain.server.ServerRef
+import dev.blazelight.p4oc.domain.server.WorkspaceKey
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
@@ -190,13 +191,13 @@ internal class CompletionTracker {
         busySessions.clear()
     }
 
-    fun clearServer(serverRef: dev.blazelight.p4oc.domain.server.ServerRef) {
+    fun clearServer(serverRef: ServerRef) {
         busySessions.removeAll { it.serverRef == serverRef }
     }
 
     fun clearWorkspace(
-        serverRef: dev.blazelight.p4oc.domain.server.ServerRef,
-        workspaceKey: dev.blazelight.p4oc.domain.server.WorkspaceKey,
+        serverRef: ServerRef,
+        workspaceKey: WorkspaceKey,
     ) {
         busySessions.removeAll { it.serverRef == serverRef && it.workspaceKey == workspaceKey }
     }

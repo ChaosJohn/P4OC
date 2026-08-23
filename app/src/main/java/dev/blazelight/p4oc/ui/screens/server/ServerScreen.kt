@@ -1,11 +1,6 @@
 package dev.blazelight.p4oc.ui.screens.server
 
 import androidx.compose.animation.AnimatedVisibility
-import androidx.compose.animation.core.RepeatMode
-import androidx.compose.animation.core.animateFloat
-import androidx.compose.animation.core.infiniteRepeatable
-import androidx.compose.animation.core.rememberInfiniteTransition
-import androidx.compose.animation.core.tween
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
@@ -26,6 +21,8 @@ import androidx.compose.ui.graphics.SolidColor
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.semantics.Role
+import androidx.compose.ui.semantics.contentDescription
+import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.text.TextRange
 import androidx.compose.ui.text.TextStyle
 import androidx.compose.ui.text.font.FontFamily
@@ -39,11 +36,11 @@ import androidx.compose.ui.unit.sp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import dev.blazelight.p4oc.R
 import dev.blazelight.p4oc.core.datastore.SavedServer
-import dev.blazelight.p4oc.core.network.DiscoveredServer
 import dev.blazelight.p4oc.core.network.DiscoveryState
 import dev.blazelight.p4oc.core.network.ServerConnectionRegistry
 import dev.blazelight.p4oc.core.network.ServerUrl
 import dev.blazelight.p4oc.core.network.toServerRef
+import dev.blazelight.p4oc.ui.components.TuiAlertDialog
 import dev.blazelight.p4oc.ui.components.TuiConfirmDialog
 import dev.blazelight.p4oc.ui.components.TuiSectionHeader
 import dev.blazelight.p4oc.ui.components.TuiSwitch
@@ -60,13 +57,10 @@ import org.koin.compose.koinInject
 @OptIn(ExperimentalMaterial3Api::class)
 @Suppress("LongMethod")
 @Composable
-fun serverScreen(
+internal fun serverScreen(
     onNavigateToSessions: () -> Unit,
     onSettings: () -> Unit,
-    autoReconnect: Boolean = true,
-    showManualFormInitially: Boolean = false,
-    onConnectSavedServer: ((SavedServer) -> Unit)? = null,
-    onNavigateBack: (() -> Unit)? = null,
+    config: ServerScreenConfig = ServerScreenConfig(),
 ) {
     val viewModel: ServerViewModel = koinViewModel()
     val theme = LocalOpenCodeTheme.current
@@ -82,13 +76,14 @@ fun serverScreen(
     val inventory = remember(uiState, registryStates) { buildServerInventory(uiState, registryStates) }
     var showManualForm by rememberSaveable {
         mutableStateOf(
-            showManualFormInitially || (uiState.savedServers.isEmpty() && uiState.discoveredServers.isEmpty()),
+            config.showManualFormInitially ||
+                (uiState.savedServers.isEmpty() && uiState.discoveredServers.isEmpty()),
         )
     }
     var editingServerId by rememberSaveable { mutableStateOf<String?>(null) }
 
-    LaunchedEffect(autoReconnect) {
-        viewModel.start(autoReconnect)
+    LaunchedEffect(config.autoReconnect) {
+        viewModel.start(config.autoReconnect)
     }
 
     // Start/stop mDNS discovery with screen lifecycle
@@ -129,10 +124,10 @@ fun serverScreen(
             },
             onDismissEdit = { editingServerId = null },
             onNavigateToSessions = onNavigateToSessions,
-            onConnectSavedServer = onConnectSavedServer,
+            onConnectSavedServer = config.onConnectSavedServer,
         ),
         onSettings = onSettings,
-        onNavigateBack = onNavigateBack,
+        onNavigateBack = config.onNavigateBack,
     )
 }
 
@@ -370,7 +365,7 @@ private fun remoteServerSection(
     actions: RemoteServerActions,
 ) {
     var passwordVisible by remember { mutableStateOf(false) }
-    // Credentials are required to reach an OpenCode server, so the panel starts open.
+    // Keep optional credentials visible so authenticated servers remain quick to configure.
     var showCredentials by rememberSaveable { mutableStateOf(true) }
     var urlFieldValue by remember { mutableStateOf(serverUrlTextFieldValue(state.url)) }
 
@@ -398,22 +393,39 @@ private fun remoteServerSection(
                 onTogglePassword = { passwordVisible = !passwordVisible },
             ),
         )
-        cleartextCredentialWarning(state)
+        serverCleartextCredentialWarning(
+            url = state.url,
+            username = state.username,
+            password = state.password,
+        )
         connectButton(state = state, onConnect = actions.onConnect)
     }
 }
 
+/**
+ * Pre-submit warning shown before CONNECT when a cleartext `http://` URL that the app considers a
+ * trusted loopback or private-LAN address is combined with actual credentials (both username and
+ * password present). Public-cleartext submissions are rejected outright, so this surfaces only the
+ * allowed-but-unencrypted case. Shared by the connect-to-server and first-run setup forms so the
+ * two cannot drift apart.
+ */
 @Composable
-private fun cleartextCredentialWarning(state: RemoteServerState) {
-    val usesCleartext = state.url.trimStart().startsWith("http://", ignoreCase = true)
-    val hasCredentials = state.username.isNotBlank() || state.password.isNotBlank()
-    val shouldWarn = usesCleartext && hasCredentials && ServerUrl.allowsCleartextCredentials(state.url)
+internal fun serverCleartextCredentialWarning(
+    url: String,
+    username: String,
+    password: String,
+    modifier: Modifier = Modifier,
+) {
+    val usesCleartext = url.trimStart().startsWith("http://", ignoreCase = true)
+    val hasCredentials = username.isNotBlank() && password.isNotBlank()
+    val shouldWarn = usesCleartext && hasCredentials && ServerUrl.allowsCleartextCredentials(url)
     if (!shouldWarn) return
     Text(
         text = stringResource(R.string.server_cleartext_credentials_warning),
         color = LocalOpenCodeTheme.current.warning,
         style = MaterialTheme.typography.bodySmall,
         fontFamily = FontFamily.Monospace,
+        modifier = modifier,
     )
 }
 
@@ -423,12 +435,11 @@ private fun remoteUrlField(
     onValueChange: (TextFieldValue) -> Unit,
 ) {
     val theme = LocalOpenCodeTheme.current
+    val contentDescription = stringResource(R.string.cd_server_url_field)
     Column {
-        Text(
-            text = stringResource(R.string.setup_server_url_label),
-            fontFamily = FontFamily.Monospace,
-            fontSize = TuiCodeFontSize.md,
-            color = theme.textMuted,
+        serverFieldLabel(
+            stringResource(R.string.setup_server_url_label),
+            stringResource(R.string.setup_field_required),
         )
         Spacer(Modifier.height(Spacing.sm))
         BasicTextField(
@@ -439,6 +450,7 @@ private fun remoteUrlField(
                 .height(Sizing.buttonHeightLg)
                 .background(theme.backgroundPanel, RectangleShape)
                 .border(Sizing.strokeMd, theme.primary, RectangleShape)
+                .semantics { this.contentDescription = contentDescription }
                 .testTag("server_url_input"),
             textStyle = TextStyle(
                 color = theme.text,
@@ -521,8 +533,18 @@ private fun credentialsSection(
             )
             if (!controls.expanded) {
                 Text(
-                    text = stringResource(R.string.setup_credentials_hint),
-                    color = theme.border,
+                    text = if (state.password.isBlank()) {
+                        stringResource(
+                            R.string.setup_credentials_hint_no_password,
+                            state.username.ifBlank { ServerUrl.DEFAULT_USERNAME },
+                        )
+                    } else {
+                        stringResource(
+                            R.string.setup_credentials_hint,
+                            state.username.ifBlank { ServerUrl.DEFAULT_USERNAME },
+                        )
+                    },
+                    color = theme.textMuted,
                     fontFamily = FontFamily.Monospace,
                     fontSize = TuiCodeFontSize.sm,
                 )
@@ -542,15 +564,24 @@ private fun credentialsFields(
     onTogglePassword: () -> Unit,
 ) {
     Column(Modifier.padding(top = Spacing.lg)) {
-        serverFieldLabel(stringResource(R.string.setup_username_label))
+        serverFieldLabel(
+            stringResource(R.string.setup_username_label),
+            stringResource(R.string.setup_field_default_opencode),
+        )
         Spacer(Modifier.height(Spacing.sm))
         serverFieldBox(
             value = state.username,
             onValueChange = actions.onUsernameChange,
-            options = ServerFieldOptions(testTag = "server_username_input"),
+            options = ServerFieldOptions(
+                testTag = "server_username_input",
+                contentDescription = stringResource(R.string.cd_username_field),
+            ),
         )
         Spacer(Modifier.height(Spacing.lg))
-        serverFieldLabel(stringResource(R.string.setup_password_label))
+        serverFieldLabel(
+            stringResource(R.string.setup_password_label),
+            stringResource(R.string.setup_field_optional),
+        )
         Spacer(Modifier.height(Spacing.sm))
         passwordField(state.password, actions.onPasswordChange, passwordVisible, onTogglePassword)
         if (state.showTlsOptions) {
@@ -561,7 +592,7 @@ private fun credentialsFields(
 }
 
 @Composable
-private fun serverFieldLabel(label: String) {
+private fun serverFieldLabel(label: String, qualifier: String) {
     val theme = LocalOpenCodeTheme.current
     Row(horizontalArrangement = Arrangement.spacedBy(Spacing.xs)) {
         Text(
@@ -571,7 +602,7 @@ private fun serverFieldLabel(label: String) {
             color = theme.textMuted,
         )
         Text(
-            text = stringResource(R.string.setup_field_required),
+            text = qualifier,
             fontFamily = FontFamily.Monospace,
             fontSize = TuiCodeFontSize.md,
             color = theme.textMuted,
@@ -629,6 +660,7 @@ private fun serverTlsSection(allowInsecure: Boolean, onAllowInsecureChange: (Boo
 
 private data class ServerFieldOptions(
     val testTag: String,
+    val contentDescription: String,
     val keyboardType: KeyboardType = KeyboardType.Text,
     val visualTransformation: VisualTransformation = VisualTransformation.None,
 )
@@ -649,6 +681,7 @@ private fun serverFieldBox(
             .height(Sizing.textFieldHeightSm)
             .background(theme.backgroundPanel, RectangleShape)
             .border(Sizing.strokeMd, theme.borderSubtle, RectangleShape)
+            .semantics { contentDescription = options.contentDescription }
             .testTag(options.testTag),
         textStyle = TextStyle(
             color = theme.text,
@@ -687,6 +720,7 @@ private fun passwordField(
         onValueChange = onPasswordChange,
         options = ServerFieldOptions(
             testTag = "server_password_input",
+            contentDescription = stringResource(R.string.cd_password_field),
             keyboardType = KeyboardType.Password,
             visualTransformation = if (passwordVisible) {
                 VisualTransformation.None
@@ -808,6 +842,7 @@ private fun savedServerRow(
 ) {
     val theme = LocalOpenCodeTheme.current
     val server = entry.server
+    val statusVisual = serverStatusVisual(entry.status)
     var menuExpanded by remember { mutableStateOf(false) }
     Row(
         modifier = Modifier
@@ -823,7 +858,8 @@ private fun savedServerRow(
         Box(
             modifier = Modifier
                 .size(Sizing.indicatorDotActive)
-                .background(serverStatusVisual(entry.status).color, RectangleShape),
+                .background(statusVisual.color, RectangleShape)
+                .semantics { contentDescription = statusVisual.contentDescription },
         )
         savedServerDetails(entry, openTabCount, Modifier.weight(1f))
         Box {
@@ -1024,10 +1060,10 @@ private fun forgetServerDialog(
             modifier = Modifier.testTag("saved_server_forget_dialog"),
         )
     } else {
-        AlertDialog(
+        TuiAlertDialog(
             onDismissRequest = onDismiss,
-            title = { Text(stringResource(R.string.server_forget_title, server.displayName)) },
-            text = { Text(stringResource(R.string.server_forget_message, openTabCount)) },
+            title = stringResource(R.string.server_forget_title, server.displayName),
+            modifier = Modifier.testTag("saved_server_forget_dialog"),
             confirmButton = {
                 TextButton(
                     onClick = {
@@ -1046,8 +1082,8 @@ private fun forgetServerDialog(
                     modifier = Modifier.testTag("server_close_tabs_forget"),
                 ) { Text(stringResource(R.string.server_close_tabs_forget), color = theme.error) }
             },
-            modifier = Modifier.testTag("saved_server_forget_dialog"),
-        )
+        ) {
+            Text(stringResource(R.string.server_forget_message, openTabCount))
+        }
     }
 }
-

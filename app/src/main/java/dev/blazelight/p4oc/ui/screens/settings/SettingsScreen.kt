@@ -233,7 +233,7 @@ fun SettingsScreen(
                 style = MaterialTheme.typography.labelSmall.copy(
                     fontFamily = androidx.compose.ui.text.font.FontFamily.Monospace
                 ),
-                color = theme.border,
+                color = theme.textMuted,
                 modifier = Modifier
                     .fillMaxWidth()
                     .padding(horizontal = Spacing.lg, vertical = Spacing.md)
@@ -523,7 +523,7 @@ private fun SettingsItem(
                 Text(
                     text = "›",
                     style = MaterialTheme.typography.titleMedium,
-                    color = theme.border.copy(alpha = contentAlpha)
+                    color = theme.textMuted.copy(alpha = contentAlpha)
                 )
             }
         }
