@@ -52,6 +52,8 @@ class ServerConnectionRegistry constructor(
     private val connections = ConcurrentHashMap<String, MutableStateFlow<Connection?>>()
     private val generationStates = ConcurrentHashMap<GenerationKey, MutableStateFlow<ConnectionState>>()
     private val generationStateLock = Any()
+    private val generationEpochs = ConcurrentHashMap<GenerationKey, MutableStateFlow<Long>>()
+    private val generationEpochBridges = ConcurrentHashMap<GenerationKey, Job>()
     private val stateCollectors = ConcurrentHashMap<String, Job>()
     private val connectionCollectors = ConcurrentHashMap<String, Job>()
     private val eventCollectors = ConcurrentHashMap<String, Job>()
@@ -85,7 +87,27 @@ class ServerConnectionRegistry constructor(
         }
     }
 
-    internal fun generationStateCount(): Int = generationStates.size
+    internal val generationStateCount: Int
+        get() = generationStates.size
+
+    /**
+     * Monotonic reconnect epoch for an immutable workspace generation. Returns a stable per-generation
+     * flow even when requested before the manager publishes its active connection; the flow bridges
+     * to that generation's live [OpenCodeEventSource.connectionEpoch] once it activates. A stale or
+     * wrong generation stays pinned at 0 so no reconnect is observed for it.
+     */
+    fun connectionEpoch(
+        serverRef: ServerRef,
+        generation: ServerGeneration,
+    ): StateFlow<Long> = synchronized(generationStateLock) {
+        val key = GenerationKey(serverRef.endpointKey, generation)
+        val flow = generationEpochs.getOrPut(key) { MutableStateFlow(0L) }
+        val manager = managers[serverRef.endpointKey]
+        if (manager?.connection?.value?.generation == generation) {
+            ensureEpochBridge(key, manager)
+        }
+        flow.asStateFlow()
+    }
 
     fun connection(serverRef: ServerRef): StateFlow<Connection?> = connectionFlow(serverRef.endpointKey).asStateFlow()
 
@@ -298,7 +320,86 @@ class ServerConnectionRegistry constructor(
             if (activeGeneration != null) {
                 generationStates[GenerationKey(endpointKey, activeGeneration)]?.value = manager.connectionState.value
             }
+            reconcileGenerationEpochs(endpointKey, manager, activeGeneration)
         }
+    }
+
+    /**
+     * Mirrors the live event-source epoch of the exact active generation into any stable per-generation
+     * flow returned earlier by [connectionEpoch]. When no generation is active yet, existing bridges
+     * are cancelled and their flows reset to 0 while the requested entries are preserved (so a
+     * pre-connect subscription is not orphaned). When a generation is active, bridges for generations
+     * that are no longer active are cancelled and their flows reset/evicted to the stale 0 state.
+     */
+    private fun reconcileGenerationEpochs(
+        endpointKey: String,
+        manager: ConnectionManager,
+        activeGeneration: ServerGeneration?,
+    ) {
+        val endpointEntries = generationEpochs.entries.filter { it.key.endpointKey == endpointKey }
+        if (activeGeneration == null) {
+            // No active generation yet: cancel any existing endpoint bridges and reset their flows
+            // to 0 so a leaked collector cannot push stale updates, but KEEP the requested entries
+            // so a pre-connect connectionEpoch() call is not orphaned.
+            endpointEntries.forEach { (key, flow) ->
+                flow.value = 0L
+                generationEpochBridges.remove(key)?.cancel()
+            }
+        } else {
+            // Active generation present: evict entries for generations that are no longer active.
+            endpointEntries
+                .filter { it.key.generation != activeGeneration }
+                .forEach { (key, flow) ->
+                    flow.value = 0L
+                    // Reset to 0 so a previously active generation stops reflecting its source.
+                    generationEpochBridges.remove(key)?.cancel()
+                    // Evict the stale entry only if it still maps to this flow; a caller-held flow
+                    // (via asStateFlow) stays valid at 0 because it wraps the same MutableStateFlow.
+                    generationEpochs.remove(key, flow)
+                }
+        }
+        // Bridge only the exact active generation once a generation is present. When activeGeneration
+        // is null this filter matches nothing, so pre-publication entries survive unbridged.
+        generationEpochs.keys
+            .filter { it.endpointKey == endpointKey && it.generation == activeGeneration }
+            .forEach { ensureEpochBridge(it, manager) }
+    }
+
+    internal val generationEpochCount: Int
+        get() = generationEpochs.size
+
+    internal val generationEpochBridgeCount: Int
+        get() = generationEpochBridges.size
+
+    /**
+     * Starts the bridge from the exact active generation's live source epoch, if not already running.
+     * MUST be called while holding [generationStateLock]; both callers ([connectionEpoch] and
+     * [reconcileGenerationState]) synchronize on it, and the bridge-identity check relies on that
+     * serialization with resets/evictions.
+     */
+    private fun ensureEpochBridge(key: GenerationKey, manager: ConnectionManager) {
+        if (generationEpochBridges.containsKey(key)) return
+        val sourceEpoch = manager.connection.value?.eventSource?.connectionEpoch
+        val flow = generationEpochs[key]
+        if (sourceEpoch == null || flow == null) return
+        // Seed synchronously so an active lookup reflects the current source epoch immediately,
+        // before the async bridge's first collect.
+        flow.value = sourceEpoch.value
+        // Start lazily so the job is registered in the map before its first collect runs; otherwise
+        // an emission between the sync seed and the map assignment could be lost by the identity check.
+        val bridgeJob = scope.launch(start = kotlinx.coroutines.CoroutineStart.LAZY) {
+            sourceEpoch.collect { value ->
+                synchronized(generationStateLock) {
+                    // Only write if this bridge is still the current bridge for the key; otherwise a
+                    // stale in-flight emission after reset/eviction could repopulate a nonzero epoch.
+                    if (generationEpochBridges[key] === coroutineContext[Job]) {
+                        flow.value = value
+                    }
+                }
+            }
+        }
+        generationEpochBridges[key] = bridgeJob
+        bridgeJob.start()
     }
 
     private fun staleAndEvictGenerationStates(endpointKey: String) {
@@ -309,6 +410,17 @@ class ServerConnectionRegistry constructor(
                 if (entry.key.endpointKey == endpointKey) {
                     entry.value.value = STALE_GENERATION_ERROR
                     iterator.remove()
+                }
+            }
+            val epochIterator = generationEpochs.entries.iterator()
+            while (epochIterator.hasNext()) {
+                val entry = epochIterator.next()
+                if (entry.key.endpointKey == endpointKey) {
+                    // Reset so a caller-held flow cannot retain a nonzero active epoch after
+                    // explicit disconnect/invalidate.
+                    entry.value.value = 0L
+                    generationEpochBridges.remove(entry.key)?.cancel()
+                    epochIterator.remove()
                 }
             }
         }

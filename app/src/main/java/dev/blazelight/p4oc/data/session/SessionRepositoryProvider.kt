@@ -1,12 +1,12 @@
 package dev.blazelight.p4oc.data.session
 
-import dev.blazelight.p4oc.core.network.ServerConnectionRegistry
 import dev.blazelight.p4oc.core.log.AppLog
-import dev.blazelight.p4oc.core.network.ConnectionState
+import dev.blazelight.p4oc.core.network.ServerConnectionRegistry
 import dev.blazelight.p4oc.data.remote.mapper.MessageMapper
 import dev.blazelight.p4oc.data.server.ActiveServerApiProvider
 import dev.blazelight.p4oc.data.workspace.WorkspaceClient
 import dev.blazelight.p4oc.domain.model.OpenCodeEvent
+import dev.blazelight.p4oc.domain.server.ScopedEvent
 import dev.blazelight.p4oc.domain.server.ServerGeneration
 import dev.blazelight.p4oc.domain.server.WorkspaceKey
 import dev.blazelight.p4oc.domain.workspace.Workspace
@@ -22,7 +22,8 @@ class SessionRepositoryProvider(
     private val activeServerApiProvider: ActiveServerApiProvider,
     private val messageMapper: MessageMapper,
     private val serverConnectionRegistry: ServerConnectionRegistry,
-    dispatcher: CoroutineDispatcher = Dispatchers.Default,
+    private val dispatcher: CoroutineDispatcher = Dispatchers.Default,
+    private val repositoryDispatcher: CoroutineDispatcher = Dispatchers.IO,
 ) {
     data class Lease(
         val workspaceClient: WorkspaceClient,
@@ -59,7 +60,11 @@ class SessionRepositoryProvider(
                 apiProvider = activeServerApiProvider,
                 connectionState = serverConnectionRegistry.connectionState(workspace.server, generation),
             )
-            val repository = SessionRepositoryImpl(workspaceClient, messageMapper, dispatcher = dispatcher)
+            val repository = SessionRepositoryImpl(
+                workspaceClient,
+                messageMapper,
+                dispatcher = repositoryDispatcher,
+            )
             Entry(
                 workspaceClient = workspaceClient,
                 repository = repository,
@@ -97,12 +102,7 @@ class SessionRepositoryProvider(
             // per-workspace fan-out. Reconnect is delivered exclusively via the registry's exact
             // server-and-generation connection-state transition in [collectReconnects]; ignoring
             // it here prevents a duplicate signal on global workspaces.
-            val isReconnectMarker = scopedEvent.event is OpenCodeEvent.Connected
-            if (!isReconnectMarker &&
-                scopedEvent.serverRef.endpointKey == workspace.server.endpointKey &&
-                scopedEvent.generation == generation &&
-                scopedEvent.workspaceKey == workspace.key
-            ) {
+            if (isDeliverableEvent(scopedEvent, workspace, generation)) {
                 try {
                     repository.acceptEvent(scopedEvent.event)
                 } catch (ce: CancellationException) {
@@ -120,15 +120,29 @@ class SessionRepositoryProvider(
         }
     }
 
+    /** True for a real event scoped to this exact server, generation, and workspace key. */
+    private fun isDeliverableEvent(
+        scopedEvent: ScopedEvent,
+        workspace: Workspace,
+        generation: ServerGeneration,
+    ): Boolean {
+        if (scopedEvent.event is OpenCodeEvent.Connected) return false
+        return scopedEvent.serverRef == workspace.server &&
+            scopedEvent.generation == generation &&
+            scopedEvent.workspaceKey == workspace.key
+    }
+
     /**
      * Delivers the canonical reconnect signal to this workspace repository from the exact
-     * server-and-generation connection state, so open conversations self-heal after an SSE
+     * server-and-generation event-source epoch, so open conversations self-heal after an SSE
      * reconnect without navigation (issue #14: had to leave and re-enter to see updates).
      *
-     * The synthetic [OpenCodeEvent.Connected] carries no directory, so it never reaches the
-     * per-workspace event fan-out; the raw event from the scoped stream is deliberately ignored
-     * in [collectWorkspaceEvents] to avoid a duplicate on global workspaces. The registry's exact
-     * non-Connected -> Connected transition is the single authoritative reconnect signal.
+     * The epoch is monotonic and increments on every successful (re)connect of the active
+     * generation, so any later epoch increase is a fresh reconnect. The synthetic
+     * [OpenCodeEvent.Connected] carries no directory and never reaches the per-workspace fan-out;
+     * the raw event from the scoped stream is deliberately ignored in [collectWorkspaceEvents] to
+     * avoid a duplicate on global workspaces. The registry's exact-server exact-generation epoch
+     * increase is the single authoritative reconnect signal.
      */
     @Suppress("TooGenericExceptionCaught") // resilience guard: one bad repo must not stop a repo's delivery
     private fun collectReconnects(
@@ -136,13 +150,14 @@ class SessionRepositoryProvider(
         generation: ServerGeneration,
         repository: SessionRepositoryImpl,
     ): Job = scope.launch {
-        val connectionState = serverConnectionRegistry.connectionState(workspace.server, generation)
-        // Seed from the current value so an already-Connected registry (e.g. the workspace was
-        // acquired mid-connection) does not emit a redundant reconnect on collection start.
-        var wasConnected = connectionState.value is ConnectionState.Connected
-        connectionState.collect { state ->
-            val nowConnected = state is ConnectionState.Connected
-            if (nowConnected && !wasConnected) {
+        val epoch = serverConnectionRegistry.connectionEpoch(workspace.server, generation)
+        // The first emission is the baseline (no reconnect yet), so a generation already connected
+        // at collection start (epoch > 0) does not emit a redundant reconnect. Any later increase
+        // is a fresh reconnect.
+        var baselineSeen = false
+        var lastEpoch = 0L
+        epoch.collect { value ->
+            if (baselineSeen && value > lastEpoch) {
                 try {
                     repository.acceptEvent(OpenCodeEvent.Connected)
                 } catch (ce: CancellationException) {
@@ -155,7 +170,8 @@ class SessionRepositoryProvider(
                     )
                 }
             }
-            wasConnected = nowConnected
+            lastEpoch = value
+            baselineSeen = true
         }
     }
 
