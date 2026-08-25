@@ -7,6 +7,7 @@ import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.interaction.DragInteraction
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.LazyListState
@@ -57,6 +58,8 @@ import dev.blazelight.p4oc.ui.screens.files.upload.UploadProgressSheet
 import dev.blazelight.p4oc.ui.theme.LocalOpenCodeTheme
 import dev.blazelight.p4oc.ui.theme.Sizing
 import dev.blazelight.p4oc.ui.theme.Spacing
+import kotlinx.coroutines.flow.drop
+import kotlinx.coroutines.flow.filterIsInstance
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.launch
 import org.koin.androidx.compose.koinViewModel
@@ -115,7 +118,8 @@ fun ChatScreen(
     onProviderAuthRequired: ((String) -> Unit)? = null,
     onSessionLoaded: ((sessionId: String, sessionTitle: String) -> Unit)? = null,
     onConnectionStateChanged: ((SessionConnectionState?) -> Unit)? = null,
-    isActiveTab: Boolean = true
+    isActiveTab: Boolean = true,
+    requestInitialInputFocus: Boolean = false,
 ) {
     val uiState by viewModel.uiState.collectAsStateWithLifecycle()
     val messages by viewModel.messages.collectAsStateWithLifecycle()
@@ -205,21 +209,13 @@ fun ChatScreen(
         findChatMatches(messageBlocks, scrollRestorationState.searchQuery)
     }
     val coroutineScope = rememberCoroutineScope()
+    var composerFocused by remember { mutableStateOf(false) }
 
-    // Derived state: check if the bottom edge of the last rendered item is visible.
-    val isAtBottom by remember {
-        derivedStateOf {
-            val layoutInfo = listState.layoutInfo
-            val lastVisible = layoutInfo.visibleItemsInfo.lastOrNull()
-            val lastItemIndex = layoutInfo.totalItemsCount - 1
-            val lastItemBottom = (lastVisible?.offset ?: 0) + (lastVisible?.size ?: 0)
-            layoutInfo.totalItemsCount == 0 ||
-                (
-                    lastVisible != null &&
-                        lastVisible.index >= lastItemIndex &&
-                        lastItemBottom <= layoutInfo.viewportEndOffset
-                    )
-        }
+    // Derived state: true when the list cannot advance toward the tail. Keyed on listState so a
+    // session's async null->id load (which recreates listState) cannot leave this observing a
+    // discarded, zero-item instance.
+    val isAtBottom by remember(listState) {
+        derivedStateOf { !listState.canScrollForward }
     }
 
     val focusManager = LocalFocusManager.current
@@ -236,12 +232,23 @@ fun ChatScreen(
         }
     }
 
-    // Match the sticky follow-tail model: only update follow state after the user's scroll settles.
+    // A user drag disables tail-following immediately so IME pinning cannot fight the gesture.
+    LaunchedEffect(listState, uiState.session?.id) {
+        listState.interactionSource.interactions
+            .filterIsInstance<DragInteraction.Start>()
+            .collect { scrollRestorationState.onUserScrollStarted() }
+    }
+
+    // Re-evaluate follow state after any scroll (touch, wheel, keyboard, semantics/TalkBack)
+    // settles. The initial emission is ignored so a freshly composed list does not settle from a
+    // stale position; the frame wait lets the final layout commit before reading the live bottom.
     LaunchedEffect(listState, uiState.session?.id) {
         snapshotFlow { listState.isScrollInProgress }
-            .collect { isScrolling ->
-                if (!isScrolling) {
-                    scrollRestorationState.onScrollSettled(isAtBottom)
+            .drop(1)
+            .collect { scrolling ->
+                if (!scrolling) {
+                    withFrameNanos { }
+                    scrollRestorationState.onScrollSettled(!listState.canScrollForward)
                 }
             }
     }
@@ -260,6 +267,7 @@ fun ChatScreen(
     val pendingQuestionId = pendingQuestion?.id
     val pendingPermissionCallIds = pendingPermissionsByCallId.keys
     val pendingPermissionVersion = pendingPermissionAttentionVersion(pendingPermissionCallIds)
+    val hasRenderableTail = !uiState.isLoading && (messages.isNotEmpty() || pendingQuestionId != null)
     var previouslyPendingPermissionCallIds by remember(uiState.session?.id) {
         mutableStateOf(emptySet<String>())
     }
@@ -269,6 +277,27 @@ fun ChatScreen(
         if (scrollRestorationState.onTailContentChanged(messages.isNotEmpty() || pendingQuestionId != null)) {
             listState.scrollChatToBottom()
         }
+    }
+
+    // While the composer is focused and the user is already following the tail, keep the latest
+    // content visible as the IME opens or resizes. This never forces a scrolled-away viewport back
+    // to the tail: it only pins when shouldFollowTail is already true, and scrolling away mid-typing
+    // clears that flag so later viewport changes do not snap. The LazyColumn's actual viewport
+    // height is observed (not the IME inset), so the effect reacts to real layout changes without
+    // recomposing ChatScreen per animation pixel. The initial emission is ignored so merely
+    // focusing the composer cannot scroll; only a real viewport-height transition pins the tail.
+    LaunchedEffect(listState, composerFocused, scrollRestorationState.shouldFollowTail, hasRenderableTail) {
+        if (!scrollRestorationState.shouldPinTailForIme(composerFocused, hasRenderableTail)) {
+            return@LaunchedEffect
+        }
+        snapshotFlow {
+            val info = listState.layoutInfo
+            info.viewportEndOffset - info.viewportStartOffset
+        }
+            .drop(1)
+            .collect {
+                listState.scrollChatToBottom()
+            }
     }
 
     // Permissions can arrive for a tool rendered far above the current viewport without changing
@@ -309,8 +338,6 @@ fun ChatScreen(
 
     // The loading screen hides the list; once the session content is visible, land at the tail.
     LaunchedEffect(uiState.session?.id, uiState.isLoading, messageCount, pendingQuestionId) {
-        val hasRenderableTail = !uiState.isLoading &&
-            (messages.isNotEmpty() || pendingQuestionId != null)
         when (scrollRestorationState.onContentReady(hasRenderableTail)) {
             InitialTailDecision.ScrollToTail -> {
                 snapshotFlow { listState.layoutInfo.totalItemsCount }.first { it > 0 }
@@ -405,7 +432,9 @@ fun ChatScreen(
                         commandLoadError = uiState.commandLoadError,
                         onRetryCommands = { viewModel.refreshCommandsIfNeeded(force = true) },
                         onCommandSelected = { /* Command text is already updated via onValueChange */ },
-                        requestFocus = isActiveTab,
+                        requestFocus = requestInitialInputFocus,
+                        isActiveTab = isActiveTab,
+                        onComposerFocusChanged = { composerFocused = it },
                         enterToSend = chatSettings.enterToSend,
                     )
                 }

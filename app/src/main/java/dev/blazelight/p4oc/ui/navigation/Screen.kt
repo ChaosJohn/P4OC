@@ -11,9 +11,13 @@ sealed class Screen(val route: String) {
     data object Home : Screen("home")
     data object Sessions : Screen("sessions")
 
-    data object Chat : Screen("chat/{sessionId}") {
-        fun createRoute(sessionId: String) = "chat/${Uri.encode(sessionId)}"
+    data object Chat : Screen("chat/{sessionId}?focusInput={focusInput}") {
+        fun createRoute(sessionId: String, focusInput: Boolean = false): String {
+            val route = "chat/${sessionId.routeEncode()}"
+            return if (focusInput) "$route?focusInput=true" else route
+        }
         const val ARG_SESSION_ID = "sessionId"
+        const val ARG_FOCUS_INPUT = "focusInput"
     }
 
     data object Terminal : Screen("terminal/{ptyId}") {

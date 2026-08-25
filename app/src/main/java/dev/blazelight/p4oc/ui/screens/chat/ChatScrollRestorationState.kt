@@ -35,6 +35,11 @@ internal class ChatScrollRestorationState(
         }
     }
 
+    /** A user drag has begun; stop following the tail so IME pinning cannot fight the gesture. */
+    fun onUserScrollStarted() {
+        shouldFollowTail = false
+    }
+
     fun onTailContentChanged(hasRenderableTail: Boolean): Boolean {
         val shouldScrollToTail = didInitialTailScroll && hasRenderableTail && shouldFollowTail
         if (didInitialTailScroll && hasRenderableTail && !shouldFollowTail) {
@@ -47,6 +52,9 @@ internal class ChatScrollRestorationState(
         shouldFollowTail = true
         hasNewContentWhileAway = false
     }
+
+    fun shouldPinTailForIme(composerFocused: Boolean, hasRenderableTail: Boolean): Boolean =
+        composerFocused && hasRenderableTail && shouldFollowTail
 
     fun onContentReady(hasRenderableTail: Boolean): InitialTailDecision {
         val decision = when {

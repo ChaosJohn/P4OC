@@ -354,7 +354,11 @@ class TabManager {
     }
 
     private fun persistableStartRoute(tab: TabInstance): String = when (val sessionId = tab.sessionId) {
-        null -> if (tab.startRoute.startsWith("terminal/")) Screen.Sessions.route else tab.startRoute
+        null -> when {
+            tab.startRoute.startsWith("chat/") -> tab.startRoute.substringBefore('?')
+            tab.startRoute.startsWith("terminal/") -> Screen.Sessions.route
+            else -> tab.startRoute
+        }
         else -> TabChatRouteCodec.chatRoute(sessionId)
     }
 }
