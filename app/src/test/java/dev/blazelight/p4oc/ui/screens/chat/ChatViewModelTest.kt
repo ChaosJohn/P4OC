@@ -17,16 +17,19 @@ import dev.blazelight.p4oc.data.remote.dto.MessageInfoDto
 import dev.blazelight.p4oc.data.remote.dto.MessageTimeDto
 import dev.blazelight.p4oc.data.remote.dto.MessageWrapperDto
 import dev.blazelight.p4oc.data.remote.dto.ModelRefDto
+import dev.blazelight.p4oc.data.remote.dto.PartDto
 import dev.blazelight.p4oc.data.remote.dto.RevertSessionRequest
 import dev.blazelight.p4oc.data.remote.dto.SendMessageRequest
 import dev.blazelight.p4oc.data.remote.dto.SessionDto
 import dev.blazelight.p4oc.data.remote.dto.SessionRevertDto
+import dev.blazelight.p4oc.data.remote.dto.SessionStatusDto
 import dev.blazelight.p4oc.data.remote.dto.TimeDto
 import dev.blazelight.p4oc.data.remote.mapper.MessageMapper
 import dev.blazelight.p4oc.data.server.ActiveServerApiProvider
 import dev.blazelight.p4oc.data.session.SessionRepositoryImpl
 import dev.blazelight.p4oc.data.workspace.WorkspaceClient
 import dev.blazelight.p4oc.domain.model.Message
+import dev.blazelight.p4oc.domain.model.MessageError
 import dev.blazelight.p4oc.domain.model.MessageWithParts
 import dev.blazelight.p4oc.domain.model.OpenCodeEvent
 import dev.blazelight.p4oc.domain.model.Part
@@ -36,10 +39,12 @@ import dev.blazelight.p4oc.domain.model.QuestionRequest
 import dev.blazelight.p4oc.domain.model.Session
 import dev.blazelight.p4oc.domain.model.SessionPresence
 import dev.blazelight.p4oc.domain.model.SessionStatus
+import dev.blazelight.p4oc.domain.model.Todo
 import dev.blazelight.p4oc.domain.model.TokenUsage
 import dev.blazelight.p4oc.domain.server.ScopedEvent
 import dev.blazelight.p4oc.domain.server.ServerGeneration
 import dev.blazelight.p4oc.domain.server.ServerRef
+import dev.blazelight.p4oc.domain.session.SessionId
 import dev.blazelight.p4oc.domain.workspace.Workspace
 import dev.blazelight.p4oc.ui.components.chat.SelectedFile
 import dev.blazelight.p4oc.ui.navigation.Screen
@@ -50,7 +55,10 @@ import io.mockk.every
 import io.mockk.mockk
 import io.mockk.mockkObject
 import io.mockk.slot
+import io.mockk.spyk
 import io.mockk.unmockkObject
+import io.mockk.verify
+import kotlinx.coroutines.CompletableDeferred
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.ExperimentalCoroutinesApi
@@ -60,8 +68,10 @@ import kotlinx.coroutines.flow.flowOf
 import kotlinx.coroutines.test.StandardTestDispatcher
 import kotlinx.coroutines.test.TestDispatcher
 import kotlinx.coroutines.test.TestScope
+import kotlinx.coroutines.test.advanceTimeBy
 import kotlinx.coroutines.test.advanceUntilIdle
 import kotlinx.coroutines.test.resetMain
+import kotlinx.coroutines.test.runCurrent
 import kotlinx.coroutines.test.runTest
 import kotlinx.coroutines.test.setMain
 import kotlinx.serialization.json.Json
@@ -81,6 +91,7 @@ import retrofit2.HttpException
 import retrofit2.Response
 
 @OptIn(ExperimentalCoroutinesApi::class)
+@Suppress("LargeClass")
 class ChatViewModelTest {
 
     @get:Rule
@@ -274,6 +285,49 @@ class ChatViewModelTest {
     }
 
     @Test
+    fun sessionStatusChanged_usageLimitRetry_explainsWhyRunIsWaiting() = runTest {
+        val vm = createViewModel()
+
+        emitEvent(
+            OpenCodeEvent.SessionStatusChanged(
+                "session-1",
+                SessionStatus.Retry(
+                    attempt = 2,
+                    message = "Free usage exceeded, subscribe to Go",
+                    next = 0L,
+                ),
+            )
+        )
+        advanceUntilIdle()
+
+        assertTrue(vm.uiState.value.isBusy)
+        assertEquals(
+            "Model usage limit reached. OpenCode is retrying (attempt 2).",
+            vm.uiState.value.runNotice,
+        )
+    }
+
+    @Test
+    fun sessionError_rateLimitExplainsFailure_andClearsBusyState() = runTest {
+        val vm = createViewModel()
+        emitEvent(OpenCodeEvent.SessionStatusChanged("session-1", SessionStatus.Busy))
+
+        emitEvent(
+            OpenCodeEvent.SessionError(
+                "session-1",
+                MessageError(name = "APIError", message = "Rate limit exceeded", statusCode = 429),
+            )
+        )
+        advanceUntilIdle()
+
+        assertFalse(vm.uiState.value.isBusy)
+        assertEquals(
+            "Model usage limit reached. Try again later or choose another model.",
+            vm.uiState.value.error,
+        )
+    }
+
+    @Test
     fun sessionStatusChanged_idle_clearsStreamingFlags() = runTest {
         val vm = createViewModel()
         emitEvent(OpenCodeEvent.MessageUpdated(assistantMessage(id = "m1", sessionId = "session-1", createdAt = 1)))
@@ -409,6 +463,356 @@ class ChatViewModelTest {
         advanceUntilIdle()
         assertEquals("", vm.uiState.value.inputText)
         assertFalse(vm.uiState.value.isSending)
+        assertTrue(vm.uiState.value.isBusy)
+    }
+
+    @Test
+    fun sendMessage_reconcilesEmptyCompletedResponse_whenTerminalSseIsMissing() = runTest {
+        coEvery { api.getMessages("session-1", 100, null, "/test", null) } returnsMany listOf(
+            emptyList(),
+            listOf(
+                userMessageDto("user-new", createdAt = 10),
+                assistantMessageDto("assistant-empty", createdAt = 11, completedAt = 12),
+            ),
+        )
+        coEvery { api.getSessionStatuses("/test", null) } returns mapOf(
+            "session-1" to SessionStatusDto(type = "idle")
+        )
+        coEvery { api.sendMessageAsync(any(), any(), any(), null) } returns Unit
+        val vm = createViewModel()
+        vm.updateInput("hello")
+
+        vm.sendMessage()
+        advanceUntilIdle()
+
+        assertFalse(vm.uiState.value.isBusy)
+        assertEquals(
+            "The model returned no response. The provider may be unavailable or rate-limited.",
+            vm.uiState.value.error,
+        )
+        assertEquals(listOf("user-new", "assistant-empty"), vm.currentMessages().map { it.message.id })
+    }
+
+    @Test
+    fun sendMessage_restIdleStatus_doesNotCancelItsOwnMessageRecovery() = runTest {
+        // Physical failure sequence: the run's terminal SSE is missed, REST status already says
+        // Idle, and the completed-but-empty assistant exists only behind the canonical message
+        // fetch. Gate that fetch so the poll is suspended inside it with the Idle status in hand.
+        val messagesGate = CompletableDeferred<Unit>()
+        var messageCalls = 0
+        coEvery { api.getSessionStatuses("/test", null) } returns mapOf(
+            "session-1" to SessionStatusDto(type = "idle")
+        )
+        coEvery { api.getMessages("session-1", 100, null, "/test", null) } coAnswers {
+            messageCalls += 1
+            if (messageCalls == 1) {
+                // The ViewModel's initial history load: nothing on the server yet.
+                emptyList()
+            } else {
+                // The poll's canonical reconciliation fetch: held open so the test can observe
+                // whether the poll survives having already seen the REST Idle status.
+                messagesGate.await()
+                listOf(
+                    userMessageDto("user-new", createdAt = 10),
+                    assistantMessageDto("assistant-empty", createdAt = 11, completedAt = 12),
+                )
+            }
+        }
+        coEvery { api.sendMessageAsync(any(), any(), any(), null) } returns Unit
+        val vm = createViewModel()
+        vm.updateInput("hello")
+
+        vm.sendMessage()
+        runCurrent()
+        advanceTimeBy(2_000)
+        runCurrent()
+        // The poll must be suspended inside the gated reconciliation fetch with the run still
+        // busy. On the pre-fix order the REST Idle was published before this fetch, so by now the
+        // responseCompletedToken collector has applied Idle (isBusy=false) and cancelled the poll
+        // while it sits at the gate — completing the gate would import nothing.
+        assertEquals(2, messageCalls)
+        assertTrue(vm.uiState.value.isBusy)
+        messagesGate.complete(Unit)
+        advanceUntilIdle()
+
+        assertFalse(vm.uiState.value.isBusy)
+        assertEquals(
+            "The model returned no response. The provider may be unavailable or rate-limited.",
+            vm.uiState.value.error,
+        )
+        assertEquals(listOf("user-new", "assistant-empty"), vm.currentMessages().map { it.message.id })
+    }
+
+    @Test
+    fun sendMessage_cancelsReconciliation_whenRunCompletesViaSse() = runTest {
+        coEvery { api.getMessages("session-1", 100, null, "/test", null) } returns emptyList()
+        coEvery { api.getSessionStatuses("/test", null) } returns mapOf(
+            "session-1" to SessionStatusDto(type = "busy")
+        )
+        coEvery { api.sendMessageAsync(any(), any(), any(), null) } returns Unit
+        val vm = createViewModel()
+        vm.updateInput("hello")
+
+        vm.sendMessage()
+        // Let the send coroutine start the bounded poll, then advance past the first delay so the
+        // first reconciliation iteration runs.
+        runCurrent()
+        advanceTimeBy(2_000)
+        runCurrent()
+        coVerify(exactly = 1) { api.getSessionStatuses("/test", null) }
+
+        // A terminal SSE event completes the run and must cancel the in-flight poll.
+        emitEvent(OpenCodeEvent.SessionStatusChanged("session-1", SessionStatus.Idle))
+        advanceUntilIdle()
+
+        // No further reconciliation iterations run after the run completes.
+        coVerify(exactly = 1) { api.getSessionStatuses("/test", null) }
+        assertFalse(vm.uiState.value.isBusy)
+    }
+
+    @Test
+    fun sendMessage_replacementSend_cancelsPriorReconciliation() = runTest {
+        val gate = CompletableDeferred<Unit>()
+        var statusCalls = 0
+        coEvery { api.getSessionStatuses("/test", null) } coAnswers {
+            statusCalls += 1
+            if (statusCalls == 1) gate.await()
+            mapOf("session-1" to SessionStatusDto(type = "busy"))
+        }
+        coEvery { api.getMessages("session-1", 100, null, "/test", null) } returns emptyList()
+        coEvery { api.sendMessageAsync(any(), any(), any(), null) } returns Unit
+        val vm = createViewModel()
+        vm.updateInput("hello")
+
+        // First send starts a poll whose first status lookup blocks on the gate.
+        vm.sendMessage()
+        runCurrent()
+        advanceTimeBy(2_000)
+        runCurrent()
+        assertEquals(1, statusCalls)
+
+        // A replacement send must cancel the in-flight poll at the send boundary.
+        vm.updateInput("hello")
+        vm.sendMessage()
+        runCurrent()
+        gate.complete(Unit)
+        advanceUntilIdle()
+
+        // The old poll was cancelled: it never resumes to a second status lookup. Only the
+        // replacement poll's four bounded iterations run (plus the one blocked call).
+        assertEquals(5, statusCalls)
+    }
+
+    @Test
+    fun sendMessage_pollInvokesRepositoryReconcileMessages() = runTest {
+        val repo = spyk(
+            SessionRepositoryImpl(
+                workspaceClient,
+                messageMapper,
+                dispatcher = StandardTestDispatcher(testScheduler),
+            )
+        )
+        coEvery { repo.reconcileMessages(SessionId("session-1")) } returns Unit
+        coEvery { api.getSessionStatuses("/test", null) } returns mapOf(
+            "session-1" to SessionStatusDto(type = "busy")
+        )
+        coEvery { api.getMessages("session-1", 100, null, "/test", null) } returns emptyList()
+        coEvery { api.sendMessageAsync(any(), any(), any(), null) } returns Unit
+        val vm = createViewModel(repository = repo)
+        vm.updateInput("hello")
+
+        vm.sendMessage()
+        advanceUntilIdle()
+
+        // The bounded poll drives the shared repository recovery primitive directly, not a second
+        // message buffer or an unsafe overwrite path.
+        coVerify(atLeast = 1) { repo.reconcileMessages(SessionId("session-1")) }
+    }
+
+    @Test
+    fun sendMessage_completedIntermediateAssistantWhileBusy_doesNotSynthesizeCompletion() = runTest {
+        coEvery { api.getMessages("session-1", 100, null, "/test", null) } returnsMany listOf(
+            emptyList(),
+            listOf(
+                userMessageDto("user-new", createdAt = 10),
+                assistantMessageDto(
+                    "assistant-step",
+                    createdAt = 11,
+                    completedAt = 12,
+                    parts = listOf(
+                        PartDto(
+                            id = "p-step",
+                            sessionID = "session-1",
+                            messageID = "assistant-step",
+                            type = "text",
+                            text = "intermediate step output",
+                        )
+                    ),
+                ),
+            ),
+        )
+        coEvery { api.getSessionStatuses("/test", null) } returns mapOf(
+            "session-1" to SessionStatusDto(type = "busy")
+        )
+        coEvery { api.sendMessageAsync(any(), any(), any(), null) } returns Unit
+        val vm = createViewModel()
+        vm.updateInput("hello")
+
+        vm.sendMessage()
+        advanceUntilIdle()
+
+        // The authoritative REST status is still Busy, so the completed assistant is an
+        // intermediate step of a multi-step run: no synthesized terminal Idle, no completion
+        // haptic, and the bounded poll runs its full four-iteration window instead of
+        // cancelling itself mid-run.
+        assertTrue(vm.uiState.value.isBusy)
+        assertNull(vm.uiState.value.error)
+        verify(exactly = 0) { hapticFeedback.vibrate(any()) }
+        coVerify(exactly = 4) { api.getSessionStatuses("/test", null) }
+    }
+
+    @Test
+    fun runStalledWarning_survivesUnrelatedRepositoryEmissions_untilTerminalBoundary() = runTest {
+        coEvery { api.getMessages("session-1", 100, null, "/test", null) } returns emptyList()
+        coEvery { api.getSessionStatuses("/test", null) } returns mapOf(
+            "session-1" to SessionStatusDto(type = "busy")
+        )
+        coEvery { api.sendMessageAsync(any(), any(), any(), null) } returns Unit
+        val vm = createViewModel()
+        vm.updateInput("hello")
+
+        vm.sendMessage()
+        advanceUntilIdle()
+
+        val warning = "No completion update was received. The run may still be active; stop it before retrying."
+        assertEquals(warning, vm.uiState.value.runNotice)
+
+        // An unrelated repository emission while the run is still busy (todo progress) must not
+        // erase the stalled-run warning.
+        emitEvent(
+            OpenCodeEvent.TodoUpdated(
+                "session-1",
+                listOf(Todo(id = "t1", content = "step", status = "pending", priority = "medium")),
+            )
+        )
+        flushMessages()
+        assertEquals(warning, vm.uiState.value.runNotice)
+        assertTrue(vm.uiState.value.isBusy)
+
+        // The real terminal event finally arrives: the boundary clears the warning.
+        emitEvent(OpenCodeEvent.SessionStatusChanged("session-1", SessionStatus.Idle))
+        flushMessages()
+        assertNull(vm.uiState.value.runNotice)
+        assertFalse(vm.uiState.value.isBusy)
+    }
+
+    @Test
+    fun retryNotice_persistsAcrossUnrelatedEmissions_andClearsWhenRunResumesBusy() = runTest {
+        val vm = createViewModel()
+
+        emitEvent(
+            OpenCodeEvent.SessionStatusChanged(
+                "session-1",
+                SessionStatus.Retry(attempt = 1, message = "Rate limit exceeded", next = 0L),
+            )
+        )
+        flushMessages()
+        assertEquals(
+            "Model usage limit reached. OpenCode is retrying (attempt 1).",
+            vm.uiState.value.runNotice,
+        )
+
+        // An unrelated emission while the status is still Retry recomputes the same notice —
+        // the Retry status, not stickiness, is its source of truth.
+        emitEvent(
+            OpenCodeEvent.TodoUpdated(
+                "session-1",
+                listOf(Todo(id = "t1", content = "step", status = "pending", priority = "medium")),
+            )
+        )
+        flushMessages()
+        assertEquals(
+            "Model usage limit reached. OpenCode is retrying (attempt 1).",
+            vm.uiState.value.runNotice,
+        )
+
+        // The retry succeeds and the run resumes: a transient Retry notice must not stick.
+        emitEvent(OpenCodeEvent.SessionStatusChanged("session-1", SessionStatus.Busy))
+        flushMessages()
+        assertNull(vm.uiState.value.runNotice)
+        assertTrue(vm.uiState.value.isBusy)
+    }
+
+    @Test
+    fun preexistingCompletionToken_doesNotFireSpuriousCompletionOnAttach() = runTest {
+        val repo = SessionRepositoryImpl(
+            workspaceClient,
+            messageMapper,
+            dispatcher = StandardTestDispatcher(testScheduler),
+        )
+        // A run in this session completed before this ViewModel attached (e.g. another tab
+        // holding the same session state), so the repository token is already nonzero.
+        repo.acceptEvent(OpenCodeEvent.SessionStatusChanged("session-1", SessionStatus.Busy))
+        repo.acceptEvent(OpenCodeEvent.SessionIdle("session-1"))
+
+        val vm = createViewModel(repository = repo)
+
+        // The subscription snapshot is a baseline, not a fresh completion: no haptic, no unread.
+        verify(exactly = 0) { hapticFeedback.vibrate(any()) }
+        assertFalse(vm.uiState.value.isBusy)
+        assertFalse(vm.hasUnreadResponse.value)
+    }
+
+    @Test
+    fun sendMessage_staleRunError_doesNotFlickerBackDuringGatedSend() = runTest {
+        coEvery { api.getMessages("session-1", 100, null, "/test", null) } returns emptyList()
+        coEvery { api.getSessionStatuses("/test", null) } returns mapOf(
+            "session-1" to SessionStatusDto(type = "busy")
+        )
+        val sendGate = CompletableDeferred<Unit>()
+        coEvery { api.sendMessageAsync(any(), any(), any(), null) } coAnswers { sendGate.await() }
+        val vm = createViewModel()
+        emitEvent(
+            OpenCodeEvent.SessionError(
+                "session-1",
+                MessageError(name = "APIError", message = "Rate limit exceeded", statusCode = 429),
+            )
+        )
+        flushMessages()
+        assertEquals(
+            "Model usage limit reached. Try again later or choose another model.",
+            vm.uiState.value.error,
+        )
+
+        vm.updateInput("hello")
+        vm.sendMessage()
+        flushMessages()
+        assertNull(vm.uiState.value.error)
+
+        // Repository emissions while the send is still in flight carry the previous run's error;
+        // it must not flicker back before the synthetic Busy clears it — including after the
+        // first emission has already reset isSending.
+        emitEvent(
+            OpenCodeEvent.TodoUpdated(
+                "session-1",
+                listOf(Todo(id = "t1", content = "first", status = "pending", priority = "medium")),
+            )
+        )
+        flushMessages()
+        assertNull(vm.uiState.value.error)
+        emitEvent(
+            OpenCodeEvent.TodoUpdated(
+                "session-1",
+                listOf(Todo(id = "t2", content = "second", status = "pending", priority = "medium")),
+            )
+        )
+        flushMessages()
+        assertNull(vm.uiState.value.error)
+
+        // The gated send completes: the synthetic Busy clears the repository error for real.
+        sendGate.complete(Unit)
+        advanceUntilIdle()
+        assertNull(vm.uiState.value.error)
         assertTrue(vm.uiState.value.isBusy)
     }
 
@@ -613,13 +1017,14 @@ class ChatViewModelTest {
         }
 
     private fun TestScope.createViewModel(
-        savedStateHandle: SavedStateHandle = SavedStateHandle(mapOf(Screen.Chat.ARG_SESSION_ID to "session-1"))
-    ): ChatViewModel {
-        sessionRepository = SessionRepositoryImpl(
+        savedStateHandle: SavedStateHandle = SavedStateHandle(mapOf(Screen.Chat.ARG_SESSION_ID to "session-1")),
+        repository: SessionRepositoryImpl = SessionRepositoryImpl(
             workspaceClient,
             messageMapper,
             dispatcher = StandardTestDispatcher(testScheduler),
-        )
+        ),
+    ): ChatViewModel {
+        sessionRepository = repository
         val fileRepository = testFileRepository()
         val vm = ChatViewModel(
             savedStateHandle = savedStateHandle,
@@ -686,12 +1091,17 @@ class ChatViewModelTest {
         )
     }
 
-    private fun assistantMessageDto(id: String, createdAt: Long): MessageWrapperDto {
+    private fun assistantMessageDto(
+        id: String,
+        createdAt: Long,
+        completedAt: Long? = null,
+        parts: List<PartDto> = emptyList(),
+    ): MessageWrapperDto {
         return MessageWrapperDto(
             info = MessageInfoDto(
                 id = id,
                 sessionID = "session-1",
-                time = MessageTimeDto(created = createdAt),
+                time = MessageTimeDto(created = createdAt, completed = completedAt),
                 role = "assistant",
                 parentID = "",
                 providerID = "provider",
@@ -699,7 +1109,7 @@ class ChatViewModelTest {
                 agent = "assistant",
                 mode = "chat",
             ),
-            parts = emptyList(),
+            parts = parts,
         )
     }
 

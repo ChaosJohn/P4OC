@@ -690,6 +690,11 @@ class EventMapper constructor(
                         MessageError(
                             name = error.name,
                             message = (error.data?.get("message") as? JsonPrimitive)?.contentOrNull,
+                            statusCode = (error.data?.get("statusCode") as? JsonPrimitive)?.intOrNull,
+                            isRetryable = (error.data?.get("isRetryable") as? JsonPrimitive)
+                                ?.contentOrNull
+                                ?.toBooleanStrictOrNull()
+                                ?: false,
                             providerID = (error.data?.get("providerID") as? JsonPrimitive)?.contentOrNull,
                             responseBody = (error.data?.get("responseBody") as? JsonPrimitive)?.contentOrNull,
                         )

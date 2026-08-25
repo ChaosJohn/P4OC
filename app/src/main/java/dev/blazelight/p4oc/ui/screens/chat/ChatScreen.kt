@@ -362,6 +362,7 @@ fun ChatScreen(
                         color = LocalOpenCodeTheme.current.border,
                         thickness = Sizing.strokeThin
                     )
+                    uiState.runNotice?.let { notice -> RunNoticeBanner(notice) }
                     ModelAgentSelectorBar(
                         availableAgents = availableAgents,
                         selectedAgent = selectedAgent,
@@ -704,6 +705,25 @@ internal fun latestAssistantContextUsage(messages: List<MessageWithParts>): Assi
             )
         }
     }
+
+@Composable
+@Suppress("FunctionNaming")
+private fun RunNoticeBanner(message: String) {
+    val theme = LocalOpenCodeTheme.current
+    Surface(
+        color = theme.warning.copy(alpha = 0.15f),
+        shape = RectangleShape,
+    ) {
+        Text(
+            text = "! $message",
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(horizontal = Spacing.md, vertical = Spacing.sm),
+            style = MaterialTheme.typography.bodySmall,
+            color = theme.warning,
+        )
+    }
+}
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable

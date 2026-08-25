@@ -31,7 +31,10 @@ import dev.blazelight.p4oc.domain.session.SessionId
 import dev.blazelight.p4oc.ui.components.chat.SelectedFile
 import dev.blazelight.p4oc.ui.navigation.Screen
 import dev.blazelight.p4oc.ui.screens.files.upload.UploadCoordinator
+import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.FlowPreview
+import kotlinx.coroutines.Job
+import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.*
 import kotlinx.coroutines.launch
 import kotlinx.serialization.SerializationException
@@ -171,9 +174,13 @@ class ChatViewModel constructor(
         const val TAG = "ChatViewModel"
         private const val INITIAL_HISTORY_LIMIT = 100
         private const val HISTORY_PAGE_SIZE = 100
+        private const val HTTP_TOO_MANY_REQUESTS = 429
         private const val KEY_DRAFT_TEXT = "chat_draft_text"
         private const val KEY_ATTACHED_FILES = "chat_attached_files"
         private const val COMMAND_CATALOG_REFRESH_DEBOUNCE_MS = 150L
+        private val RESPONSE_RECONCILIATION_DELAYS_MS = listOf(2_000L, 5_000L, 10_000L, 20_000L)
+        private const val RUN_STALLED_NOTICE = "No completion update was received. " +
+            "The run may still be active; stop it before retrying."
 
         // SavedState shares Android's Binder transaction budget with the rest of the Activity.
         private const val MAX_PERSISTED_DRAFT_CHARS = 64 * 1024
@@ -395,24 +402,54 @@ class ChatViewModel constructor(
     }
 
     private var lastResponseCompletedToken = 0L
+    private var hasResponseTokenBaseline = false
+    private var responseReconciliationJob: Job? = null
+
+    // True from the moment a send clears the previous run's UI error until the run is confirmed
+    // active (Busy/Retry) or reaches a genuine terminal boundary. While set, repository emissions
+    // that still carry the previous run's error (todos, permissions, session updates arriving
+    // before the synthetic Busy clears it) must not flicker that stale error back into the UI.
+    private var suppressStaleRunErrors = false
 
     private fun applyRepositorySessionState(state: dev.blazelight.p4oc.data.session.SessionUiState) {
         dialogManager.setPermissionsByCallId(state.pendingPermissionsByCallId)
         dialogManager.setPendingQuestion(state.pendingQuestion)
 
         val isBusy = state.status is SessionStatus.Busy || state.status is SessionStatus.Retry
+        val isTerminalTransition = hasResponseTokenBaseline &&
+            state.responseCompletedToken > lastResponseCompletedToken
+        if (!hasResponseTokenBaseline) {
+            // The first collected repository state is the subscription snapshot, not a fresh
+            // completion: adopt its token as the baseline so a token accumulated before this
+            // ViewModel attached (e.g. a run completed in another tab holding the same session)
+            // can never fire a spurious completion haptic/unread badge or act as a false
+            // terminal boundary for notices and the bounded poll.
+            hasResponseTokenBaseline = true
+            lastResponseCompletedToken = state.responseCompletedToken
+        }
+        if (isBusy || isTerminalTransition) {
+            // The run is confirmed active (its Busy transition already cleared the previous run's
+            // repository error) or has genuinely completed (a fresh terminal error is real, not
+            // stale). Either way, stale-error suppression for the in-flight send ends now, before
+            // the error below is computed.
+            suppressStaleRunErrors = false
+        }
         val errorMessage = state.error?.takeUnless { it.isAborted() }?.toHumanMessage()
+        val retryNotice = (state.status as? SessionStatus.Retry)?.toHumanMessage()
         _uiState.update {
             it.copy(
                 session = state.session ?: it.session,
                 isBusy = isBusy,
                 isSending = if (state.status != null) false else it.isSending,
                 todos = state.todos,
-                error = errorMessage ?: it.error,
+                error = if (suppressStaleRunErrors) it.error else errorMessage ?: it.error,
+                runNotice = resolveRunNotice(it.runNotice, retryNotice, isTerminalTransition, isBusy),
             )
         }
 
-        if (state.responseCompletedToken > lastResponseCompletedToken) {
+        if (isTerminalTransition) {
+            responseReconciliationJob?.cancel()
+            responseReconciliationJob = null
             lastResponseCompletedToken = state.responseCompletedToken
             if (state.error?.isAborted() != true) {
                 _hasUnreadResponse.value = !_isActiveTab.value
@@ -426,6 +463,23 @@ class ChatViewModel constructor(
         hapticFeedback.vibrate(settings.vibrationPattern)
     }
 
+    private fun resolveRunNotice(
+        current: String?,
+        retryNotice: String?,
+        isTerminalTransition: Boolean,
+        isBusy: Boolean,
+    ): String? = when {
+        // A terminal boundary (completion, stop, or terminal error) retires any notice.
+        isTerminalTransition -> null
+        retryNotice != null -> retryNotice
+        // The bounded poll's stalled-run warning stays visible across unrelated repository
+        // emissions (todos, permissions, session updates) while the run remains busy; only
+        // send/stop/terminal boundaries clear it. A non-busy emission also retires it: the
+        // warning ("the run may still be active") is meaningless once the run is not running.
+        isBusy && current == RUN_STALLED_NOTICE -> current
+        else -> null
+    }
+
     // --- Message sending ---
 
     fun sendMessage() {
@@ -437,10 +491,16 @@ class ChatViewModel constructor(
             return
         }
 
-        _uiState.update { it.copy(isSending = true) }
+        // A replacement send must supersede any in-flight reconciliation from a prior send so the
+        // old poll can never reconcile the wrong assistant/status against the new run.
+        responseReconciliationJob?.cancel()
+        responseReconciliationJob = null
+        suppressStaleRunErrors = true
+        _uiState.update { it.copy(isSending = true, error = null, runNotice = null) }
         viewModelScope.launch {
             val validatedFiles = filePickerManager.validateAttachedFiles()
             if (validatedFiles.any { !it.available }) {
+                suppressStaleRunErrors = false
                 _uiState.update { it.copy(error = UNAVAILABLE_ATTACHMENTS_ERROR, isSending = false) }
                 return@launch
             }
@@ -450,6 +510,7 @@ class ChatViewModel constructor(
     }
 
     private suspend fun sendValidatedMessage(text: String, attachedFiles: List<SelectedFile>) {
+        val knownMessageIds = messages.value.mapTo(mutableSetOf()) { it.message.id }
         val selectedAgent = modelAgentManager.selectedAgent.value
         val selectedModel = modelAgentManager.selectedModel.value
         val selectedVariant = modelAgentManager.currentReasoningEffort()
@@ -467,10 +528,15 @@ class ChatViewModel constructor(
         val result = sessionRepository.sendMessageAsync(SessionId(sessionId), request).await().toApiResult()
         when (result) {
             is ApiResult.Success -> {
-                _uiState.update { it.copy(isSending = false, isBusy = true) }
+                sessionRepository.acceptEvent(
+                    OpenCodeEvent.SessionStatusChanged(sessionId, SessionStatus.Busy)
+                )
+                _uiState.update { it.copy(isSending = false, isBusy = true, runNotice = null) }
+                startResponseReconciliation(knownMessageIds)
                 AppLog.d(TAG, "sendMessage: Async call succeeded, waiting for SSE events")
             }
             is ApiResult.Error -> {
+                suppressStaleRunErrors = false
                 _uiState.update {
                     it.copy(
                         isSending = false,
@@ -479,6 +545,95 @@ class ChatViewModel constructor(
                 }
                 updateInput(text)
                 filePickerManager.restoreAttachedFiles(attachedFiles)
+            }
+        }
+    }
+
+    private fun startResponseReconciliation(knownMessageIds: Set<String>) {
+        responseReconciliationJob?.cancel()
+        responseReconciliationJob = viewModelScope.launch {
+            var lastNewAssistant: MessageWithParts? = null
+            var observedRetry = false
+
+            RESPONSE_RECONCILIATION_DELAYS_MS.forEach { delayMs ->
+                delay(delayMs)
+                if (!_uiState.value.isBusy) return@launch
+
+                val status = runCatching {
+                    workspaceClient.getSessionStatuses(workspaceClient.workspace.directory)[sessionId]
+                }.onFailure { error ->
+                    if (error is CancellationException) throw error
+                }.getOrNull()?.let(SessionMapper::mapStatusToDomain)
+                observedRetry = observedRetry || status is SessionStatus.Retry
+
+                // Reconcile canonical messages BEFORE publishing any status. A terminal Idle
+                // published first bumps responseCompletedToken, whose collector cancels this very
+                // job while the recovery fetch is still in flight — the run then ends with the
+                // completed assistant reachable only via REST and no user-facing explanation.
+                // The repository's canonical active-lease, revision-safe recovery primitive is
+                // reused rather than a second message buffer or an unsafe overwrite path.
+                runCatching {
+                    sessionRepository.reconcileMessages(SessionId(sessionId))
+                }.onFailure { error ->
+                    if (error is CancellationException) throw error
+                }
+                lastNewAssistant = messages.value.asReversed().firstOrNull { messageWithParts ->
+                    messageWithParts.message.id !in knownMessageIds &&
+                        messageWithParts.message is Message.Assistant
+                } ?: lastNewAssistant
+
+                if (reconcileCompletedAssistant(lastNewAssistant, status)) return@launch
+
+                // No assistant completed yet: only non-terminal statuses may be published. A REST
+                // Idle with no new assistant must not terminate the run (or cancel this poll);
+                // keep polling until an assistant appears or the bounded window is exhausted.
+                if (status is SessionStatus.Busy || status is SessionStatus.Retry) {
+                    sessionRepository.acceptEvent(OpenCodeEvent.SessionStatusChanged(sessionId, status))
+                }
+            }
+
+            if (!_uiState.value.isBusy) return@launch
+            if (!observedRetry) {
+                _uiState.update { it.copy(runNotice = RUN_STALLED_NOTICE) }
+            }
+        }
+    }
+
+    private fun reconcileCompletedAssistant(
+        messageWithParts: MessageWithParts?,
+        status: SessionStatus?,
+    ): Boolean {
+        val assistant = messageWithParts?.message as? Message.Assistant
+        return when {
+            assistant == null -> false
+            // An authoritative Busy/Retry just fetched from REST means nothing terminal was
+            // missed: multi-step runs emit one assistant message per step, so a completed
+            // intermediate assistant mid-run must never synthesize a terminal Idle/Error (false
+            // completion haptic, unread badge, poll cancellation). The caller republishes the
+            // non-terminal status and keeps polling.
+            status is SessionStatus.Busy || status is SessionStatus.Retry -> false
+            assistant.error != null -> {
+                sessionRepository.acceptEvent(OpenCodeEvent.SessionError(sessionId, assistant.error))
+                true
+            }
+            assistant.completedAt == null && status !is SessionStatus.Idle -> false
+            messageWithParts.parts.isEmpty() -> {
+                sessionRepository.acceptEvent(
+                    OpenCodeEvent.SessionError(
+                        sessionId,
+                        MessageError(
+                            name = "EmptyResponseError",
+                            message = "The model completed without returning content",
+                        ),
+                    )
+                )
+                true
+            }
+            else -> {
+                sessionRepository.acceptEvent(
+                    OpenCodeEvent.SessionStatusChanged(sessionId, SessionStatus.Idle)
+                )
+                true
             }
         }
     }
@@ -781,8 +936,10 @@ class ChatViewModel constructor(
         viewModelScope.launch {
             when (val result = sessionRepository.abortSession(SessionId(sessionId)).await().toApiResult()) {
                 is ApiResult.Success -> {
+                    responseReconciliationJob?.cancel()
+                    responseReconciliationJob = null
                     sessionRepository.clearStreamingFlags(SessionId(sessionId))
-                    _uiState.update { it.copy(isBusy = false, isSending = false) }
+                    _uiState.update { it.copy(isBusy = false, isSending = false, runNotice = null) }
                 }
                 is ApiResult.Error -> _uiState.update {
                     it.copy(error = "Could not stop the run. Try again.")
@@ -792,14 +949,40 @@ class ChatViewModel constructor(
     }
 
     override fun onCleared() {
+        responseReconciliationJob?.cancel()
         sessionLease.close()
         super.onCleared()
     }
 
     private fun dev.blazelight.p4oc.domain.model.MessageError.toHumanMessage(): String = when {
         name == "ProviderAuthError" -> "Provider authentication required"
+        isUsageLimit() -> "Model usage limit reached. Try again later or choose another model."
+        name == "EmptyResponseError" ->
+            "The model returned no response. The provider may be unavailable or rate-limited."
         isRetryable -> "The request failed temporarily. Try again."
         else -> "The run failed. Try again."
+    }
+
+    private fun dev.blazelight.p4oc.domain.model.MessageError.isUsageLimit(): Boolean =
+        statusCode == HTTP_TOO_MANY_REQUESTS ||
+            message.containsUsageLimitMarker() ||
+            responseBody.containsUsageLimitMarker()
+
+    private fun SessionStatus.Retry.toHumanMessage(): String =
+        if (message.containsUsageLimitMarker()) {
+            "Model usage limit reached. OpenCode is retrying${attemptLabel()}."
+        } else {
+            "The model request failed temporarily. OpenCode is retrying${attemptLabel()}."
+        }
+
+    private fun SessionStatus.Retry.attemptLabel(): String =
+        if (attempt > 0) " (attempt $attempt)" else ""
+
+    private fun String?.containsUsageLimitMarker(): Boolean {
+        val normalized = this?.lowercase().orEmpty()
+        return "rate limit" in normalized || "rate-limit" in normalized ||
+            "too many requests" in normalized || "status 429" in normalized ||
+            "free usage exceeded" in normalized || "free limit" in normalized
     }
 
     private fun <T> Result<T>.toApiResult(): ApiResult<T> = fold(
@@ -823,6 +1006,7 @@ data class ChatUiState(
     val isSending: Boolean = false,
     val isBusy: Boolean = false,
     val error: String? = null,
+    val runNotice: String? = null,
     val commands: List<Command> = emptyList(),
     val isLoadingCommands: Boolean = false,
     val hasLoadedWorkspaceCommands: Boolean = false,

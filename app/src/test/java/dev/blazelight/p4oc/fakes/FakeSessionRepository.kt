@@ -63,6 +63,8 @@ class FakeSessionRepository(
 
     override suspend fun loadMessages(sessionId: SessionId, limit: Int): Int = 0
 
+    override suspend fun reconcileMessages(sessionId: SessionId) = Unit
+
     override fun sendMessageAsync(sessionId: SessionId, request: SendMessageRequest): Deferred<Result<Unit>> =
         CompletableDeferred(Result.success(Unit))
 
