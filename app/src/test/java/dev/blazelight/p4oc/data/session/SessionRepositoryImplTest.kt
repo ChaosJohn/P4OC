@@ -712,6 +712,74 @@ class SessionRepositoryImplTest {
     }
 
     @Test
+    fun `equivalent duplicate terminal error does not complete twice`() = runTest {
+        val repository =
+            SessionRepositoryImpl(FakeWorkspaceClient(), dispatcher = StandardTestDispatcher(testScheduler))
+        repository.acceptEvent(OpenCodeEvent.SessionStatusChanged("s1", SessionStatus.Busy))
+        val error = MessageError(name = "APIError", message = "Rate limit exceeded", statusCode = 429)
+
+        // The assistant message carries the error, then a separate session.error event reports the
+        // same failure. Both must converge on one terminal completion, not two.
+        repository.acceptEvent(OpenCodeEvent.MessageUpdated(assistantMessage("m1", "s1", error)))
+        repository.acceptEvent(OpenCodeEvent.SessionError("s1", error))
+
+        val state = repository.sessionUiState(SessionId("s1")).value
+        assertEquals(SessionStatus.Idle, state.status)
+        assertEquals(error, state.error)
+        assertEquals(1L, state.responseCompletedToken)
+    }
+
+    @Test
+    fun `fresh busy status clears a prior run error`() = runTest {
+        val repository =
+            SessionRepositoryImpl(FakeWorkspaceClient(), dispatcher = StandardTestDispatcher(testScheduler))
+        repository.acceptEvent(
+            OpenCodeEvent.SessionError("s1", MessageError(name = "APIError", message = "boom"))
+        )
+
+        repository.acceptEvent(OpenCodeEvent.SessionStatusChanged("s1", SessionStatus.Busy))
+
+        val state = repository.sessionUiState(SessionId("s1")).value
+        assertEquals(SessionStatus.Busy, state.status)
+        assertNull(state.error)
+    }
+
+    @Test
+    fun `terminal idle status preserves a just delivered error`() = runTest {
+        val repository =
+            SessionRepositoryImpl(FakeWorkspaceClient(), dispatcher = StandardTestDispatcher(testScheduler))
+        val error = MessageError(name = "APIError", message = "Rate limit exceeded", statusCode = 429)
+        repository.acceptEvent(OpenCodeEvent.SessionStatusChanged("s1", SessionStatus.Busy))
+
+        repository.acceptEvent(OpenCodeEvent.SessionError("s1", error))
+        // A trailing terminal idle/status update must not erase the error the user was just shown.
+        repository.acceptEvent(OpenCodeEvent.SessionStatusChanged("s1", SessionStatus.Idle))
+
+        val state = repository.sessionUiState(SessionId("s1")).value
+        assertEquals(SessionStatus.Idle, state.status)
+        assertEquals(error, state.error)
+        // The error already completed the run; the trailing Idle must neither erase the error nor
+        // fire a second completion (double haptic/unread badge).
+        assertEquals(1L, state.responseCompletedToken)
+    }
+
+    @Test
+    fun `trailing session idle event after a terminal error does not complete twice`() = runTest {
+        val repository =
+            SessionRepositoryImpl(FakeWorkspaceClient(), dispatcher = StandardTestDispatcher(testScheduler))
+        val error = MessageError(name = "APIError", message = "Rate limit exceeded", statusCode = 429)
+        repository.acceptEvent(OpenCodeEvent.SessionStatusChanged("s1", SessionStatus.Busy))
+        repository.acceptEvent(OpenCodeEvent.SessionError("s1", error))
+
+        repository.acceptEvent(OpenCodeEvent.SessionIdle("s1"))
+
+        val state = repository.sessionUiState(SessionId("s1")).value
+        assertEquals(SessionStatus.Idle, state.status)
+        assertEquals(error, state.error)
+        assertEquals(1L, state.responseCompletedToken)
+    }
+
+    @Test
     fun `permission request without callID is still exposed in session UI state`() = runTest {
         val client = FakeWorkspaceClient().apply {
             projects = emptyList()

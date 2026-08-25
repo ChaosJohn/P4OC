@@ -6,6 +6,8 @@ import dev.blazelight.p4oc.data.remote.dto.MessageInfoDto
 import dev.blazelight.p4oc.data.remote.dto.MessageTimeDto
 import dev.blazelight.p4oc.data.remote.dto.MessageWrapperDto
 import dev.blazelight.p4oc.data.remote.dto.PartDto
+import dev.blazelight.p4oc.data.remote.dto.PermissionDto
+import dev.blazelight.p4oc.data.remote.dto.PermissionToolDto
 import dev.blazelight.p4oc.data.remote.mapper.MessageMapper
 import dev.blazelight.p4oc.data.server.ActiveServerApiProvider
 import dev.blazelight.p4oc.data.workspace.WorkspaceClient
@@ -23,10 +25,12 @@ import io.mockk.mockk
 import kotlinx.coroutines.CompletableDeferred
 import kotlinx.coroutines.ExperimentalCoroutinesApi
 import kotlinx.coroutines.flow.MutableStateFlow
+import kotlinx.coroutines.launch
 import kotlinx.coroutines.test.StandardTestDispatcher
 import kotlinx.coroutines.test.advanceUntilIdle
 import kotlinx.coroutines.test.runTest
 import kotlinx.serialization.json.Json
+import kotlinx.serialization.json.JsonObject
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertTrue
 import org.junit.Test
@@ -300,6 +304,135 @@ class SessionRepositoryRecoveryTest {
         assertTrue(repo.messages(sessionId).value.isEmpty())
     }
 
+    @Test
+    fun `reconcileMessages uses the remembered authoritative window for an active session`() = runTest {
+        val (repo, api, _) = repository(testScheduler)
+        val lease = repo.acquireSession(sessionId)
+        coEvery { api.getMessages("s1", 200, null, "/test", null) } returns (1L..200L)
+            .map { assistantWrapper("m$it", createdAt = it, partText = "x") }
+        repo.loadMessages(sessionId, 200)
+        advanceUntilIdle()
+
+        coEvery { api.getMessages("s1", 200, null, "/test", null) } returns (1L..200L)
+            .map { assistantWrapper("m$it", createdAt = it, partText = "reconciled") }
+
+        repo.reconcileMessages(sessionId)
+        advanceUntilIdle()
+
+        // The explicit entry point reuses the largest loaded window, never a default-100 call.
+        coVerify(exactly = 2) { api.getMessages("s1", 200, null, "/test", null) }
+        coVerify(exactly = 0) { api.getMessages("s1", 100, null, "/test", null) }
+        val part = repo.messages(sessionId).value.first().parts.single() as Part.Text
+        assertEquals("reconciled", part.text)
+        lease.close()
+    }
+
+    @Test
+    fun `reconcileMessages is a no-op after the lease is released`() = runTest {
+        val (repo, api, _) = repository(testScheduler)
+        val lease = repo.acquireSession(sessionId)
+        repo.acceptEvent(OpenCodeEvent.MessageUpdated(assistantMessage("m1", createdAt = 1)))
+        advanceUntilIdle()
+        lease.close()
+
+        coEvery { api.getMessages("s1", 100, null, "/test", null) } returns listOf(
+            assistantWrapper("m2", createdAt = 2, partText = "should-not-commit"),
+        )
+
+        repo.reconcileMessages(sessionId)
+        advanceUntilIdle()
+
+        // No active lease means no fetch and no state resurrection.
+        coVerify(exactly = 0) { api.getMessages(any(), any(), any(), any(), any()) }
+        assertTrue(repo.messages(sessionId).value.isEmpty())
+    }
+
+    @Test
+    fun `reconcileMessages is a no-op after the session is deleted`() = runTest {
+        val (repo, api, _) = repository(testScheduler)
+        repo.acquireSession(sessionId)
+        repo.acceptEvent(OpenCodeEvent.MessageUpdated(assistantMessage("m1", createdAt = 1)))
+        advanceUntilIdle()
+
+        repo.acceptEvent(OpenCodeEvent.SessionDeleted(session("s1")))
+        advanceUntilIdle()
+
+        coEvery { api.getMessages("s1", 100, null, "/test", null) } returns listOf(
+            assistantWrapper("m2", createdAt = 2, partText = "should-not-commit"),
+        )
+
+        repo.reconcileMessages(sessionId)
+        advanceUntilIdle()
+
+        // A deleted session must never be refetched or repopulated even while its lease is held.
+        coVerify(exactly = 0) { api.getMessages(any(), any(), any(), any(), any()) }
+        assertTrue(repo.messages(sessionId).value.isEmpty())
+    }
+
+    @Test
+    fun `release and reacquire during gated pending reconciliation does not resurrect stale permissions`() = runTest {
+        val (repo, api, _) = repository(testScheduler)
+        val firstLease = repo.acquireSession(sessionId)
+        coEvery { api.getMessages("s1", 100, null, "/test", null) } returns listOf(
+            assistantWrapper("m1", createdAt = 1, partText = "recovered"),
+        )
+        // Gate the recovery-bound permission fetch so the lease can flip while it is in flight.
+        val permissionGate = CompletableDeferred<Unit>()
+        coEvery { api.listPermissions("/test", null) } coAnswers {
+            permissionGate.await()
+            listOf(permissionDto("perm-stale"))
+        }
+
+        val recovery = launch { repo.reconcileMessages(sessionId) }
+        advanceUntilIdle()
+
+        // The message window has committed; recovery is now suspended in the gated permission
+        // fetch. Flip the lease underneath it.
+        firstLease.close()
+        val secondLease = repo.acquireSession(sessionId)
+
+        permissionGate.complete(Unit)
+        advanceUntilIdle()
+        recovery.join()
+
+        // The old recovery's pending work lost ownership at release; it must not recreate
+        // pending-permission UI state for the reopened lease.
+        assertTrue(repo.sessionUiState(sessionId).value.pendingPermissionsByCallId.isEmpty())
+        secondLease.close()
+    }
+
+    @Test
+    fun `sse mutation during gated pending reconciliation still delivers the permission to the current lease`() =
+        runTest {
+            val (repo, api, _) = repository(testScheduler)
+            val lease = repo.acquireSession(sessionId)
+            coEvery { api.getMessages("s1", 100, null, "/test", null) } returns listOf(
+                assistantWrapper("m1", createdAt = 1, partText = "recovered"),
+            )
+            // Gate the recovery-bound permission fetch so ordinary SSE traffic can land mid-flight.
+            val permissionGate = CompletableDeferred<Unit>()
+            coEvery { api.listPermissions("/test", null) } coAnswers {
+                permissionGate.await()
+                listOf(permissionDto("perm-live"))
+            }
+
+            val recovery = launch { repo.reconcileMessages(sessionId) }
+            advanceUntilIdle()
+
+            // An ordinary SSE message mutation arrives while the permission fetch is in flight. It
+            // bumps the message revision but must NOT invalidate pending recovery for the
+            // still-current lease — only a lease/state-lifetime change may do that.
+            repo.acceptEvent(OpenCodeEvent.MessageUpdated(assistantMessage("m2", createdAt = 2)))
+
+            permissionGate.complete(Unit)
+            advanceUntilIdle()
+            recovery.join()
+
+            // The lease never changed, so the recovered permission is delivered.
+            assertEquals(1, repo.sessionUiState(sessionId).value.pendingPermissionsByCallId.size)
+            lease.close()
+        }
+
     private fun session(id: String) = dev.blazelight.p4oc.domain.model.Session(
         id = id,
         projectID = "project-$id",
@@ -308,6 +441,16 @@ class SessionRepositoryRecoveryTest {
         version = "1",
         createdAt = 1L,
         updatedAt = 1L,
+    )
+
+    private fun permissionDto(id: String): PermissionDto = PermissionDto(
+        id = id,
+        permission = "bash",
+        patterns = emptyList(),
+        sessionID = "s1",
+        metadata = JsonObject(emptyMap()),
+        always = emptyList(),
+        tool = PermissionToolDto(messageID = "m1", callID = "call-$id"),
     )
 
     private fun repository(

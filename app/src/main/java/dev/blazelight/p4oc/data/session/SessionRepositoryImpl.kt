@@ -112,6 +112,13 @@ class SessionRepositoryImpl(
     // consumer lease is still held by an open view.
     private val recoveryInvalidatedSessions = mutableSetOf<String>()
 
+    // Per-session lease/state-lifetime generation. Bumped ONLY on acquire, final release, and
+    // SessionDeleted (cleared on close) — never by ordinary message/part mutations — so it is the
+    // ownership token for recovery-bound pending question/permission reconciliation. Ordinary SSE
+    // message traffic racing a pending fetch must not invalidate pending recovery for the
+    // still-current lease; only a lease/state-lifetime change may.
+    private val sessionLeaseGenerations = mutableMapOf<String, Long>()
+
     // Shared boundary guarding per-session message state, consumer counts, revisions and loaded
     // limits. Held across capture, mutation+revision-bump, active-count checks, and replacement so
     // a lease release or SSE mutation cannot interleave and let a fetched window commit stale data.
@@ -271,7 +278,6 @@ class SessionRepositoryImpl(
             }
             is OpenCodeEvent.SessionDeleted -> {
                 removeSessionOwnership(event.session.id)
-                synchronized(sessionUiStates) { sessionUiStates.remove(event.session.id) }
                 synchronized(messageStateLock) {
                     messageStates.remove(event.session.id)?.value = emptyList()
                     // Treat deletion as a revisioned invalidation: remove the state but mark the
@@ -280,7 +286,14 @@ class SessionRepositoryImpl(
                     // recovery capture collide with the default `?: 0L` and resurrect the session.
                     recoveryInvalidatedSessions.add(event.session.id)
                     sessionRevisions[event.session.id] = (sessionRevisions[event.session.id] ?: 0L) + 1
+                    // Deletion ends the state lifetime: any in-flight recovery-bound pending
+                    // reconciliation loses ownership.
+                    sessionLeaseGenerations[event.session.id] = (sessionLeaseGenerations[event.session.id] ?: 0L) + 1
                     sessionLoadedLimits.remove(event.session.id)
+                    // UI-state removal happens inside the same critical section (nested order
+                    // messageStateLock -> sessionUiStates, matching releaseSession) so a guarded
+                    // recovery write can never recreate the entry between removal and invalidation.
+                    synchronized(sessionUiStates) { sessionUiStates.remove(event.session.id) }
                 }
             }
             is OpenCodeEvent.SessionUpdated -> {
@@ -289,19 +302,31 @@ class SessionRepositoryImpl(
             }
             is OpenCodeEvent.SessionStatusChanged -> {
                 updateSession(event.sessionID) { state ->
+                    val alreadyIdleWithError = state.status is SessionStatus.Idle && state.error != null
                     state.copy(
                         status = event.status,
                         error = if (event.status is SessionStatus.Busy) null else state.error,
-                        responseCompletedToken = if (event.status.isTerminalIdle()) state.responseCompletedToken + 1 else state.responseCompletedToken,
+                        // A trailing terminal status after an error already completed the run must
+                        // not fire a second completion (haptic/unread) for the same failure.
+                        responseCompletedToken = if (event.status.isTerminalIdle() && !alreadyIdleWithError) {
+                            state.responseCompletedToken + 1
+                        } else {
+                            state.responseCompletedToken
+                        },
                     )
                 }
                 if (event.status.isTerminalIdle()) clearStreamingFlags(SessionId(event.sessionID))
             }
             is OpenCodeEvent.SessionIdle -> {
                 updateSession(event.sessionID) { state ->
+                    val alreadyIdleWithError = state.status is SessionStatus.Idle && state.error != null
                     state.copy(
                         status = SessionStatus.Idle,
-                        responseCompletedToken = state.responseCompletedToken + 1,
+                        responseCompletedToken = if (alreadyIdleWithError) {
+                            state.responseCompletedToken
+                        } else {
+                            state.responseCompletedToken + 1
+                        },
                     )
                 }
                 clearStreamingFlags(SessionId(event.sessionID))
@@ -369,11 +394,18 @@ class SessionRepositoryImpl(
      * Fetches the list of pending questions from GET /question and sets
      * pendingQuestion on owned sessions that don't already have one.
      * Skips questions that were recently resolved (anti-resurrection).
+     *
+     * A non-null [leaseGeneration] marks a recovery-bound call: the fetch is skipped when
+     * ownership was already lost, and every UI-state write is re-checked atomically against the
+     * lease generation so a lease released (or released and reacquired) mid-fetch is never
+     * repopulated with stale state. Ordinary message traffic does not invalidate ownership.
      */
-    private suspend fun reconcilePendingQuestions(sessionId: String) {
+    private suspend fun reconcilePendingQuestions(sessionId: String, leaseGeneration: Long? = null) {
+        if (leaseGeneration != null && !ownsRecoveryLease(sessionId, leaseGeneration)) return
         AppLog.d(TAG, "reconcilePendingQuestions: fetching pending questions")
         val questionsToCheck = runCatching { fetchPendingQuestions(sessionId) }
             .getOrElse { error ->
+                if (error is CancellationException) throw error
                 AppLog.w(TAG, "Failed to fetch pending questions: ${error.javaClass.simpleName}")
                 return
             }
@@ -396,12 +428,15 @@ class SessionRepositoryImpl(
 
             // Mirror live question.asked handling: first pending question is shown,
             // additional recovered questions are queued behind it.
-            updateOwnedSession(questionDto.sessionID) { state ->
-                val question = mapQuestionRequestDtoToDomain(questionDto)
-                when {
-                    state.pendingQuestion?.id == question.id || state.queuedQuestions.any { it.id == question.id } -> state
-                    state.pendingQuestion == null -> state.copy(pendingQuestion = question)
-                    else -> state.copy(queuedQuestions = state.queuedQuestions + question)
+            withRecoveryOwnership(sessionId, leaseGeneration) {
+                updateOwnedSession(questionDto.sessionID) { state ->
+                    val question = mapQuestionRequestDtoToDomain(questionDto)
+                    when {
+                        state.pendingQuestion?.id == question.id ||
+                            state.queuedQuestions.any { it.id == question.id } -> state
+                        state.pendingQuestion == null -> state.copy(pendingQuestion = question)
+                        else -> state.copy(queuedQuestions = state.queuedQuestions + question)
+                    }
                 }
             }
         }
@@ -436,7 +471,7 @@ class SessionRepositoryImpl(
             }
             for (sessionId in active) {
                 try {
-                    recoverMessagesForSession(sessionId)
+                    reconcileMessages(SessionId(sessionId))
                 } catch (ce: CancellationException) {
                     throw ce
                 } catch (e: Exception) {
@@ -444,6 +479,17 @@ class SessionRepositoryImpl(
                 }
             }
         }
+    }
+
+    /**
+     * Reconciles the cached message state for a single session against the server's authoritative
+     * REST window. This is the shared primitive used both by reconnect recovery (for every actively
+     * leased session) and by post-send callers recovering a missed terminal SSE update. It reuses
+     * the same active-lease, revision-safe, remembered-window algorithm, so a second independent
+     * polling path is never introduced.
+     */
+    override suspend fun reconcileMessages(sessionId: SessionId) {
+        recoverMessagesForSession(sessionId.value)
     }
 
     private suspend fun recoverMessagesForSession(sessionId: String) {
@@ -467,24 +513,25 @@ class SessionRepositoryImpl(
     }
 
     private fun mergeRacedRecovery(sessionId: String, loaded: List<MessageWithParts>, limit: Int) {
-        val merged = synchronized(messageStateLock) {
+        val leaseGeneration = synchronized(messageStateLock) {
             // Recheck under the lock: a lease may have been released (count removed, state cleared)
             // between the recovery loop and here, so this merge must never recreate an inactive
-            // session that a subsequent lease would then inherit as stale data.
+            // session that a subsequent lease would then inherit as stale data. The current lease
+            // generation is captured as the ownership token for the follow-up pending
+            // reconciliation; the revision bump stays purely message-window race detection.
             if (!canRecover(sessionId) || loaded.isEmpty()) {
-                false
+                null
             } else {
                 mergeLoadedMessages(sessionId, loaded)
                 sessionLoadedLimits[sessionId] = maxOf(sessionLoadedLimits[sessionId] ?: 0, limit)
                 sessionRevisions[sessionId] = (sessionRevisions[sessionId] ?: 0L) + 1
-                true
+                sessionLeaseGenerations[sessionId] ?: 0L
             }
-        }
-        if (!merged) return
+        } ?: return
         AppLog.w(TAG, "Post-reconnect recovery raced SSE repeatedly; merged fetched state for $sessionId")
         scope.launch {
             try {
-                reconcileLoadedPendingState(sessionId, loaded)
+                reconcileLoadedPendingState(sessionId, loaded, leaseGeneration)
             } catch (ce: CancellationException) {
                 throw ce
             } catch (e: Exception) {
@@ -505,7 +552,9 @@ class SessionRepositoryImpl(
             .map { dto -> mapper.mapWrapperToDomain(dto) }
         val outcome = commitReplacementIfUnchanged(sessionId, attempt, loaded)
         if (outcome == CommitOutcome.Committed) {
-            reconcileLoadedPendingState(sessionId, loaded)
+            // The lease generation captured with the attempt is the ownership token: pending
+            // reconciliation may only touch UI state while that lease lifetime is still current.
+            reconcileLoadedPendingState(sessionId, loaded, attempt.leaseGeneration)
         }
         return RecoveryResult(outcome, loaded, attempt.limit)
     }
@@ -521,11 +570,39 @@ class SessionRepositoryImpl(
         return RecoveryAttempt(
             revision = sessionRevisions[sessionId] ?: 0L,
             limit = sessionLoadedLimits[sessionId] ?: DEFAULT_MESSAGE_HISTORY_LIMIT,
+            leaseGeneration = sessionLeaseGenerations[sessionId] ?: 0L,
         )
     }
 
     private fun canRecover(sessionId: String): Boolean =
         sessionId !in recoveryInvalidatedSessions && (sessionConsumerCounts[sessionId] ?: 0) > 0
+
+    /**
+     * True while [leaseGeneration] still owns the session's recovery: the session is actively
+     * leased, not invalidated, and its lease/state-lifetime generation is exactly the one the
+     * recovery captured. Acquire, final release, deletion, and release+reacquire each bump the
+     * generation, so stale recovery work can never pass this check again — while ordinary SSE
+     * message/part mutations (which bump only [sessionRevisions]) never invalidate pending
+     * recovery for the still-current lease.
+     */
+    private fun ownsRecoveryLease(sessionId: String, leaseGeneration: Long): Boolean =
+        synchronized(messageStateLock) {
+            canRecover(sessionId) && (sessionLeaseGenerations[sessionId] ?: 0L) == leaseGeneration
+        }
+
+    /**
+     * Runs [block] atomically under [messageStateLock] only while [leaseGeneration] still owns the
+     * session's recovery, so a lease release cannot interleave between the ownership check and a
+     * recovery-bound UI-state read/create/write. A null token means the caller is not
+     * recovery-bound and runs unguarded, preserving pre-existing behavior. Never call with a
+     * suspending or slow [block]; fetches must happen outside the lock.
+     */
+    private fun <T> withRecoveryOwnership(sessionId: String, leaseGeneration: Long?, block: () -> T): T? {
+        if (leaseGeneration == null) return block()
+        return synchronized(messageStateLock) {
+            if (ownsRecoveryLease(sessionId, leaseGeneration)) block() else null
+        }
+    }
 
     private fun commitReplacement(sessionId: String, attempt: RecoveryAttempt, loaded: List<MessageWithParts>) {
         replaceMessagesAuthoritatively(sessionId, loaded)
@@ -563,19 +640,24 @@ class SessionRepositoryImpl(
         messageState(sessionId).value = loaded
     }
 
-    private suspend fun reconcileLoadedPendingState(sessionId: String, loaded: List<MessageWithParts>) {
+    private suspend fun reconcileLoadedPendingState(
+        sessionId: String,
+        loaded: List<MessageWithParts>,
+        leaseGeneration: Long,
+    ) {
         val hasRunningQuestion = loaded.any { mwp ->
             mwp.parts.any { it is Part.Tool && it.isQuestionTool() && it.state is ToolState.Running }
         }
         if (hasRunningQuestion) {
-            reconcilePendingQuestions(sessionId)
+            reconcilePendingQuestions(sessionId, leaseGeneration)
         }
-        reconcilePendingPermissions(sessionId)
+        reconcilePendingPermissions(sessionId, leaseGeneration)
     }
 
     private data class RecoveryAttempt(
         val revision: Long,
         val limit: Int,
+        val leaseGeneration: Long,
     )
 
     override fun messages(sessionId: SessionId): StateFlow<List<MessageWithParts>> = messageState(
@@ -593,6 +675,9 @@ class SessionRepositoryImpl(
             // Bump the revision so a fetch still in flight from a previous lease can never commit
             // into this new lease.
             sessionRevisions[sessionId.value] = (sessionRevisions[sessionId.value] ?: 0L) + 1
+            // A new lease lifetime begins: pending reconciliation captured under a previous lease
+            // loses ownership and can never write into this one.
+            sessionLeaseGenerations[sessionId.value] = (sessionLeaseGenerations[sessionId.value] ?: 0L) + 1
             sessionConsumerCounts[sessionId.value] = sessionConsumerCounts.getOrDefault(sessionId.value, 0) + 1
         }
         val released = AtomicBoolean(false)
@@ -615,6 +700,8 @@ class SessionRepositoryImpl(
             // Bump rather than delete the revision so a fetch that captured the pre-release revision
             // cannot commit after the lease is gone.
             sessionRevisions[sessionId] = (sessionRevisions[sessionId] ?: 0L) + 1
+            // The state lifetime ends here: in-flight recovery-bound pending work loses ownership.
+            sessionLeaseGenerations[sessionId] = (sessionLeaseGenerations[sessionId] ?: 0L) + 1
             sessionLoadedLimits.remove(sessionId)
             recoveryInvalidatedSessions.remove(sessionId)
             synchronized(sessionUiStates) {
@@ -772,6 +859,7 @@ class SessionRepositoryImpl(
             sessionLoadedLimits.clear()
             sessionConsumerCounts.clear()
             recoveryInvalidatedSessions.clear()
+            sessionLeaseGenerations.clear()
         }
         synchronized(sessionUiStates) { sessionUiStates.clear() }
         synchronized(childToParentSessionIds) { childToParentSessionIds.clear() }
@@ -1093,30 +1181,40 @@ class SessionRepositoryImpl(
         sessionIds.forEach { sessionId -> reconcilePendingPermissions(sessionId) }
     }
 
-    private suspend fun reconcilePendingPermissions(sessionId: String) {
-        val pendingBeforeReconciliation = sessionUiStateFor(sessionId).value.pendingPermissionsByCallId
+    /**
+     * A non-null [leaseGeneration] marks a recovery-bound call; see [reconcilePendingQuestions].
+     * The initial snapshot read is also guarded because [sessionUiStateFor] creates state on
+     * demand, and a recovery that lost ownership must not recreate an evicted session's state.
+     */
+    private suspend fun reconcilePendingPermissions(sessionId: String, leaseGeneration: Long? = null) {
+        val pendingBeforeReconciliation = withRecoveryOwnership(sessionId, leaseGeneration) {
+            sessionUiStateFor(sessionId).value.pendingPermissionsByCallId
+        } ?: return
         val legacyPermissions = runCatching {
             client.listPermissions()
                 .filter { permission -> permission.sessionID == sessionId }
                 .map(PermissionMapper::mapToDomain)
-        }.getOrNull()
+        }.onFailure { if (it is CancellationException) throw it }.getOrNull()
         val permissions = if (!legacyPermissions.isNullOrEmpty()) {
             legacyPermissions
         } else {
             runCatching { client.listSessionPermissionsV2(sessionId).map(PermissionMapper::mapV2ToDomain) }
+                .onFailure { if (it is CancellationException) throw it }
                 .getOrNull()
                 ?: legacyPermissions
                 ?: return
         }
-        updateSession(sessionId) { state ->
-            val recovered = permissions.associateBy { permission -> permission.pendingPermissionKey() }
-            val concurrentlyRemovedKeys = pendingBeforeReconciliation.keys - state.pendingPermissionsByCallId.keys
-            val concurrentlyArrived = state.pendingPermissionsByCallId.filter { (key, permission) ->
-                pendingBeforeReconciliation[key] != permission
+        withRecoveryOwnership(sessionId, leaseGeneration) {
+            updateSession(sessionId) { state ->
+                val recovered = permissions.associateBy { permission -> permission.pendingPermissionKey() }
+                val concurrentlyRemovedKeys = pendingBeforeReconciliation.keys - state.pendingPermissionsByCallId.keys
+                val concurrentlyArrived = state.pendingPermissionsByCallId.filter { (key, permission) ->
+                    pendingBeforeReconciliation[key] != permission
+                }
+                state.copy(
+                    pendingPermissionsByCallId = (recovered - concurrentlyRemovedKeys) + concurrentlyArrived
+                )
             }
-            state.copy(
-                pendingPermissionsByCallId = (recovered - concurrentlyRemovedKeys) + concurrentlyArrived
-            )
         }
     }
 

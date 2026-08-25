@@ -496,6 +496,26 @@ class EventMapperTest {
         assertTrue(error?.isRetryable == true)
     }
 
+    @Test
+    fun `maps session_error without retry metadata as non retryable`() {
+        val properties = buildJsonObject {
+            put("sessionID", "sess-1")
+            putJsonObject("error") {
+                put("name", "APIError")
+                putJsonObject("data") {
+                    put("message", "hard failure")
+                }
+            }
+        }
+
+        val event = eventMapper.mapToEvent(EventDataDto(type = "session.error", properties = properties))
+
+        assertTrue(event is OpenCodeEvent.SessionError)
+        val error = (event as OpenCodeEvent.SessionError).error
+        assertNull(error?.statusCode)
+        assertFalse(error?.isRetryable ?: true)
+    }
+
     // ── Unknown type ────────────────────────────────────────────────────────
 
     @Test
