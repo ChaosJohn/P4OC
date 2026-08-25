@@ -7,6 +7,7 @@ import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.interaction.DragInteraction
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.LazyListState
@@ -20,7 +21,6 @@ import androidx.compose.ui.graphics.RectangleShape
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalFocusManager
 import androidx.compose.ui.platform.LocalSoftwareKeyboardController
-import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.semantics.Role
@@ -58,7 +58,11 @@ import dev.blazelight.p4oc.ui.screens.files.upload.UploadProgressSheet
 import dev.blazelight.p4oc.ui.theme.LocalOpenCodeTheme
 import dev.blazelight.p4oc.ui.theme.Sizing
 import dev.blazelight.p4oc.ui.theme.Spacing
+import kotlinx.coroutines.flow.distinctUntilChanged
+import kotlinx.coroutines.flow.drop
+import kotlinx.coroutines.flow.filterIsInstance
 import kotlinx.coroutines.flow.first
+import kotlinx.coroutines.flow.collectLatest
 import kotlinx.coroutines.launch
 import org.koin.androidx.compose.koinViewModel
 
@@ -207,26 +211,11 @@ fun ChatScreen(
         findChatMatches(messageBlocks, scrollRestorationState.searchQuery)
     }
     val coroutineScope = rememberCoroutineScope()
-    val density = LocalDensity.current
-    val imeBottom = WindowInsets.ime.getBottom(density)
-    val isImeVisible = imeBottom > 0
-    var wasImeVisible by remember(uiState.session?.id) { mutableStateOf(false) }
-    var keepTailVisibleDuringImeOpen by remember(uiState.session?.id) { mutableStateOf(false) }
+    var composerFocused by remember { mutableStateOf(false) }
 
-    // Derived state: check if the bottom edge of the last rendered item is visible.
+    // Derived state: true when the list cannot advance toward the tail.
     val isAtBottom by remember {
-        derivedStateOf {
-            val layoutInfo = listState.layoutInfo
-            val lastVisible = layoutInfo.visibleItemsInfo.lastOrNull()
-            val lastItemIndex = layoutInfo.totalItemsCount - 1
-            val lastItemBottom = (lastVisible?.offset ?: 0) + (lastVisible?.size ?: 0)
-            layoutInfo.totalItemsCount == 0 ||
-                (
-                    lastVisible != null &&
-                        lastVisible.index >= lastItemIndex &&
-                        lastItemBottom <= layoutInfo.viewportEndOffset
-                    )
-        }
+        derivedStateOf { !listState.canScrollForward }
     }
 
     val focusManager = LocalFocusManager.current
@@ -243,12 +232,25 @@ fun ChatScreen(
         }
     }
 
-    // Match the sticky follow-tail model: only update follow state after the user's scroll settles.
+    // Match the sticky follow-tail model: a user drag disables following immediately, and the
+    // follow state is only re-evaluated after the drag (and any fling) settles. Programmatic
+    // scrolls (e.g. IME pinning) never touch this state. The frame boundaries around the
+    // isScrollInProgress wait prevent a stale pre-layout bottom read: the first frame lets any
+    // fling start, and the second lets the drag layout commit before the final bottom read.
     LaunchedEffect(listState, uiState.session?.id) {
-        snapshotFlow { listState.isScrollInProgress }
-            .collect { isScrolling ->
-                if (!isScrolling) {
-                    scrollRestorationState.onScrollSettled(isAtBottom)
+        listState.interactionSource.interactions
+            .filterIsInstance<DragInteraction>()
+            .collectLatest { interaction ->
+                when (interaction) {
+                    is DragInteraction.Start -> scrollRestorationState.onUserScrollStarted()
+                    is DragInteraction.Stop, is DragInteraction.Cancel -> {
+                        withFrameNanos { }
+                        snapshotFlow { listState.isScrollInProgress }
+                            .first { !it }
+                        withFrameNanos { }
+                        val settledAtBottom = !listState.canScrollForward
+                        scrollRestorationState.onScrollSettled(settledAtBottom)
+                    }
                 }
             }
     }
@@ -267,6 +269,7 @@ fun ChatScreen(
     val pendingQuestionId = pendingQuestion?.id
     val pendingPermissionCallIds = pendingPermissionsByCallId.keys
     val pendingPermissionVersion = pendingPermissionAttentionVersion(pendingPermissionCallIds)
+    val hasRenderableTail = !uiState.isLoading && (messages.isNotEmpty() || pendingQuestionId != null)
     var previouslyPendingPermissionCallIds by remember(uiState.session?.id) {
         mutableStateOf(emptySet<String>())
     }
@@ -278,22 +281,26 @@ fun ChatScreen(
         }
     }
 
-    // When the user opens the composer keyboard, keep the latest conversation content visible.
-    // This is an explicit input action, so it intentionally returns a previously scrolled chat
-    // to the tail instead of leaving the keyboard covering the newest messages.
-    LaunchedEffect(imeBottom) {
-        if (!isImeVisible) {
-            wasImeVisible = false
-            keepTailVisibleDuringImeOpen = false
+    // While the composer is focused and the user is already following the tail, keep the latest
+    // content visible as the IME opens or resizes. This never forces a scrolled-away viewport back
+    // to the tail: it only pins when shouldFollowTail is already true, and scrolling away mid-typing
+    // clears that flag so later viewport changes do not snap. The LazyColumn's actual viewport
+    // height is observed (not the IME inset), so the effect reacts to real layout changes without
+    // recomposing ChatScreen per animation pixel. The initial emission is ignored so merely
+    // focusing the composer cannot scroll; only a real viewport-height transition pins the tail.
+    LaunchedEffect(composerFocused, scrollRestorationState.shouldFollowTail, hasRenderableTail) {
+        if (!scrollRestorationState.shouldPinTailForIme(composerFocused, hasRenderableTail)) {
             return@LaunchedEffect
         }
-        if (!wasImeVisible) {
-            keepTailVisibleDuringImeOpen = scrollRestorationState.onKeyboardOpened(messageCount > 0)
+        snapshotFlow {
+            val info = listState.layoutInfo
+            info.viewportEndOffset - info.viewportStartOffset
         }
-        if (keepTailVisibleDuringImeOpen) {
-            listState.scrollChatToBottom()
-        }
-        wasImeVisible = true
+            .distinctUntilChanged()
+            .drop(1)
+            .collect {
+                listState.scrollChatToBottom()
+            }
     }
 
     // Permissions can arrive for a tool rendered far above the current viewport without changing
@@ -334,8 +341,6 @@ fun ChatScreen(
 
     // The loading screen hides the list; once the session content is visible, land at the tail.
     LaunchedEffect(uiState.session?.id, uiState.isLoading, messageCount, pendingQuestionId) {
-        val hasRenderableTail = !uiState.isLoading &&
-            (messages.isNotEmpty() || pendingQuestionId != null)
         when (scrollRestorationState.onContentReady(hasRenderableTail)) {
             InitialTailDecision.ScrollToTail -> {
                 snapshotFlow { listState.layoutInfo.totalItemsCount }.first { it > 0 }
@@ -430,7 +435,9 @@ fun ChatScreen(
                         commandLoadError = uiState.commandLoadError,
                         onRetryCommands = { viewModel.refreshCommandsIfNeeded(force = true) },
                         onCommandSelected = { /* Command text is already updated via onValueChange */ },
-                        requestFocus = isActiveTab && requestInitialInputFocus,
+                        requestFocus = requestInitialInputFocus,
+                        isActiveTab = isActiveTab,
+                        onComposerFocusChanged = { composerFocused = it },
                         enterToSend = chatSettings.enterToSend,
                     )
                 }

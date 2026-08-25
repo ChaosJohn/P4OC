@@ -14,10 +14,12 @@ import androidx.compose.foundation.text.input.rememberTextFieldState
 import androidx.compose.foundation.text.input.setTextAndPlaceCursorAtEnd
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
+import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.focus.FocusRequester
 import androidx.compose.ui.focus.focusRequester
+import androidx.compose.ui.focus.onFocusChanged
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.RectangleShape
 import androidx.compose.ui.graphics.SolidColor
@@ -26,6 +28,7 @@ import androidx.compose.ui.input.key.KeyEventType
 import androidx.compose.ui.input.key.key
 import androidx.compose.ui.input.key.onPreviewKeyEvent
 import androidx.compose.ui.input.key.type
+import androidx.compose.ui.layout.onGloballyPositioned
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.semantics.Role
@@ -77,11 +80,17 @@ fun ChatInputBar(
     onRetryCommands: () -> Unit = {},
     onCommandSelected: (Command) -> Unit = {},
     requestFocus: Boolean = false,
+    isActiveTab: Boolean = true,
+    onComposerFocusChanged: (Boolean) -> Unit = {},
     enterToSend: Boolean = false,
 ) {
     val theme = LocalOpenCodeTheme.current
     val focusRequester = remember { FocusRequester() }
     val textState = rememberTextFieldState(initialText = value)
+    var isAttached by remember { mutableStateOf(false) }
+    val initialFocusState = rememberSaveable(saver = InitialInputFocusState.Saver) {
+        InitialInputFocusState()
+    }
 
     // External value changes (e.g. a programmatic set from the parent) → field.
     LaunchedEffect(value) {
@@ -96,15 +105,14 @@ fun ChatInputBar(
         snapshotFlow { textState.text.toString() }.collect { onValueChange(it) }
     }
 
-    // Initial focus is a navigation decision. Do not reopen the keyboard when the user returns
-    // to this tab or after they dismiss it manually.
-    LaunchedEffect(Unit) {
-        if (requestFocus) {
-            try {
-                focusRequester.requestFocus()
-            } catch (e: Exception) {
-                // Focus request can fail if not attached yet
-            }
+    // Request focus once the field is attached and the tab is active. The request stays eligible
+    // while the tab is inactive and fires when it becomes active; onGloballyPositioned establishes
+    // the FocusRequester attachment invariant, so a request issued here cannot be deferred to a
+    // later reconnect solely because the composer was disabled. Consumption happens only in
+    // onFocusChanged after focus is actually observed.
+    LaunchedEffect(requestFocus, isActiveTab, isAttached, initialFocusState.isConsumed) {
+        if (initialFocusState.shouldAttempt(requestFocus, isActiveTab) && isAttached) {
+            focusRequester.requestFocus()
         }
     }
 
@@ -307,6 +315,18 @@ fun ChatInputBar(
                             modifier = Modifier
                                 .fillMaxWidth()
                                 .focusRequester(focusRequester)
+                                .onGloballyPositioned { isAttached = true }
+                                .onFocusChanged { focusState ->
+                                    onComposerFocusChanged(focusState.isFocused)
+                                    // Consume the initial request only when focus is actually
+                                    // observed and the request is still eligible. A manual focus
+                                    // satisfying a pending initial request consumes it too.
+                                    val shouldConsumeInitialFocus = focusState.isFocused &&
+                                        initialFocusState.shouldAttempt(requestFocus, isActiveTab)
+                                    if (shouldConsumeInitialFocus) {
+                                        initialFocusState.markConsumed()
+                                    }
+                                }
                                 .onPreviewKeyEvent { event ->
                                     if (event.type != KeyEventType.KeyDown) {
                                         return@onPreviewKeyEvent false

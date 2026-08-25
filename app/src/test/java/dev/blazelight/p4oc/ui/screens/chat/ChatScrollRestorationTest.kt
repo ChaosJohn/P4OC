@@ -75,25 +75,49 @@ class ChatScrollRestorationTest {
     }
 
     @Test
-    fun openingKeyboardReturnsExistingConversationToTail() {
+    fun followingTailPinsWhenComposerFocusedAndContentPresent() {
         val state = ChatScrollRestorationState()
         state.onContentReady(hasRenderableTail = true)
-        state.onScrollSettled(isAtBottom = false)
-        state.onTailContentChanged(hasRenderableTail = true)
 
-        val shouldScroll = state.onKeyboardOpened(hasRenderableTail = true)
-
-        assertTrue(shouldScroll)
-        assertTrue(state.shouldFollowTail)
-        assertFalse(state.hasNewContentWhileAway)
+        assertTrue(state.shouldPinTailForIme(composerFocused = true, hasRenderableTail = true))
     }
 
     @Test
-    fun openingKeyboardDoesNotRequestScrollForEmptyConversation() {
+    fun scrolledAwayReaderIsNeverPinnedByIme() {
+        val state = ChatScrollRestorationState()
+        state.onContentReady(hasRenderableTail = true)
+        state.onScrollSettled(isAtBottom = false)
+
+        assertFalse(state.shouldPinTailForIme(composerFocused = true, hasRenderableTail = true))
+    }
+
+    @Test
+    fun userDragStartDisablesImePinAndSettledAtBottomResumesFollowing() {
+        val state = ChatScrollRestorationState()
+        state.onContentReady(hasRenderableTail = true)
+
+        assertTrue(state.shouldPinTailForIme(composerFocused = true, hasRenderableTail = true))
+
+        state.onUserScrollStarted()
+        assertFalse(state.shouldPinTailForIme(composerFocused = true, hasRenderableTail = true))
+
+        state.onScrollSettled(isAtBottom = true)
+        assertTrue(state.shouldPinTailForIme(composerFocused = true, hasRenderableTail = true))
+    }
+
+    @Test
+    fun nonComposerFocusDoesNotPinTail() {
+        val state = ChatScrollRestorationState()
+        state.onContentReady(hasRenderableTail = true)
+
+        assertFalse(state.shouldPinTailForIme(composerFocused = false, hasRenderableTail = true))
+    }
+
+    @Test
+    fun freshFollowingTailWithEmptyTranscriptIsNeverPinnedByIme() {
         val state = ChatScrollRestorationState()
 
-        assertFalse(state.onKeyboardOpened(hasRenderableTail = false))
-        assertTrue(state.shouldFollowTail)
+        assertFalse(state.shouldPinTailForIme(composerFocused = true, hasRenderableTail = false))
     }
 
     @Test
