@@ -58,11 +58,9 @@ import dev.blazelight.p4oc.ui.screens.files.upload.UploadProgressSheet
 import dev.blazelight.p4oc.ui.theme.LocalOpenCodeTheme
 import dev.blazelight.p4oc.ui.theme.Sizing
 import dev.blazelight.p4oc.ui.theme.Spacing
-import kotlinx.coroutines.flow.distinctUntilChanged
 import kotlinx.coroutines.flow.drop
 import kotlinx.coroutines.flow.filterIsInstance
 import kotlinx.coroutines.flow.first
-import kotlinx.coroutines.flow.collectLatest
 import kotlinx.coroutines.launch
 import org.koin.androidx.compose.koinViewModel
 
@@ -213,8 +211,10 @@ fun ChatScreen(
     val coroutineScope = rememberCoroutineScope()
     var composerFocused by remember { mutableStateOf(false) }
 
-    // Derived state: true when the list cannot advance toward the tail.
-    val isAtBottom by remember {
+    // Derived state: true when the list cannot advance toward the tail. Keyed on listState so a
+    // session's async null->id load (which recreates listState) cannot leave this observing a
+    // discarded, zero-item instance.
+    val isAtBottom by remember(listState) {
         derivedStateOf { !listState.canScrollForward }
     }
 
@@ -232,25 +232,23 @@ fun ChatScreen(
         }
     }
 
-    // Match the sticky follow-tail model: a user drag disables following immediately, and the
-    // follow state is only re-evaluated after the drag (and any fling) settles. Programmatic
-    // scrolls (e.g. IME pinning) never touch this state. The frame boundaries around the
-    // isScrollInProgress wait prevent a stale pre-layout bottom read: the first frame lets any
-    // fling start, and the second lets the drag layout commit before the final bottom read.
+    // A user drag disables tail-following immediately so IME pinning cannot fight the gesture.
     LaunchedEffect(listState, uiState.session?.id) {
         listState.interactionSource.interactions
-            .filterIsInstance<DragInteraction>()
-            .collectLatest { interaction ->
-                when (interaction) {
-                    is DragInteraction.Start -> scrollRestorationState.onUserScrollStarted()
-                    is DragInteraction.Stop, is DragInteraction.Cancel -> {
-                        withFrameNanos { }
-                        snapshotFlow { listState.isScrollInProgress }
-                            .first { !it }
-                        withFrameNanos { }
-                        val settledAtBottom = !listState.canScrollForward
-                        scrollRestorationState.onScrollSettled(settledAtBottom)
-                    }
+            .filterIsInstance<DragInteraction.Start>()
+            .collect { scrollRestorationState.onUserScrollStarted() }
+    }
+
+    // Re-evaluate follow state after any scroll (touch, wheel, keyboard, semantics/TalkBack)
+    // settles. The initial emission is ignored so a freshly composed list does not settle from a
+    // stale position; the frame wait lets the final layout commit before reading the live bottom.
+    LaunchedEffect(listState, uiState.session?.id) {
+        snapshotFlow { listState.isScrollInProgress }
+            .drop(1)
+            .collect { scrolling ->
+                if (!scrolling) {
+                    withFrameNanos { }
+                    scrollRestorationState.onScrollSettled(!listState.canScrollForward)
                 }
             }
     }
@@ -288,7 +286,7 @@ fun ChatScreen(
     // height is observed (not the IME inset), so the effect reacts to real layout changes without
     // recomposing ChatScreen per animation pixel. The initial emission is ignored so merely
     // focusing the composer cannot scroll; only a real viewport-height transition pins the tail.
-    LaunchedEffect(composerFocused, scrollRestorationState.shouldFollowTail, hasRenderableTail) {
+    LaunchedEffect(listState, composerFocused, scrollRestorationState.shouldFollowTail, hasRenderableTail) {
         if (!scrollRestorationState.shouldPinTailForIme(composerFocused, hasRenderableTail)) {
             return@LaunchedEffect
         }
@@ -296,7 +294,6 @@ fun ChatScreen(
             val info = listState.layoutInfo
             info.viewportEndOffset - info.viewportStartOffset
         }
-            .distinctUntilChanged()
             .drop(1)
             .collect {
                 listState.scrollChatToBottom()
