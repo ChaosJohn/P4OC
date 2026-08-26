@@ -81,6 +81,69 @@ class ChatPresentationBehaviorTest {
         assertTrue(complete!!.showSeparator)
     }
 
+    @Test
+    fun chatLoading_loadingMessagesWithoutContent_isOpaque() {
+        assertEquals(
+            ChatLoadingOverlay.Opaque,
+            chatLoadingOverlay(isMessageLoading = true, hasActiveLoadSteps = false, hasContent = false),
+        )
+        assertEquals(
+            ChatLoadingOverlay.Opaque,
+            chatLoadingOverlay(isMessageLoading = true, hasActiveLoadSteps = true, hasContent = false),
+        )
+    }
+
+    @Test
+    fun chatLoading_loadingMessagesWithContent_isTransparent() {
+        assertEquals(
+            ChatLoadingOverlay.Transparent,
+            chatLoadingOverlay(isMessageLoading = true, hasActiveLoadSteps = false, hasContent = true),
+        )
+        assertEquals(
+            ChatLoadingOverlay.Transparent,
+            chatLoadingOverlay(isMessageLoading = true, hasActiveLoadSteps = true, hasContent = true),
+        )
+    }
+
+    @Test
+    fun chatLoading_emptyHistoryWithPendingQuestion_isTransparent() {
+        val hasContent = hasChatContent(
+            hasMessages = false,
+            isBusy = false,
+            hasPendingQuestion = true,
+            hasSessionPendingPermissions = false,
+        )
+
+        assertEquals(
+            ChatLoadingOverlay.Transparent,
+            chatLoadingOverlay(isMessageLoading = true, hasActiveLoadSteps = false, hasContent = hasContent),
+        )
+    }
+
+    @Test
+    fun chatLoading_incidentalStep_isTransparent() {
+        assertEquals(
+            ChatLoadingOverlay.Transparent,
+            chatLoadingOverlay(isMessageLoading = false, hasActiveLoadSteps = true, hasContent = false),
+        )
+        assertEquals(
+            ChatLoadingOverlay.Transparent,
+            chatLoadingOverlay(isMessageLoading = false, hasActiveLoadSteps = true, hasContent = true),
+        )
+    }
+
+    @Test
+    fun chatLoading_noActivity_isNone() {
+        assertEquals(
+            ChatLoadingOverlay.None,
+            chatLoadingOverlay(isMessageLoading = false, hasActiveLoadSteps = false, hasContent = false),
+        )
+        assertEquals(
+            ChatLoadingOverlay.None,
+            chatLoadingOverlay(isMessageLoading = false, hasActiveLoadSteps = false, hasContent = true),
+        )
+    }
+
     private fun assistantMessage(
         id: String,
         providerID: String,

@@ -201,7 +201,8 @@
     <ID>FunctionNaming:StreamingMarkdown.kt$@Composable private fun MarkdownParagraph(text: String, colors: MarkdownRenderColors)</ID>
     <ID>FunctionNaming:StreamingMarkdown.kt$@Composable private fun MarkdownQuote(lines: List&lt;String&gt;, colors: MarkdownRenderColors)</ID>
     <ID>FunctionNaming:StreamingMarkdown.kt$@Composable private fun MarkdownTableBlock(rows: List&lt;List&lt;String&gt;&gt;, colors: MarkdownRenderColors)</ID>
-    <ID>FunctionNaming:StreamingMarkdown.kt$@Composable private fun MarkdownText( text: AnnotatedString, style: TextStyle, colors: MarkdownRenderColors, modifier: Modifier = Modifier, )</ID>
+    <ID>FunctionNaming:StreamingMarkdown.kt$@Composable private fun MarkdownText( text: AnnotatedString, style: TextStyle, color: androidx.compose.ui.graphics.Color, modifier: Modifier = Modifier, )</ID>
+    <ID>FunctionNaming:StreamingMarkdown.kt$@Composable private fun MarkdownBlockView( block: MarkdownBlock, colors: MarkdownRenderColors, highlighter: Highlights.Builder, )</ID>
     <ID>FunctionNaming:SyntaxHighlightedCode.kt$@Composable fun SyntaxHighlightedCode( code: String, filename: String, modifier: Modifier = Modifier, showLineNumbers: Boolean = true, fontSize: Int = 12, selectable: Boolean = false, )</ID>
     <ID>FunctionNaming:TabBar.kt$@Composable fun TabBar( tabs: List&lt;TabInstance&gt;, activeTabId: String?, tabTitles: Map&lt;String, String&gt;, tabIcons: Map&lt;String, ImageVector&gt;, tabConnectionStates: Map&lt;String, SessionConnectionState&gt;, onTabClick: (String) -&gt; Unit, onTabClose: (String) -&gt; Unit, onAddClick: () -&gt; Unit, modifier: Modifier = Modifier )</ID>
     <ID>FunctionNaming:TabBar.kt$@Composable private fun TabIndicator( title: String, icon: ImageVector, connectionState: SessionConnectionState?, isActive: Boolean, closeable: Boolean = true, onClick: () -&gt; Unit, onClose: () -&gt; Unit, modifier: Modifier = Modifier )</ID>
