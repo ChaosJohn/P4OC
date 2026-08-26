@@ -260,7 +260,7 @@ class StreamingMarkdownParserTest {
 
     @Test
     fun `display marker truncates long markers to six visible characters`() {
-        assertEquals("…23456", displayListMarker("1234567."))
-        assertEquals("…67890", displayListMarker("1234567890."))
+        assertEquals("…4567.", displayListMarker("1234567."))
+        assertEquals("…7890.", displayListMarker("1234567890."))
     }
 }

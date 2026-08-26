@@ -38,6 +38,7 @@ import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextDecoration
 import androidx.compose.ui.text.withLink
 import androidx.compose.ui.text.withStyle
+import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import dev.blazelight.p4oc.ui.theme.LocalOpenCodeTheme
@@ -158,33 +159,7 @@ private fun MarkdownText(
 @Composable
 private fun MarkdownList(items: List<MarkdownListItem>, colors: MarkdownRenderColors) {
     val markerStyle = MaterialTheme.typography.bodyMedium.copy(lineHeight = 20.sp)
-    val textMeasurer = rememberTextMeasurer()
-    val density = LocalDensity.current
-    // One marker column per block keeps mixed bullet/number runs aligned and lets wrapped item
-    // text stay flush with its first line. The widest displayed marker (see [displayListMarker])
-    // sets the column by measured text width, so it scales with the font and never clips
-    // `1.`/`10.`/`100.`, while pathological markers cannot create an unbounded gutter.
-    val markerWidth = remember(items, markerStyle, textMeasurer, density.density, density.fontScale) {
-        val bulletPx = textMeasurer.measure(
-            text = AnnotatedString(MARKER_BULLET),
-            style = markerStyle,
-            softWrap = false,
-        ).size.width
-        val widestMarkerPx = items.maxOfOrNull { item ->
-            textMeasurer.measure(
-                text = AnnotatedString(displayListMarker(item.marker)),
-                style = markerStyle,
-                softWrap = false,
-            ).size.width
-        }
-        with(density) {
-            maxOf(
-                bulletPx.toFloat(),
-                widestMarkerPx?.toFloat() ?: 0f,
-                Spacing.md.toPx(),
-            ).roundToInt().toDp()
-        }
-    }
+    val markerWidth = rememberListMarkerWidth(items, markerStyle)
     Column(
         modifier = Modifier.padding(horizontal = Spacing.xs),
         verticalArrangement = Arrangement.spacedBy(Spacing.xxs),
@@ -217,6 +192,37 @@ private fun MarkdownList(items: List<MarkdownListItem>, colors: MarkdownRenderCo
                     modifier = Modifier.weight(1f),
                 )
             }
+        }
+    }
+}
+
+// One marker column per block keeps mixed bullet/number runs aligned and lets wrapped item
+// text stay flush with its first line. The widest displayed marker (see [displayListMarker])
+// sets the column by measured text width, so it scales with the font and never clips
+// `1.`/`10.`/`100.`, while pathological markers cannot create an unbounded gutter.
+@Composable
+private fun rememberListMarkerWidth(items: List<MarkdownListItem>, markerStyle: TextStyle): Dp {
+    val textMeasurer = rememberTextMeasurer()
+    val density = LocalDensity.current
+    return remember(items, markerStyle, textMeasurer, density.density, density.fontScale) {
+        val bulletPx = textMeasurer.measure(
+            text = AnnotatedString(MARKER_BULLET),
+            style = markerStyle,
+            softWrap = false,
+        ).size.width
+        val widestMarkerPx = items.maxOfOrNull { item ->
+            textMeasurer.measure(
+                text = AnnotatedString(displayListMarker(item.marker)),
+                style = markerStyle,
+                softWrap = false,
+            ).size.width
+        }
+        with(density) {
+            maxOf(
+                bulletPx.toFloat(),
+                widestMarkerPx?.toFloat() ?: 0f,
+                Spacing.md.toPx(),
+            ).roundToInt().toDp()
         }
     }
 }
