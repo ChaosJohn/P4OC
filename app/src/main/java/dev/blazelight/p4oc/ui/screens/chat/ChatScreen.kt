@@ -24,6 +24,8 @@ import androidx.compose.ui.platform.LocalSoftwareKeyboardController
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.semantics.Role
+import androidx.compose.ui.semantics.contentDescription
+import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
@@ -104,6 +106,29 @@ internal fun hasChatContent(
     hasPendingQuestion: Boolean,
     hasSessionPendingPermissions: Boolean,
 ): Boolean = hasMessages || isBusy || hasPendingQuestion || hasSessionPendingPermissions
+
+internal enum class ChatLoadingOverlay {
+    None,
+    Transparent,
+    Opaque,
+}
+
+/**
+ * Presentation seam for the chat loading indicator. An opaque full-bleed overlay is shown only
+ * while the session messages themselves are loading over an empty transcript, so cached or
+ * populated content stays visible. Incidental in-session steps (slash commands, todos, file
+ * picker) render a small transparent centered indicator regardless of content; when there is no
+ * loading activity at all no overlay is shown.
+ */
+internal fun chatLoadingOverlay(
+    isMessageLoading: Boolean,
+    hasActiveLoadSteps: Boolean,
+    hasContent: Boolean,
+): ChatLoadingOverlay = when {
+    !isMessageLoading && !hasActiveLoadSteps -> ChatLoadingOverlay.None
+    isMessageLoading && !hasContent -> ChatLoadingOverlay.Opaque
+    else -> ChatLoadingOverlay.Transparent
+}
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
@@ -606,12 +631,27 @@ fun ChatScreen(
                     addAll(uiState.loadingSteps)
                     if (isPickerLoading) add("Loading files")
                 }
-                if (uiState.isLoading || activeLoadSteps.isNotEmpty()) {
+                val overlayPresentation = chatLoadingOverlay(
+                    isMessageLoading = uiState.isLoading,
+                    hasActiveLoadSteps = activeLoadSteps.isNotEmpty(),
+                    hasContent = hasContent,
+                )
+                if (overlayPresentation != ChatLoadingOverlay.None) {
+                    val loadingDescription = stringResource(R.string.cd_loading)
+                    val modifier = when (overlayPresentation) {
+                        ChatLoadingOverlay.Opaque ->
+                            Modifier
+                                .matchParentSize()
+                                .background(LocalOpenCodeTheme.current.background)
+                        ChatLoadingOverlay.Transparent ->
+                            Modifier
+                                .align(Alignment.Center)
+                        ChatLoadingOverlay.None -> Modifier
+                    }
                     TuiLoadingScreen(
-                        modifier = Modifier
-                            .matchParentSize()
-                            .background(LocalOpenCodeTheme.current.background)
-                            .testTag("chat_loading_overlay"),
+                        modifier = modifier
+                            .testTag("chat_loading_overlay")
+                            .semantics { contentDescription = loadingDescription },
                         text = activeLoadSteps.ifEmpty { listOf("Loading session") }.joinToString("\n")
                     )
                 }

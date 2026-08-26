@@ -118,4 +118,135 @@ class StreamingMarkdownParserTest {
             list.items,
         )
     }
+
+    @Test
+    fun `keeps mixed ordered and unordered nesting in one list run`() {
+        val blocks = parseMarkdownBlocks(
+            """
+            1. Parent
+               - Child
+               - Another child
+            2. Parent
+            """.trimIndent()
+        )
+
+        assertEquals(1, blocks.size)
+        val list = blocks.single() as MarkdownBlock.ListBlock
+        assertEquals(
+            listOf(
+                MarkdownListItem("1.", "Parent", indentLevel = 0, ordered = true),
+                MarkdownListItem("•", "Child", indentLevel = 1, ordered = false),
+                MarkdownListItem("•", "Another child", indentLevel = 1, ordered = false),
+                MarkdownListItem("2.", "Parent", indentLevel = 0, ordered = true),
+            ),
+            list.items,
+        )
+    }
+
+    @Test
+    fun `four space nesting maps to a single semantic level`() {
+        val blocks = parseMarkdownBlocks(
+            """
+            - Parent
+                - Child
+                - Another child
+            - Sibling
+            """.trimIndent()
+        )
+
+        val list = blocks.single() as MarkdownBlock.ListBlock
+        assertEquals(
+            listOf(
+                MarkdownListItem("•", "Parent", indentLevel = 0),
+                MarkdownListItem("•", "Child", indentLevel = 1),
+                MarkdownListItem("•", "Another child", indentLevel = 1),
+                MarkdownListItem("•", "Sibling", indentLevel = 0),
+            ),
+            list.items,
+        )
+    }
+
+    @Test
+    fun `zero four eight indentation maps to depths zero one two`() {
+        val blocks = parseMarkdownBlocks(
+            """
+            - Level zero
+                - Level one
+                    - Level two
+            """.trimIndent()
+        )
+
+        val list = blocks.single() as MarkdownBlock.ListBlock
+        assertEquals(
+            listOf(
+                MarkdownListItem("•", "Level zero", indentLevel = 0),
+                MarkdownListItem("•", "Level one", indentLevel = 1),
+                MarkdownListItem("•", "Level two", indentLevel = 2),
+            ),
+            list.items,
+        )
+    }
+
+    @Test
+    fun `stream fragment beginning at indentation maps first item to zero`() {
+        val blocks = parseMarkdownBlocks(
+            "    - Fragment child\n    - Fragment sibling"
+        )
+
+        val list = blocks.single() as MarkdownBlock.ListBlock
+        assertEquals(
+            listOf(
+                MarkdownListItem("•", "Fragment child", indentLevel = 0),
+                MarkdownListItem("•", "Fragment sibling", indentLevel = 0),
+            ),
+            list.items,
+        )
+    }
+
+    @Test
+    fun `blank line splits two lists into separate blocks`() {
+        val blocks = parseMarkdownBlocks(
+            """
+            - first
+
+            - second
+            """.trimIndent()
+        )
+
+        assertEquals(2, blocks.size)
+        assertTrue(blocks[0] is MarkdownBlock.ListBlock)
+        assertTrue(blocks[1] is MarkdownBlock.ListBlock)
+    }
+
+    @Test
+    fun `tab indented child maps one semantic level below parent`() {
+        val blocks = parseMarkdownBlocks(
+            "- Parent\n\t- Tab child\n\t- Tab sibling\n- Second parent"
+        )
+
+        val list = blocks.single() as MarkdownBlock.ListBlock
+        assertEquals(
+            listOf(
+                MarkdownListItem("•", "Parent", indentLevel = 0),
+                MarkdownListItem("•", "Tab child", indentLevel = 1),
+                MarkdownListItem("•", "Tab sibling", indentLevel = 1),
+                MarkdownListItem("•", "Second parent", indentLevel = 0),
+            ),
+            list.items,
+        )
+    }
+
+    @Test
+    fun `tab indented fragment maps first item to zero`() {
+        val blocks = parseMarkdownBlocks("\t- Fragment child\n\t- Fragment sibling")
+
+        val list = blocks.single() as MarkdownBlock.ListBlock
+        assertEquals(
+            listOf(
+                MarkdownListItem("•", "Fragment child", indentLevel = 0),
+                MarkdownListItem("•", "Fragment sibling", indentLevel = 0),
+            ),
+            list.items,
+        )
+    }
 }

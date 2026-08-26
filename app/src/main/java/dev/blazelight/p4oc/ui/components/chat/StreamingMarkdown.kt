@@ -24,6 +24,7 @@ import androidx.compose.runtime.key
 import androidx.compose.runtime.remember
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.text.AnnotatedString
 import androidx.compose.ui.text.LinkAnnotation
 import androidx.compose.ui.text.SpanStyle
@@ -32,8 +33,9 @@ import androidx.compose.ui.text.TextStyle
 import androidx.compose.ui.text.buildAnnotatedString
 import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.font.FontWeight
-import androidx.compose.ui.text.style.TextDecoration
+import androidx.compose.ui.text.rememberTextMeasurer
 import androidx.compose.ui.text.style.TextAlign
+import androidx.compose.ui.text.style.TextDecoration
 import androidx.compose.ui.text.withLink
 import androidx.compose.ui.text.withStyle
 import androidx.compose.ui.unit.dp
@@ -45,6 +47,7 @@ import dev.snipme.highlights.Highlights
 import dev.snipme.highlights.model.ColorHighlight
 import dev.snipme.highlights.model.SyntaxLanguage
 import dev.snipme.highlights.model.SyntaxThemes
+import kotlin.math.roundToInt
 
 /**
  * Chat-oriented markdown renderer.
@@ -62,19 +65,7 @@ fun StreamingMarkdown(
 ) {
     val isDarkTheme = isSystemInDarkTheme()
     val theme = LocalOpenCodeTheme.current
-    val contentColor = if (useTertiaryColors) theme.success else theme.markdownText
-    val colors = MarkdownRenderColors(
-        text = contentColor,
-        heading = if (useTertiaryColors) contentColor else theme.markdownHeading,
-        strong = if (useTertiaryColors) contentColor else theme.markdownStrong,
-        listMarker = if (useTertiaryColors) contentColor else theme.markdownListItem,
-        listEnumeration = if (useTertiaryColors) contentColor else theme.markdownListEnumeration,
-        muted = theme.textMuted,
-        border = theme.border,
-        codeBackground = theme.backgroundElement,
-        inlineCodeBackground = theme.backgroundPanel,
-        link = theme.info,
-    )
+    val colors = markdownRenderColors(theme, useTertiaryColors)
     val highlighter = remember(isDarkTheme) {
         Highlights.Builder().theme(SyntaxThemes.atom(darkMode = isDarkTheme))
     }
@@ -87,21 +78,7 @@ fun StreamingMarkdown(
         ) {
             blocks.forEach { block ->
                 key(block.key) {
-                    when (block) {
-                        is MarkdownBlock.Paragraph -> MarkdownParagraph(block.lines.joinToString("\n"), colors)
-                        is MarkdownBlock.Heading -> MarkdownText(
-                            text = inlineMarkdown(block.text, colors),
-                            style = headingStyle(block.level),
-                            colors = colors,
-                            color = colors.heading,
-                            modifier = Modifier.padding(top = Spacing.xs),
-                        )
-                        is MarkdownBlock.ListBlock -> MarkdownList(block.items, colors)
-                        is MarkdownBlock.Quote -> MarkdownQuote(block.lines, colors)
-                        is MarkdownBlock.CodeFence -> CodeFenceBlock(block.code, block.language, highlighter, colors)
-                        is MarkdownBlock.Table -> MarkdownTableBlock(block.rows, colors)
-                        is MarkdownBlock.Rule -> HorizontalRule(colors)
-                    }
+                    MarkdownBlockView(block, colors, highlighter)
                 }
             }
         }
@@ -109,11 +86,57 @@ fun StreamingMarkdown(
 }
 
 @Composable
+private fun MarkdownBlockView(
+    block: MarkdownBlock,
+    colors: MarkdownRenderColors,
+    highlighter: Highlights.Builder,
+) {
+    when (block) {
+        is MarkdownBlock.Paragraph -> MarkdownParagraph(block.lines.joinToString("\n"), colors)
+        is MarkdownBlock.Heading -> MarkdownText(
+            text = inlineMarkdown(block.text, colors),
+            style = headingStyle(block.level),
+            color = colors.heading,
+            modifier = Modifier.padding(top = Spacing.xs),
+        )
+        is MarkdownBlock.ListBlock -> MarkdownList(block.items, colors)
+        is MarkdownBlock.Quote -> MarkdownQuote(block.lines, colors)
+        is MarkdownBlock.CodeFence -> CodeFenceBlock(block.code, block.language, highlighter, colors)
+        is MarkdownBlock.Table -> MarkdownTableBlock(block.rows, colors)
+        is MarkdownBlock.Rule -> HorizontalRule(colors)
+    }
+}
+
+/**
+ * Builds the renderer palette. Tertiary content (reasoning) is intentionally monochrome: every
+ * foreground token collapses to the single content color, while surfaces and structural rules keep
+ * their neutral theme values.
+ */
+private fun markdownRenderColors(
+    theme: dev.blazelight.p4oc.ui.theme.opencode.OpenCodeTheme,
+    useTertiaryColors: Boolean,
+): MarkdownRenderColors {
+    val contentColor = if (useTertiaryColors) theme.success else theme.markdownText
+    return MarkdownRenderColors(
+        text = contentColor,
+        heading = if (useTertiaryColors) contentColor else theme.markdownHeading,
+        strong = if (useTertiaryColors) contentColor else theme.markdownStrong,
+        listMarker = if (useTertiaryColors) contentColor else theme.markdownListItem,
+        listEnumeration = if (useTertiaryColors) contentColor else theme.markdownListEnumeration,
+        muted = if (useTertiaryColors) contentColor else theme.textMuted,
+        border = theme.border,
+        codeBackground = theme.backgroundElement,
+        inlineCodeBackground = theme.backgroundPanel,
+        link = if (useTertiaryColors) contentColor else theme.info,
+    )
+}
+
+@Composable
 private fun MarkdownParagraph(text: String, colors: MarkdownRenderColors) {
     MarkdownText(
         text = inlineMarkdown(text.trim(), colors),
         style = MaterialTheme.typography.bodyMedium.copy(lineHeight = 20.sp),
-        colors = colors,
+        color = colors.text,
     )
 }
 
@@ -121,9 +144,8 @@ private fun MarkdownParagraph(text: String, colors: MarkdownRenderColors) {
 private fun MarkdownText(
     text: AnnotatedString,
     style: TextStyle,
-    colors: MarkdownRenderColors,
+    color: androidx.compose.ui.graphics.Color,
     modifier: Modifier = Modifier,
-    color: androidx.compose.ui.graphics.Color = colors.text,
 ) {
     Text(
         text = text,
@@ -135,29 +157,52 @@ private fun MarkdownText(
 
 @Composable
 private fun MarkdownList(items: List<MarkdownListItem>, colors: MarkdownRenderColors) {
-    val markerWidth = if (items.any { it.ordered }) Spacing.xl else Spacing.md
+    val markerStyle = MaterialTheme.typography.bodyMedium.copy(lineHeight = 20.sp)
+    val textMeasurer = rememberTextMeasurer()
+    val density = LocalDensity.current
+    // One marker column per block keeps mixed bullet/number runs aligned and lets wrapped item
+    // text stay flush with its first line. The widest marker (bounded to its trailing six
+    // characters) sets the column by measured text width, so it scales with the font and never
+    // clips `1.`/`10.`/`100.`, while pathological markers cannot create an unbounded gutter.
+    val markerWidth = remember(items, markerStyle, density.density, density.fontScale) {
+        val bulletPx = textMeasurer.measure(
+            text = AnnotatedString(MARKER_BULLET),
+            style = markerStyle,
+        ).size.width
+        val widestMarkerPx = items.maxOfOrNull { item ->
+            textMeasurer.measure(
+                text = AnnotatedString(item.marker.takeLast(MARKER_MEASURE_MAX_CHARS)),
+                style = markerStyle,
+            ).size.width
+        }
+        val minWidthPx = with(density) { Spacing.md.toPx() }.roundToInt()
+        with(density) {
+            maxOf(bulletPx, widestMarkerPx ?: 0, minWidthPx).toDp()
+        }
+    }
     Column(
         modifier = Modifier.padding(horizontal = Spacing.xs),
         verticalArrangement = Arrangement.spacedBy(Spacing.xxs),
     ) {
         items.forEachIndexed { index, item ->
-            val startsTopLevelSection = item.indentLevel == 0 &&
-                items.getOrNull(index - 1)?.indentLevel?.let { it > 0 } == true
+            val indentStep = item.indentLevel.coerceAtMost(MAX_VISUAL_INDENT_LEVELS)
+            val returnsToTopLevel = indentStep == 0 && (items.getOrNull(index - 1)?.indentLevel ?: 0) > 0
             Row(
                 modifier = Modifier
                     .fillMaxWidth()
                     .padding(
-                        start = Spacing.lg * item.indentLevel,
-                        top = if (startsTopLevelSection) Spacing.md else Spacing.none,
+                        start = Spacing.lg * indentStep,
+                        top = if (returnsToTopLevel) Spacing.md else Spacing.none,
                     ),
                 horizontalArrangement = Arrangement.spacedBy(Spacing.sm),
                 verticalAlignment = Alignment.Top,
             ) {
                 Text(
                     text = item.marker,
-                    style = MaterialTheme.typography.bodyMedium.copy(lineHeight = 20.sp),
+                    style = markerStyle,
                     color = if (item.ordered) colors.listEnumeration else colors.listMarker,
                     textAlign = TextAlign.End,
+                    softWrap = false,
                     modifier = Modifier.width(markerWidth),
                 )
                 Text(
@@ -363,10 +408,8 @@ private fun inlineMarkdown(text: String, colors: MarkdownRenderColors): Annotate
                     appendInline(text.substring(boldStart), colors)
                     break
                 }
-                withStyle(SpanStyle(fontWeight = FontWeight.Bold)) {
-                    withStyle(SpanStyle(color = colors.strong)) {
-                        append(text.substring(boldStart + 2, end))
-                    }
+                withStyle(SpanStyle(fontWeight = FontWeight.Bold, color = colors.strong)) {
+                    append(text.substring(boldStart + 2, end))
                 }
                 index = end + 2
             }
@@ -439,6 +482,15 @@ private fun tableCellWidth(contentLength: Int) = when {
     else -> 320.dp
 }
 
+/** Characters of a list marker used to bound measurement, so huge source numbers cannot widen the column. */
+private const val MARKER_MEASURE_MAX_CHARS = 6
+
+/** Bullet glyph measured as the list-marker floor so narrow runs never shrink the shared column. */
+private const val MARKER_BULLET = "•"
+
+/** Maximum visual indentation steps rendered for nested lists, keeping the gutter bounded on phones. */
+private const val MAX_VISUAL_INDENT_LEVELS = 4
+
 private data class MarkdownRenderColors(
     val text: androidx.compose.ui.graphics.Color,
     val heading: androidx.compose.ui.graphics.Color,
@@ -463,7 +515,7 @@ internal sealed interface MarkdownBlock {
         override val key = "h:$startLine"
     }
 
-    data class ListBlock(val startLine: Int, val ordered: Boolean, val items: List<MarkdownListItem>) : MarkdownBlock {
+    data class ListBlock(val startLine: Int, val items: List<MarkdownListItem>) : MarkdownBlock {
         override val key = "l:$startLine"
     }
 
@@ -533,16 +585,15 @@ internal fun parseMarkdownBlocks(text: String): List<MarkdownBlock> {
         }
 
         parseListItem(line)?.let { firstItem ->
-            val ordered = firstItem.ordered
-            val items = mutableListOf(firstItem.toMarkdownListItem())
+            val items = mutableListOf(firstItem)
             index++
             while (index < lines.size) {
                 val next = parseListItem(lines[index])
-                if (next == null || next.ordered != ordered) break
-                items += next.toMarkdownListItem()
+                if (next == null) break
+                items += next
                 index++
             }
-            blocks += MarkdownBlock.ListBlock(startLine, ordered, items)
+            blocks += MarkdownBlock.ListBlock(startLine, normalizeListIndents(items))
             continue
         }
 
@@ -601,9 +652,9 @@ private data class ListItem(
     val ordered: Boolean,
     val marker: String,
     val text: String,
-    val indentLevel: Int,
+    val leadingIndentWidth: Int,
 ) {
-    fun toMarkdownListItem(): MarkdownListItem = MarkdownListItem(
+    fun toMarkdownListItem(indentLevel: Int): MarkdownListItem = MarkdownListItem(
         marker = marker,
         text = text,
         indentLevel = indentLevel,
@@ -611,21 +662,46 @@ private data class ListItem(
     )
 }
 
+/**
+ * Normalize a contiguous list run's raw leading-indentation widths into semantic indentation
+ * levels. Each leading space counts one and each leading tab counts [TAB_INDENT_WIDTH], so tab
+ * indentation is recognized as hierarchy instead of being silently flattened.
+ * The first visible item is level 0; any greater indentation than the current level opens exactly
+ * one child level, equal indentation stays, and dedenting returns to a prior/lower level. This
+ * makes the model independent of the source indent width (two vs four spaces) and of skipped
+ * levels, so a stream fragment beginning mid-list still maps its first item to 0.
+ */
+private fun normalizeListIndents(items: List<ListItem>): List<MarkdownListItem> {
+    val stack = mutableListOf<Int>()
+    return items.map { item ->
+        val indent = item.leadingIndentWidth
+        while (stack.isNotEmpty() && stack.last() > indent) {
+            stack.removeAt(stack.size - 1)
+        }
+        if (stack.isEmpty() || stack.last() < indent) {
+            stack.add(indent)
+        }
+        item.toMarkdownListItem(indentLevel = stack.size - 1)
+    }
+}
+
+private const val TAB_INDENT_WIDTH = 4
+
+private fun leadingIndentWidth(line: String): Int =
+    line.takeWhile { it == ' ' || it == '\t' }.sumOf { if (it == '\t') TAB_INDENT_WIDTH else 1 }
+
 private fun parseListItem(line: String): ListItem? {
-    val leadingSpaces = line.takeWhile { it == ' ' }.length
-    val indentLevel = leadingSpaces / MARKDOWN_LIST_INDENT_SPACES
+    val leadingIndentWidth = leadingIndentWidth(line)
     val trimmed = line.trimStart()
     if (trimmed.startsWith("- ") || trimmed.startsWith("* ")) {
-        return ListItem(false, "•", trimmed.drop(2).trim(), indentLevel)
+        return ListItem(false, "•", trimmed.drop(2).trim(), leadingIndentWidth)
     }
     val dot = trimmed.indexOf(". ")
     if (dot > 0 && trimmed.take(dot).all { it.isDigit() }) {
-        return ListItem(true, trimmed.take(dot + 1), trimmed.drop(dot + 2).trim(), indentLevel)
+        return ListItem(true, trimmed.take(dot + 1), trimmed.drop(dot + 2).trim(), leadingIndentWidth)
     }
     return null
 }
-
-private const val MARKDOWN_LIST_INDENT_SPACES = 2
 
 private data class ParsedTable(val rows: List<List<String>>, val nextIndex: Int)
 
