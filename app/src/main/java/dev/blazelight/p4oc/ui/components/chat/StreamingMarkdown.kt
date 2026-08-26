@@ -161,23 +161,28 @@ private fun MarkdownList(items: List<MarkdownListItem>, colors: MarkdownRenderCo
     val textMeasurer = rememberTextMeasurer()
     val density = LocalDensity.current
     // One marker column per block keeps mixed bullet/number runs aligned and lets wrapped item
-    // text stay flush with its first line. The widest marker (bounded to its trailing six
-    // characters) sets the column by measured text width, so it scales with the font and never
-    // clips `1.`/`10.`/`100.`, while pathological markers cannot create an unbounded gutter.
-    val markerWidth = remember(items, markerStyle, density.density, density.fontScale) {
+    // text stay flush with its first line. The widest displayed marker (see [displayListMarker])
+    // sets the column by measured text width, so it scales with the font and never clips
+    // `1.`/`10.`/`100.`, while pathological markers cannot create an unbounded gutter.
+    val markerWidth = remember(items, markerStyle, textMeasurer, density.density, density.fontScale) {
         val bulletPx = textMeasurer.measure(
             text = AnnotatedString(MARKER_BULLET),
             style = markerStyle,
+            softWrap = false,
         ).size.width
         val widestMarkerPx = items.maxOfOrNull { item ->
             textMeasurer.measure(
-                text = AnnotatedString(item.marker.takeLast(MARKER_MEASURE_MAX_CHARS)),
+                text = AnnotatedString(displayListMarker(item.marker)),
                 style = markerStyle,
+                softWrap = false,
             ).size.width
         }
-        val minWidthPx = with(density) { Spacing.md.toPx() }.roundToInt()
         with(density) {
-            maxOf(bulletPx, widestMarkerPx ?: 0, minWidthPx).toDp()
+            maxOf(
+                bulletPx.toFloat(),
+                widestMarkerPx?.toFloat() ?: 0f,
+                Spacing.md.toPx(),
+            ).roundToInt().toDp()
         }
     }
     Column(
@@ -198,7 +203,7 @@ private fun MarkdownList(items: List<MarkdownListItem>, colors: MarkdownRenderCo
                 verticalAlignment = Alignment.Top,
             ) {
                 Text(
-                    text = item.marker,
+                    text = displayListMarker(item.marker),
                     style = markerStyle,
                     color = if (item.ordered) colors.listEnumeration else colors.listMarker,
                     textAlign = TextAlign.End,
@@ -482,8 +487,24 @@ private fun tableCellWidth(contentLength: Int) = when {
     else -> 320.dp
 }
 
-/** Characters of a list marker used to bound measurement, so huge source numbers cannot widen the column. */
-private const val MARKER_MEASURE_MAX_CHARS = 6
+/** Characters of a displayed list marker, so huge source numbers cannot widen the column. */
+private const val MARKER_DISPLAY_MAX_CHARS = 6
+
+/** Ellipsis glyph used to truncate an over-long ordered marker before rendering/measurement. */
+private const val MARKER_ELLIPSIS = "…"
+
+/**
+ * Returns the exact string that will be measured and rendered for [marker]. Markers of at most
+ * [MARKER_DISPLAY_MAX_CHARS] characters are unchanged; longer markers become an ellipsis plus
+ * their trailing characters so the measured column matches what is drawn. The full original
+ * marker remains available on [MarkdownListItem].
+ */
+internal fun displayListMarker(marker: String): String =
+    if (marker.length <= MARKER_DISPLAY_MAX_CHARS) {
+        marker
+    } else {
+        MARKER_ELLIPSIS + marker.takeLast(MARKER_DISPLAY_MAX_CHARS - 1)
+    }
 
 /** Bullet glyph measured as the list-marker floor so narrow runs never shrink the shared column. */
 private const val MARKER_BULLET = "•"

@@ -249,4 +249,18 @@ class StreamingMarkdownParserTest {
             list.items,
         )
     }
+
+    @Test
+    fun `display marker leaves normal markers unchanged`() {
+        assertEquals("•", displayListMarker("•"))
+        assertEquals("1.", displayListMarker("1."))
+        assertEquals("10.", displayListMarker("10."))
+        assertEquals("100.", displayListMarker("100."))
+    }
+
+    @Test
+    fun `display marker truncates long markers to six visible characters`() {
+        assertEquals("…23456", displayListMarker("1234567."))
+        assertEquals("…67890", displayListMarker("1234567890."))
+    }
 }
