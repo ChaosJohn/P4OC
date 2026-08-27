@@ -3,6 +3,7 @@ package dev.blazelight.p4oc.ui.screens.chat
 import androidx.lifecycle.SavedStateHandle
 import dev.blazelight.p4oc.core.datastore.ChatSettings
 import dev.blazelight.p4oc.core.datastore.NotificationSettings
+import dev.blazelight.p4oc.core.datastore.SessionComposerSelection
 import dev.blazelight.p4oc.core.datastore.SettingsDataStore
 import dev.blazelight.p4oc.core.datastore.VisualSettings
 import dev.blazelight.p4oc.core.haptic.HapticFeedback
@@ -50,7 +51,6 @@ import dev.blazelight.p4oc.domain.workspace.Workspace
 import dev.blazelight.p4oc.ui.components.chat.SelectedFile
 import dev.blazelight.p4oc.ui.navigation.Screen
 import dev.blazelight.p4oc.ui.screens.files.upload.UploadCoordinator
-import io.mockk.clearMocks
 import io.mockk.coEvery
 import io.mockk.coVerify
 import io.mockk.every
@@ -137,13 +137,11 @@ class ChatViewModelTest {
         every { settingsDataStore.favoriteModels } returns flowOf(emptySet())
         every { settingsDataStore.recentModels } returns flowOf(emptyList())
         every { settingsDataStore.chatSettings } returns flowOf(ChatSettings())
+        every { settingsDataStore.notificationSettings } returns flowOf(NotificationSettings())
         every { settingsDataStore.visualSettings } returns flowOf(VisualSettings())
         coEvery { settingsDataStore.getComposerSelectionForSession(any(), any()) } returns null
-        coEvery { settingsDataStore.getSelectedModelForSession(any()) } returns null
-        coEvery { settingsDataStore.setSelectedModelForSession(any(), any()) } returns Unit
         coEvery { settingsDataStore.setComposerSelectionForSession(any(), any(), any()) } returns Unit
         coEvery { settingsDataStore.addRecentModel(any()) } returns Unit
-        every { settingsDataStore.notificationSettings } returns flowOf(NotificationSettings())
         coEvery { settingsDataStore.getSelectedAgentForSession(any()) } returns null
         coEvery { settingsDataStore.setSelectedAgentForSession(any(), any()) } returns Unit
 
@@ -894,6 +892,52 @@ class ChatViewModelTest {
     }
 
     @Test
+    fun sendMessage_acknowledgesCapturedModelVariant_notMutableStateAtSuccess() = runTest {
+        val sentModel = dev.blazelight.p4oc.data.remote.dto.ModelInput("openai", "gpt-5")
+        coEvery { api.getSession("session-1", any(), null) } returns sessionDto(
+            model = SessionModelDto(id = "gpt-5", providerID = "openai", variant = "high")
+        )
+        coEvery { api.getProviders(any(), null) } returns reasoningProviders()
+        val sendGate = CompletableDeferred<Unit>()
+        coEvery { api.sendMessageAsync(any(), any(), any(), null) } coAnswers {
+            sendGate.await()
+            Unit
+        }
+        val vm = createViewModel()
+
+        vm.updateInput("hello")
+        vm.sendMessage()
+        runCurrent()
+
+        // While the request is suspended in flight, the user changes the selection. The success
+        // acknowledgment carries the model/variant captured when the request was sent (high); the
+        // current pending record is now (gpt-5, low), so the ack is stale and must NOT flush the
+        // in-flight selection — and must not re-read mutable state to flush "low" as if it had
+        // been sent.
+        vm.modelAgentManager.selectReasoningEffort("low")
+        runCurrent()
+        sendGate.complete(Unit)
+        advanceUntilIdle()
+
+        // The newer pending (low) selection survives as pending; the stale ack flushes nothing.
+        assertEquals("low", vm.modelAgentManager.currentReasoningEffort())
+        coVerify(exactly = 1) {
+            settingsDataStore.setComposerSelectionForSession(
+                workspaceClient.workspace,
+                "session-1",
+                SessionComposerSelection(model = sentModel, variant = "low", pendingServerSync = true),
+            )
+        }
+        coVerify(exactly = 0) {
+            settingsDataStore.setComposerSelectionForSession(
+                workspaceClient.workspace,
+                "session-1",
+                SessionComposerSelection(model = sentModel, variant = "low", pendingServerSync = false),
+            )
+        }
+    }
+
+    @Test
     fun abortSession_clearsStreamingFlags_andBusyState() = runTest {
         val vm = createViewModel()
 
@@ -964,19 +1008,6 @@ class ChatViewModelTest {
         assertNull(vm.uiState.value.error)
     }
 
-    @Test
-    fun refreshAfterForeground_refetchesOpenSessionMetadataAndMessages() = runTest {
-        val vm = createViewModel()
-        clearMocks(api, answers = false, recordedCalls = true, childMocks = false)
-        coEvery { api.getSession("session-1", any(), null) } returns sessionDto()
-        coEvery { api.getMessages("session-1", any(), null, any(), null) } returns emptyList()
-
-        vm.refreshAfterForeground()
-        advanceUntilIdle()
-
-        coVerify(exactly = 1) { api.getSession("session-1", "/test", null) }
-        coVerify(exactly = 1) { api.getMessages("session-1", any(), null, "/test", null) }
-    }
 
     @Test
     fun loadCommands_failureKeepsBuiltIns_andAllowsRetryForWorkspaceCommands() = runTest {

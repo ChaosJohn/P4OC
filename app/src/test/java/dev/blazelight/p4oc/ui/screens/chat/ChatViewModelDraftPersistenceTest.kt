@@ -106,7 +106,6 @@ class ChatViewModelDraftPersistenceTest {
         coEvery { settingsDataStore.getSelectedAgentForSession(any()) } returns null
         coEvery { settingsDataStore.setSelectedAgentForSession(any(), any()) } returns Unit
         coEvery { settingsDataStore.getComposerSelectionForSession(any(), any()) } returns null
-        coEvery { settingsDataStore.getSelectedModelForSession(any()) } returns null
 
         hapticFeedback = mockk(relaxed = true)
     }
