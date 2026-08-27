@@ -242,9 +242,13 @@ fun ToolCallExpanded(
             onOpenSubSession = onOpenSubSession,
             modifier = modifier
         )
-        "todowrite", "todoread" -> TodoWidgetExpanded(
+        in TODO_TOOLS -> TodoWidgetExpanded(
             tool = tool,
             onClick = onClick,
+            showApprovalActions = showApprovalActions,
+            approvalRequestId = approvalRequestId,
+            onToolApprove = onToolApprove,
+            onToolDeny = onToolDeny,
             modifier = modifier,
         )
         else -> DefaultWidgetExpanded(
@@ -290,7 +294,7 @@ internal fun getToolCompactDescription(tool: Part.Tool): String {
         name in GLOB_TOOLS -> patternDescription("glob", input, "file_mask") ?: tool.toolName
         name in GREP_TOOLS -> patternDescription("grep", input, "substring_pattern", 40, quoted = true)
             ?: tool.toolName
-        name in listOf("todowrite", "todoread") -> todoCompactDescription(tool)
+        name in TODO_TOOLS -> todoCompactDescription(tool)
         else -> tool.toolName
     }
 }
@@ -301,6 +305,7 @@ private val EDIT_TOOLS = setOf("edit", "morph_edit_file", "serena_replace_conten
 private val WRITE_TOOLS = setOf("write", "serena_create_text_file")
 private val GLOB_TOOLS = setOf("glob", "find", "serena_find_file")
 private val GREP_TOOLS = setOf("grep", "search", "serena_search_for_pattern")
+private val TODO_TOOLS = setOf("todowrite", "todoread")
 
 private fun shellDescription(tool: Part.Tool, input: JsonObject): String {
     val command = extractParam(input, "command")?.trim()?.takeIf(String::isNotEmpty)?.take(60)

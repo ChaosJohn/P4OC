@@ -749,6 +749,8 @@
     <string name="todo_status_unknown">unknown</string>
     <string name="no_active_todos">No active todos</string>
     <string name="agent_no_tasks">The agent hasn\'t created any tasks yet</string>
+    <string name="todo_list_unavailable">Todo list could not be read</string>
+    <string name="todo_tool_failed">Todo tool failed</string>
     
     <!-- Context Usage Display -->
     <string name="context_usage">Context Usage</string>

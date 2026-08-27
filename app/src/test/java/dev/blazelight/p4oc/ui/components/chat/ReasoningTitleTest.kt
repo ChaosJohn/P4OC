@@ -1,6 +1,8 @@
 package dev.blazelight.p4oc.ui.components.chat
 
 import dev.blazelight.p4oc.domain.model.Part
+import kotlinx.serialization.json.JsonPrimitive
+import kotlinx.serialization.json.buildJsonArray
 import kotlinx.serialization.json.buildJsonObject
 import kotlinx.serialization.json.put
 import org.junit.Assert.assertEquals
@@ -30,6 +32,30 @@ class ReasoningTitleTest {
 
         assertEquals("Adding full tests and formatting fixes", reasoningDetailTitle(part))
         assertEquals("**Adding full tests and formatting fixes**\nMore detail", part.text)
+    }
+
+    @Test
+    fun `falls back to first reasoning line when metadata title is not a string`() {
+        val part = reasoning(
+            text = "## Comparing server and local state\nMore detail",
+            metadata = buildJsonObject {
+                put("title", buildJsonArray { add(JsonPrimitive("nested")) })
+            },
+        )
+
+        assertEquals("Comparing server and local state", reasoningDetailTitle(part))
+    }
+
+    @Test
+    fun `falls back to first reasoning line when metadata title is a number`() {
+        val part = reasoning(
+            text = "Resolving auth handshake",
+            metadata = buildJsonObject {
+                put("title", JsonPrimitive(42))
+            },
+        )
+
+        assertEquals("Resolving auth handshake", reasoningDetailTitle(part))
     }
 
     private fun reasoning(

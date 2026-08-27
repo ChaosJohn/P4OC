@@ -580,7 +580,8 @@ fun TaskWidgetExpanded(
 // ============== Shared Components ==============
 
 @Composable
-private fun PendingApprovalButtons(
+@Suppress("FunctionNaming")
+internal fun PendingApprovalButtons(
     onApprove: () -> Unit,
     onDeny: () -> Unit
 ) {
@@ -614,7 +615,7 @@ private fun PendingApprovalButtons(
 // ============== Helper Functions ==============
 
 @Composable
-private fun getStateIconColor(
+internal fun getStateIconColor(
     state: ToolState,
     theme: dev.blazelight.p4oc.ui.theme.opencode.OpenCodeTheme
 ): Pair<String, androidx.compose.ui.graphics.Color> {

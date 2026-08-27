@@ -35,8 +35,8 @@ import dev.blazelight.p4oc.ui.theme.LocalOpenCodeTheme
 import dev.blazelight.p4oc.ui.theme.SemanticColors
 import dev.blazelight.p4oc.ui.theme.Sizing
 import dev.blazelight.p4oc.ui.theme.Spacing
+import kotlinx.serialization.json.JsonPrimitive
 import kotlinx.serialization.json.contentOrNull
-import kotlinx.serialization.json.jsonPrimitive
 
 @Composable
 @Suppress("LongParameterList", "FunctionNaming")
@@ -561,8 +561,11 @@ private fun ReasoningPart(part: Part.Reasoning) {
 }
 
 internal fun reasoningDetailTitle(part: Part.Reasoning): String? {
-    val metadataTitle = listOf("title", "summary", "subject", "heading")
-        .firstNotNullOfOrNull { key -> part.metadata?.get(key)?.jsonPrimitive?.contentOrNull }
+    val metadataTitle = REASONING_TITLE_METADATA_KEYS
+        .firstNotNullOfOrNull { key ->
+            val value = part.metadata?.get(key) as? JsonPrimitive
+            if (value != null && value.isString) value.contentOrNull else null
+        }
         ?.trim()
         ?.takeIf { it.isNotBlank() }
     val source = metadataTitle ?: part.text.lineSequence()
@@ -572,7 +575,7 @@ internal fun reasoningDetailTitle(part: Part.Reasoning): String? {
         ?.trim()
     return source
         ?.stripReasoningTitleMarkdown()
-        ?.replace(Regex("\\s+"), " ")
+        ?.replace(REASONING_WHITESPACE_REGEX, " ")
         ?.take(REASONING_TITLE_MAX_CHARS)
         ?.takeIf { it.isNotBlank() && !it.equals("reasoning", ignoreCase = true) }
 }
@@ -582,6 +585,8 @@ private fun String.stripReasoningTitleMarkdown(): String =
         .replace("__", "")
 
 private const val REASONING_TITLE_MAX_CHARS = 80
+private val REASONING_TITLE_METADATA_KEYS = listOf("title", "summary", "subject", "heading")
+private val REASONING_WHITESPACE_REGEX = Regex("\\s+")
 
 @Composable
 private fun FilePart(part: Part.File) {
