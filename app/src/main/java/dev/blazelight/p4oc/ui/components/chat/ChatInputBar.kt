@@ -1,6 +1,5 @@
 package dev.blazelight.p4oc.ui.components.chat
 
-import android.view.KeyEvent as AndroidKeyEvent
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
@@ -51,6 +50,7 @@ import dev.blazelight.p4oc.ui.theme.LocalOpenCodeTheme
 import dev.blazelight.p4oc.ui.theme.Sizing
 import dev.blazelight.p4oc.ui.theme.Spacing
 import dev.blazelight.p4oc.ui.theme.TuiCodeFontSize
+import android.view.KeyEvent as AndroidKeyEvent
 
 data class ModelOption(
     val key: String,
@@ -67,41 +67,50 @@ internal class PromptHistoryNavigator(initialDraft: String = "") {
             return null
         }
 
-        val currentIndex = historyIndex?.takeIf { it in history.indices }
-        if (currentIndex == null) draft = currentText
+        val currentIndex = reconcileSelection(history, currentText)
         val nextIndex = currentIndex?.let { (it - 1).coerceAtLeast(0) } ?: history.lastIndex
         historyIndex = nextIndex
         return history[nextIndex]
     }
 
     fun newer(history: List<String>, currentText: String): String? {
-        if (history.isEmpty()) {
+        val nextText = if (history.isEmpty()) {
             reset(currentText)
-            return null
+            null
+        } else {
+            val currentIndex = reconcileSelection(history, currentText)
+            when {
+                currentIndex == null -> null
+                currentIndex < history.lastIndex -> {
+                    val nextIndex = currentIndex + 1
+                    historyIndex = nextIndex
+                    history[nextIndex]
+                }
+                else -> {
+                    historyIndex = null
+                    draft
+                }
+            }
         }
-
-        val currentIndex = historyIndex?.takeIf { it in history.indices } ?: run {
-            historyIndex = null
-            return null
-        }
-        if (currentIndex < history.lastIndex) {
-            val nextIndex = currentIndex + 1
-            historyIndex = nextIndex
-            return history[nextIndex]
-        }
-
-        historyIndex = null
-        return draft
+        return nextText
     }
 
     fun onTextChanged(text: String, history: List<String>) {
-        val selectedPrompt = historyIndex?.let(history::getOrNull)
-        if (selectedPrompt == null || text != selectedPrompt) reset(text)
+        reconcileSelection(history, text)
     }
 
     fun reset(text: String) {
         historyIndex = null
         draft = text
+    }
+
+    private fun reconcileSelection(history: List<String>, currentText: String): Int? {
+        val currentIndex = historyIndex?.takeIf { it in history.indices }
+        if (currentIndex == null || history[currentIndex] != currentText) {
+            reset(currentText)
+            return null
+        }
+        return currentIndex
     }
 }
 
@@ -112,6 +121,7 @@ private fun nextCommandIndex(
 ): Int = (currentIndex + delta + commandCount) % commandCount
 
 @Composable
+@Suppress("LongParameterList", "LongMethod", "CyclomaticComplexMethod", "FunctionNaming")
 fun ChatInputBar(
     value: String,
     onValueChange: (String) -> Unit,

@@ -28,14 +28,22 @@ class PromptHistoryTest {
     }
 
     @Test
-    fun `editing recalled prompt exits history and establishes new draft`() {
+    fun `newer immediately after editing recalled prompt exits history and preserves edit as draft`() {
         val navigator = PromptHistoryNavigator()
         val history = listOf("older", "newest")
 
         assertEquals("newest", navigator.older(history, currentText = "original draft"))
-        navigator.onTextChanged("edited recalled prompt", history)
-
         assertNull(navigator.newer(history, currentText = "edited recalled prompt"))
+        assertEquals("newest", navigator.older(history, currentText = "edited recalled prompt"))
+        assertEquals("edited recalled prompt", navigator.newer(history, currentText = "newest"))
+    }
+
+    @Test
+    fun `older immediately after editing recalled prompt restarts from newest with edit as draft`() {
+        val navigator = PromptHistoryNavigator()
+        val history = listOf("older", "newest")
+
+        assertEquals("newest", navigator.older(history, currentText = "original draft"))
         assertEquals("newest", navigator.older(history, currentText = "edited recalled prompt"))
         assertEquals("edited recalled prompt", navigator.newer(history, currentText = "newest"))
     }
