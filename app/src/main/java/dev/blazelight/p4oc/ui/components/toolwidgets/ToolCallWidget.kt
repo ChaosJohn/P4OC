@@ -202,6 +202,7 @@ fun ToolCallCompact(
  * Delegates to specialized widgets based on tool type
  */
 @Composable
+@Suppress("FunctionNaming", "LongMethod")
 fun ToolCallExpanded(
     tool: Part.Tool,
     onClick: (() -> Unit)?,
@@ -243,6 +244,15 @@ fun ToolCallExpanded(
             modifier = modifier
         )
         in TODO_TOOLS -> TodoWidgetExpanded(
+            tool = tool,
+            onClick = onClick,
+            showApprovalActions = showApprovalActions,
+            approvalRequestId = approvalRequestId,
+            onToolApprove = onToolApprove,
+            onToolDeny = onToolDeny,
+            modifier = modifier,
+        )
+        "apply_patch" -> ApplyPatchWidgetExpanded(
             tool = tool,
             onClick = onClick,
             showApprovalActions = showApprovalActions,
@@ -295,6 +305,7 @@ internal fun getToolCompactDescription(tool: Part.Tool): String {
         name in GREP_TOOLS -> patternDescription("grep", input, "substring_pattern", 40, quoted = true)
             ?: tool.toolName
         name in TODO_TOOLS -> todoCompactDescription(tool)
+        name == "apply_patch" -> applyPatchCompactDescription(tool)
         else -> tool.toolName
     }
 }
