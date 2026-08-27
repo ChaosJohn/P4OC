@@ -520,6 +520,7 @@
     <string name="models_context_format">Context: %s</string>
     <string name="models_tools">Tools</string>
     <string name="models_reasoning">Reasoning</string>
+    <string name="reasoning_with_title">Reasoning · %1$s</string>
     <string name="models_load_failed_title">Could not load models</string>
     <string name="models_load_failed_description">Check the server connection, then try again.</string>
     <string name="models_empty_title">No models available</string>
@@ -748,6 +749,8 @@
     <string name="todo_status_unknown">unknown</string>
     <string name="no_active_todos">No active todos</string>
     <string name="agent_no_tasks">The agent hasn\'t created any tasks yet</string>
+    <string name="todo_list_unavailable">Todo list could not be read</string>
+    <string name="todo_tool_failed">Todo tool failed</string>
     
     <!-- Context Usage Display -->
     <string name="context_usage">Context Usage</string>
