@@ -29,9 +29,34 @@ class ToolCallWidgetTest {
         )
     }
 
-    private fun tool(name: String, command: String? = null): Part.Tool {
+    @Test
+    fun applyPatch_validOneFilePatch_usesPatchSummaryNotToolName() {
+        assertEquals(
+            "Patch: 1 file +1",
+            getToolCompactDescription(
+                tool(
+                    "apply_patch",
+                    patchText = "*** Begin Patch\n*** Add File: a.kt\n+x\n*** End Patch",
+                ),
+            ),
+        )
+    }
+
+    private fun tool(name: String, command: String? = null, patchText: String? = null): Part.Tool {
         val input = buildJsonObject {
             command?.let { put("command", it) }
+            patchText?.let { put("patchText", it) }
+        }
+        val state = if (patchText != null) {
+            ToolState.Completed(
+                input = input,
+                output = "Applied patch",
+                title = "Applied patch",
+                startedAt = 1,
+                endedAt = 2,
+            )
+        } else {
+            ToolState.Pending(input = input, rawInput = "")
         }
         return Part.Tool(
             id = "part",
@@ -39,7 +64,7 @@ class ToolCallWidgetTest {
             messageID = "message",
             callID = "call",
             toolName = name,
-            state = ToolState.Pending(input = input, rawInput = ""),
+            state = state,
         )
     }
 }

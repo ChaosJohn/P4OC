@@ -202,6 +202,7 @@ fun ToolCallCompact(
  * Delegates to specialized widgets based on tool type
  */
 @Composable
+@Suppress("FunctionNaming", "LongMethod")
 fun ToolCallExpanded(
     tool: Part.Tool,
     onClick: (() -> Unit)?,
@@ -254,6 +255,10 @@ fun ToolCallExpanded(
         "apply_patch" -> ApplyPatchWidgetExpanded(
             tool = tool,
             onClick = onClick,
+            showApprovalActions = showApprovalActions,
+            approvalRequestId = approvalRequestId,
+            onToolApprove = onToolApprove,
+            onToolDeny = onToolDeny,
             modifier = modifier,
         )
         else -> DefaultWidgetExpanded(

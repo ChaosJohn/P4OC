@@ -751,6 +751,14 @@
     <string name="agent_no_tasks">The agent hasn\'t created any tasks yet</string>
     <string name="todo_list_unavailable">Todo list could not be read</string>
     <string name="todo_tool_failed">Todo tool failed</string>
+
+    <!-- Apply patch tool widget -->
+    <string name="patch_tool_failed">Patch tool failed</string>
+    <string name="patch_details_unreadable">Patch details could not be read</string>
+    <string name="patch_action_add">Add file</string>
+    <string name="patch_action_update">Update file</string>
+    <string name="patch_action_move">Move file</string>
+    <string name="patch_action_delete">Delete file</string>
     
     <!-- Context Usage Display -->
     <string name="context_usage">Context Usage</string>
