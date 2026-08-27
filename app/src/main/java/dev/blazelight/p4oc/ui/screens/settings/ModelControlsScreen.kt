@@ -159,7 +159,11 @@ class ModelControlsViewModel constructor(
             when (safeApiCall { workspaceClient.updateCurrentModel("${model.providerId}/${model.id}") }) {
                 is ApiResult.Success -> {
                     _state.update { it.copy(selectedModelId = modelId, error = null, loadFailed = false) }
-                    modelSelectionCoordinator.publishActiveModel(selectedModel)
+                    modelSelectionCoordinator.publishActiveModel(
+                        workspaceClient.workspace,
+                        workspaceClient.generation,
+                        selectedModel,
+                    )
                 }
                 is ApiResult.Error -> {
                     _state.update {

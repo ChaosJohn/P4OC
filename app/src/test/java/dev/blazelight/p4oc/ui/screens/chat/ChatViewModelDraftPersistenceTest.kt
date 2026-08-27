@@ -105,6 +105,7 @@ class ChatViewModelDraftPersistenceTest {
         every { settingsDataStore.notificationSettings } returns flowOf(NotificationSettings())
         coEvery { settingsDataStore.getSelectedAgentForSession(any()) } returns null
         coEvery { settingsDataStore.setSelectedAgentForSession(any(), any()) } returns Unit
+        coEvery { settingsDataStore.getComposerSelectionForSession(any(), any()) } returns null
 
         hapticFeedback = mockk(relaxed = true)
     }

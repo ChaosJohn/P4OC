@@ -13,6 +13,7 @@ import dev.blazelight.p4oc.data.remote.dto.ModelInput
 import dev.blazelight.p4oc.domain.server.ServerIdentity
 import dev.blazelight.p4oc.domain.server.WorkspaceKey
 import dev.blazelight.p4oc.domain.session.SessionId
+import dev.blazelight.p4oc.domain.workspace.Workspace
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
@@ -35,6 +36,14 @@ private val Context.dataStore: DataStore<Preferences> by preferencesDataStore(
 
 private const val TAG = "SettingsDataStore"
 internal const val MAX_SESSION_AGENT_SELECTIONS = 100
+internal const val MAX_SESSION_COMPOSER_SELECTIONS = 100
+
+@Serializable
+data class SessionComposerSelection(
+    val model: ModelInput,
+    val variant: String? = null,
+    val pendingServerSync: Boolean = false,
+)
 
 private fun parseSessionAgentSelections(stored: String?): LinkedHashMap<String, String> =
     stored?.let {
@@ -59,6 +68,44 @@ internal fun updatedSessionAgentSelections(
     }
     return Json.encodeToString(selections)
 }
+
+private fun parseSessionComposerSelections(stored: String?): LinkedHashMap<String, SessionComposerSelection> =
+    stored?.let {
+        runCatching {
+            Json.decodeFromString<LinkedHashMap<String, SessionComposerSelection>>(it)
+        }.getOrNull()
+    } ?: linkedMapOf()
+
+internal fun composerSelectionForSession(
+    stored: String?,
+    selectionKey: String,
+): SessionComposerSelection? = parseSessionComposerSelections(stored)[selectionKey]
+
+internal fun updatedSessionComposerSelections(
+    stored: String?,
+    selectionKey: String,
+    selection: SessionComposerSelection,
+): String {
+    val selections = parseSessionComposerSelections(stored)
+    selections.remove(selectionKey)
+    selections[selectionKey] = selection
+    while (selections.size > MAX_SESSION_COMPOSER_SELECTIONS) {
+        selections.remove(selections.keys.first())
+    }
+    return Json.encodeToString(selections)
+}
+
+internal fun sessionComposerSelectionKey(workspace: Workspace, sessionId: String): String = Json.encodeToString(
+    listOf(
+        workspace.server.endpointKey,
+        when (val key = workspace.key) {
+            WorkspaceKey.Global -> "global"
+            is WorkspaceKey.Directory -> "directory:${key.value}"
+            is WorkspaceKey.SessionScoped -> "session:${key.sessionId.value}"
+        },
+        sessionId,
+    )
+)
 
 internal const val MAX_LAST_UPLOAD_DIRECTORIES = 50
 
@@ -148,6 +195,7 @@ class SettingsDataStore constructor(
         private val KEY_FAVORITE_MODELS = stringSetPreferencesKey("favorite_models")
         private val KEY_RECENT_MODELS = stringPreferencesKey("recent_models")
         private val KEY_SESSION_AGENTS = stringPreferencesKey("session_agents")
+        private val KEY_SESSION_COMPOSER_SELECTIONS = stringPreferencesKey("session_composer_selections_v1")
         private const val MAX_RECENT_MODELS = 10
 
         // Notification settings keys
@@ -713,6 +761,28 @@ class SettingsDataStore constructor(
                 stored = prefs[KEY_SESSION_AGENTS],
                 sessionId = sessionId,
                 agentName = agentName,
+            )
+        }
+    }
+
+    suspend fun getComposerSelectionForSession(
+        workspace: Workspace,
+        sessionId: String,
+    ): SessionComposerSelection? {
+        val stored = context.dataStore.data.first()[KEY_SESSION_COMPOSER_SELECTIONS] ?: return null
+        return composerSelectionForSession(stored, sessionComposerSelectionKey(workspace, sessionId))
+    }
+
+    suspend fun setComposerSelectionForSession(
+        workspace: Workspace,
+        sessionId: String,
+        selection: SessionComposerSelection,
+    ) {
+        context.dataStore.edit { prefs ->
+            prefs[KEY_SESSION_COMPOSER_SELECTIONS] = updatedSessionComposerSelections(
+                stored = prefs[KEY_SESSION_COMPOSER_SELECTIONS],
+                selectionKey = sessionComposerSelectionKey(workspace, sessionId),
+                selection = selection,
             )
         }
     }

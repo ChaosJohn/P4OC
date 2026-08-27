@@ -14,8 +14,10 @@ import dev.blazelight.p4oc.domain.server.ServerRef
 import dev.blazelight.p4oc.domain.server.WorkspaceKey
 import dev.blazelight.p4oc.domain.workspace.Workspace
 import dev.blazelight.p4oc.ui.screens.chat.ModelSelectionCoordinator
+import dev.blazelight.p4oc.ui.screens.chat.ScopedModelSelectionChange
 import io.mockk.coEvery
 import io.mockk.coVerify
+import io.mockk.every
 import io.mockk.mockk
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.ExperimentalCoroutinesApi
@@ -44,6 +46,9 @@ class ModelControlsViewModelTest {
     @Before
     fun setUp() {
         Dispatchers.setMain(dispatcher)
+        every { workspaceClient.workspace } returns
+            Workspace(ServerRef.fromEndpointKey("http://test.local"), "/test")
+        every { workspaceClient.generation } returns ServerGeneration(2L)
     }
 
     @After
@@ -73,7 +78,11 @@ class ModelControlsViewModelTest {
     @Test
     fun selectModel_publishesCoordinatorChangeOnlyAfterSuccessfulApiUpdate() = runTest(dispatcher) {
         val coordinator = ModelSelectionCoordinator()
-        val publishedModels = mutableListOf<ModelInput>()
+        val workspace = Workspace(ServerRef.fromEndpointKey("http://test.local"), "/test")
+        val generation = ServerGeneration(2L)
+        every { workspaceClient.workspace } returns workspace
+        every { workspaceClient.generation } returns generation
+        val publishedModels = mutableListOf<ScopedModelSelectionChange>()
         val collectJob = backgroundScope.launch {
             coordinator.activeModelChanges.collect(publishedModels::add)
         }
@@ -87,12 +96,21 @@ class ModelControlsViewModelTest {
 
         viewModel.selectModel("claude-3")
         runCurrent()
-        assertEquals(emptyList<ModelInput>(), publishedModels)
+        assertEquals(emptyList<ScopedModelSelectionChange>(), publishedModels)
 
         viewModel.selectModel("gpt-4")
         runCurrent()
 
-        assertEquals(listOf(ModelInput(providerID = "openai", modelID = "gpt-4")), publishedModels)
+        assertEquals(
+            listOf(
+                ScopedModelSelectionChange(
+                    workspace = workspace,
+                    generation = generation,
+                    model = ModelInput(providerID = "openai", modelID = "gpt-4"),
+                )
+            ),
+            publishedModels,
+        )
         collectJob.cancel()
     }
 
@@ -225,9 +243,9 @@ class ModelControlsViewModelTest {
         val events = MutableSharedFlow<ScopedEvent>()
         val registry = mockk<ServerConnectionRegistry>()
         coEvery { workspaceClient.getProviders() } returns providersResponse()
-        io.mockk.every { workspaceClient.workspace } returns workspace
-        io.mockk.every { workspaceClient.generation } returns generation
-        io.mockk.every { registry.events(server) } returns events
+        every { workspaceClient.workspace } returns workspace
+        every { workspaceClient.generation } returns generation
+        every { registry.events(server) } returns events
         ModelControlsViewModel(workspaceClient, serverConnectionRegistry = registry)
         advanceUntilIdle()
         coVerify(exactly = 1) { workspaceClient.getProviders() }

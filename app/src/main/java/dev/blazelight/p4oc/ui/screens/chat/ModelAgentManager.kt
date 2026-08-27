@@ -1,5 +1,6 @@
 package dev.blazelight.p4oc.ui.screens.chat
 
+import dev.blazelight.p4oc.core.datastore.SessionComposerSelection
 import dev.blazelight.p4oc.core.datastore.SettingsDataStore
 import dev.blazelight.p4oc.core.log.AppLog
 import dev.blazelight.p4oc.core.network.ApiResult
@@ -8,6 +9,7 @@ import dev.blazelight.p4oc.core.network.safeApiCall
 import dev.blazelight.p4oc.data.remote.dto.AgentDto
 import dev.blazelight.p4oc.data.remote.dto.ModelDto
 import dev.blazelight.p4oc.data.remote.dto.ModelInput
+import dev.blazelight.p4oc.data.remote.dto.SessionModelDto
 import dev.blazelight.p4oc.data.remote.dto.reasoningEfforts
 import dev.blazelight.p4oc.data.workspace.WorkspaceClient
 import dev.blazelight.p4oc.domain.model.OpenCodeEvent
@@ -21,6 +23,9 @@ import kotlinx.coroutines.flow.debounce
 import kotlinx.coroutines.flow.filter
 import kotlinx.coroutines.flow.stateIn
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.sync.Mutex
+import kotlinx.coroutines.sync.withLock
+import java.util.concurrent.atomic.AtomicLong
 
 /**
  * Manages model/agent loading, selection, favorites, and recents.
@@ -54,6 +59,16 @@ class ModelAgentManager(
 
     private var selectedModelFromAgent = false
     private var selectedModelExplicitly = false
+    private var catalogLoaded = false
+    private var composerSelectionLoaded = false
+    private var catalogDefaultModel: ModelInput? = null
+    private var catalogLastUsedModel: ModelInput? = null
+    private var localComposerSelection: SessionComposerSelection? = null
+    private var serverComposerSelection: SessionComposerSelection? = null
+
+    /** Serializes DataStore writes and tracks the newest selection so a stale write is skipped. */
+    private val composerPersistenceMutex = Mutex()
+    private val composerPersistenceVersion = AtomicLong(0L)
 
     val favoriteModels: StateFlow<Set<ModelInput>> = settingsDataStore.favoriteModels
         .stateIn(scope, SharingStarted.Eagerly, emptySet())
@@ -64,8 +79,12 @@ class ModelAgentManager(
     init {
         modelSelectionCoordinator?.let { coordinator ->
             scope.launch {
-                coordinator.activeModelChanges.collect { model ->
-                    reconcileActiveModel(model)
+                coordinator.activeModelChanges.collect { change ->
+                    if (change.workspace == workspaceClient.workspace &&
+                        change.generation == workspaceClient.generation
+                    ) {
+                        reconcileActiveModel(change.model)
+                    }
                 }
             }
         }
@@ -131,12 +150,25 @@ class ModelAgentManager(
             }
         }
         val agentModel = _availableAgents.value.find { it.name == agentName }?.model ?: return
-        _selectedModel.value = ModelInput(
+        val model = ModelInput(
             providerID = agentModel.providerID,
             modelID = agentModel.modelID
         )
-        selectedModelFromAgent = true
-        selectedModelExplicitly = false
+        if (persist || !hasPreferredSessionSelection()) {
+            if (_selectedModel.value != model) _selectedReasoningEffort.value = null
+            _selectedModel.value = model
+            selectedModelFromAgent = true
+            selectedModelExplicitly = persist
+            if (persist) {
+                persistComposerSelection(
+                    SessionComposerSelection(
+                        model = model,
+                        variant = _selectedReasoningEffort.value,
+                        pendingServerSync = true,
+                    )
+                )
+            }
+        }
     }
 
     fun loadModels() {
@@ -153,30 +185,34 @@ class ModelAgentManager(
                             models.add(providerId to model)
                         }
                     }
-                    val defaultModel = result.data.default.entries
+                    catalogDefaultModel = result.data.default.entries
                         .map { (provider, modelId) -> ModelInput(providerID = provider, modelID = modelId) }
                         .firstOrNull { candidate ->
                             models.any { (providerId, model) ->
                                 providerId == candidate.providerID && model.id == candidate.modelID
                             }
                         }
-                    val lastUsedModel = recentModels.value.firstOrNull { candidate ->
-                        models.any { (providerId, model) ->
-                            providerId == candidate.providerID && model.id == candidate.modelID
+                    catalogLastUsedModel = recentModels.value.firstOrNull { candidate ->
+                        candidate.isAvailableIn(models)
+                    }
+                    if (!composerSelectionLoaded) {
+                        val stored = sessionId?.let { currentSessionId ->
+                            settingsDataStore.getComposerSelectionForSession(
+                                workspaceClient.workspace,
+                                currentSessionId,
+                            )
+                        }
+                        // A selection may have been made (or persistence begun) while this read
+                        // was in flight; a stale storage snapshot must not clobber it.
+                        if (!composerSelectionLoaded) {
+                            localComposerSelection = stored
+                            composerSelectionLoaded = true
                         }
                     }
-                    val fallbackModel = defaultModel ?: lastUsedModel
-                    val currentSelectionIsAvailable = _selectedModel.value?.let { selected ->
-                        models.any { (providerId, model) ->
-                            providerId == selected.providerID && model.id == selected.modelID
-                        }
-                    } == true
                     _availableModels.value = models
                     _providerNames.value = names
-                    if (!selectedModelFromAgent && (!selectedModelExplicitly || !currentSelectionIsAvailable)) {
-                        _selectedModel.value = fallbackModel
-                        selectedModelExplicitly = false
-                    }
+                    catalogLoaded = true
+                    reconcileComposerSelection()
                 }
                 is ApiResult.Error -> {}
             }
@@ -190,6 +226,13 @@ class ModelAgentManager(
         _selectedModel.value = model
         selectedModelFromAgent = false
         selectedModelExplicitly = true
+        persistComposerSelection(
+            SessionComposerSelection(
+                model = model,
+                variant = _selectedReasoningEffort.value,
+                pendingServerSync = true,
+            )
+        )
         scope.launch {
             settingsDataStore.addRecentModel(model)
         }
@@ -197,6 +240,35 @@ class ModelAgentManager(
 
     fun selectReasoningEffort(reasoningEffort: String?) {
         _selectedReasoningEffort.value = reasoningEffort
+        val model = _selectedModel.value ?: return
+        persistComposerSelection(
+            SessionComposerSelection(
+                model = model,
+                variant = reasoningEffort,
+                pendingServerSync = true,
+            )
+        )
+    }
+
+    fun applyServerSessionModel(model: SessionModelDto?) {
+        serverComposerSelection = model?.let {
+            SessionComposerSelection(
+                model = ModelInput(providerID = it.providerID, modelID = it.id),
+                variant = it.variant,
+            )
+        }
+        if (catalogLoaded && !selectedModelExplicitly) reconcileComposerSelection()
+    }
+
+    fun markComposerSelectionSent(model: ModelInput?, variant: String?) {
+        val pending = localComposerSelection ?: return
+        if (!pending.pendingServerSync || pending.model != model || pending.variant != variant) return
+        val acknowledged = pending.copy(pendingServerSync = false)
+        localComposerSelection = acknowledged
+        serverComposerSelection = acknowledged
+        selectedModelExplicitly = false
+        selectedModelFromAgent = false
+        persistComposerSelection(acknowledged)
     }
 
     fun currentReasoningEffort(): String? {
@@ -217,12 +289,87 @@ class ModelAgentManager(
     }
 
     private fun reconcileActiveModel(model: ModelInput) {
-        if (selectedModelFromAgent || selectedModelExplicitly) return
+        if (selectedModelFromAgent || selectedModelExplicitly || hasPreferredSessionSelection()) return
         if (_selectedModel.value != model) {
             _selectedReasoningEffort.value = null
         }
         _selectedModel.value = model
     }
+
+    private fun reconcileComposerSelection() {
+        val currentSelectionIsAvailable = _selectedModel.value?.isAvailableIn(_availableModels.value) == true
+        if (selectedModelExplicitly && currentSelectionIsAvailable) return
+
+        val local = localComposerSelection?.takeIf { it.model.isAvailableIn(_availableModels.value) }
+        val server = serverComposerSelection?.takeIf { it.model.isAvailableIn(_availableModels.value) }
+        val preferred = preferredComposerSelection(local, server)
+
+        if (preferred != null) {
+            val applied = applyComposerSelection(preferred)
+            val serverWins = server != null && preferred == server && local != server
+            if (serverWins || applied.variant != preferred.variant) {
+                persistComposerSelection(
+                    if (serverWins) applied.copy(pendingServerSync = false) else applied
+                )
+            }
+            return
+        }
+
+        if (!selectedModelFromAgent && (!currentSelectionIsAvailable || _selectedModel.value == null)) {
+            _selectedModel.value = catalogDefaultModel ?: catalogLastUsedModel
+            _selectedReasoningEffort.value = null
+        }
+        selectedModelExplicitly = false
+    }
+
+    private fun preferredComposerSelection(
+        local: SessionComposerSelection?,
+        server: SessionComposerSelection?,
+    ): SessionComposerSelection? = when {
+        local?.pendingServerSync == true && local != server -> local
+        server != null -> server
+        else -> local
+    }
+
+    private fun applyComposerSelection(selection: SessionComposerSelection): SessionComposerSelection {
+        val availableEfforts = _availableModels.value.firstOrNull { (providerId, dto) ->
+            providerId == selection.model.providerID && dto.id == selection.model.modelID
+        }?.second?.reasoningEfforts().orEmpty()
+        val normalizedVariant = selection.variant?.takeIf { it in availableEfforts }
+        _selectedModel.value = selection.model
+        _selectedReasoningEffort.value = normalizedVariant
+        selectedModelFromAgent = false
+        selectedModelExplicitly = false
+        val applied = selection.copy(variant = normalizedVariant)
+        localComposerSelection = applied
+        return applied
+    }
+
+    private fun hasPreferredSessionSelection(): Boolean =
+        serverComposerSelection != null || localComposerSelection != null
+
+    private fun persistComposerSelection(selection: SessionComposerSelection) {
+        localComposerSelection = selection
+        composerSelectionLoaded = true
+        val version = composerPersistenceVersion.incrementAndGet()
+        val currentSessionId = sessionId ?: return
+        scope.launch {
+            composerPersistenceMutex.withLock {
+                // A newer selection superseded this one while this write was queued; skip.
+                if (version != composerPersistenceVersion.get()) return@withLock
+                settingsDataStore.setComposerSelectionForSession(
+                    workspaceClient.workspace,
+                    currentSessionId,
+                    selection,
+                )
+            }
+        }
+    }
+
+    private fun ModelInput.isAvailableIn(models: List<Pair<String, ModelDto>>): Boolean =
+        models.any { (providerId, model) ->
+            providerId == providerID && model.id == modelID
+        }
 
     private companion object {
         const val TAG = "ModelAgentManager"

@@ -3,6 +3,7 @@ package dev.blazelight.p4oc.ui.screens.chat
 import androidx.lifecycle.SavedStateHandle
 import dev.blazelight.p4oc.core.datastore.ChatSettings
 import dev.blazelight.p4oc.core.datastore.NotificationSettings
+import dev.blazelight.p4oc.core.datastore.SessionComposerSelection
 import dev.blazelight.p4oc.core.datastore.SettingsDataStore
 import dev.blazelight.p4oc.core.datastore.VisualSettings
 import dev.blazelight.p4oc.core.haptic.HapticFeedback
@@ -21,6 +22,7 @@ import dev.blazelight.p4oc.data.remote.dto.PartDto
 import dev.blazelight.p4oc.data.remote.dto.RevertSessionRequest
 import dev.blazelight.p4oc.data.remote.dto.SendMessageRequest
 import dev.blazelight.p4oc.data.remote.dto.SessionDto
+import dev.blazelight.p4oc.data.remote.dto.SessionModelDto
 import dev.blazelight.p4oc.data.remote.dto.SessionRevertDto
 import dev.blazelight.p4oc.data.remote.dto.SessionStatusDto
 import dev.blazelight.p4oc.data.remote.dto.TimeDto
@@ -135,8 +137,11 @@ class ChatViewModelTest {
         every { settingsDataStore.favoriteModels } returns flowOf(emptySet())
         every { settingsDataStore.recentModels } returns flowOf(emptyList())
         every { settingsDataStore.chatSettings } returns flowOf(ChatSettings())
-        every { settingsDataStore.visualSettings } returns flowOf(VisualSettings())
         every { settingsDataStore.notificationSettings } returns flowOf(NotificationSettings())
+        every { settingsDataStore.visualSettings } returns flowOf(VisualSettings())
+        coEvery { settingsDataStore.getComposerSelectionForSession(any(), any()) } returns null
+        coEvery { settingsDataStore.setComposerSelectionForSession(any(), any(), any()) } returns Unit
+        coEvery { settingsDataStore.addRecentModel(any()) } returns Unit
         coEvery { settingsDataStore.getSelectedAgentForSession(any()) } returns null
         coEvery { settingsDataStore.setSelectedAgentForSession(any(), any()) } returns Unit
 
@@ -868,6 +873,71 @@ class ChatViewModelTest {
     }
 
     @Test
+    fun sendMessage_sendsModelAndVariantRestoredFromServerSession() = runTest {
+        val model = dev.blazelight.p4oc.data.remote.dto.ModelInput("openai", "gpt-5")
+        coEvery { api.getSession("session-1", any(), null) } returns sessionDto(
+            model = SessionModelDto(id = "gpt-5", providerID = "openai", variant = "high")
+        )
+        coEvery { api.getProviders(any(), null) } returns reasoningProviders()
+        val request = slot<SendMessageRequest>()
+        coEvery { api.sendMessageAsync(any(), capture(request), any(), null) } returns Unit
+        val vm = createViewModel()
+
+        vm.updateInput("hello")
+        vm.sendMessage()
+        advanceUntilIdle()
+
+        assertEquals(model, request.captured.model)
+        assertEquals("high", request.captured.variant)
+    }
+
+    @Test
+    fun sendMessage_acknowledgesCapturedModelVariant_notMutableStateAtSuccess() = runTest {
+        val sentModel = dev.blazelight.p4oc.data.remote.dto.ModelInput("openai", "gpt-5")
+        coEvery { api.getSession("session-1", any(), null) } returns sessionDto(
+            model = SessionModelDto(id = "gpt-5", providerID = "openai", variant = "high")
+        )
+        coEvery { api.getProviders(any(), null) } returns reasoningProviders()
+        val sendGate = CompletableDeferred<Unit>()
+        coEvery { api.sendMessageAsync(any(), any(), any(), null) } coAnswers {
+            sendGate.await()
+            Unit
+        }
+        val vm = createViewModel()
+
+        vm.updateInput("hello")
+        vm.sendMessage()
+        runCurrent()
+
+        // While the request is suspended in flight, the user changes the selection. The success
+        // acknowledgment carries the model/variant captured when the request was sent (high); the
+        // current pending record is now (gpt-5, low), so the ack is stale and must NOT flush the
+        // in-flight selection — and must not re-read mutable state to flush "low" as if it had
+        // been sent.
+        vm.modelAgentManager.selectReasoningEffort("low")
+        runCurrent()
+        sendGate.complete(Unit)
+        advanceUntilIdle()
+
+        // The newer pending (low) selection survives as pending; the stale ack flushes nothing.
+        assertEquals("low", vm.modelAgentManager.currentReasoningEffort())
+        coVerify(exactly = 1) {
+            settingsDataStore.setComposerSelectionForSession(
+                workspaceClient.workspace,
+                "session-1",
+                SessionComposerSelection(model = sentModel, variant = "low", pendingServerSync = true),
+            )
+        }
+        coVerify(exactly = 0) {
+            settingsDataStore.setComposerSelectionForSession(
+                workspaceClient.workspace,
+                "session-1",
+                SessionComposerSelection(model = sentModel, variant = "low", pendingServerSync = false),
+            )
+        }
+    }
+
+    @Test
     fun abortSession_clearsStreamingFlags_andBusyState() = runTest {
         val vm = createViewModel()
 
@@ -937,6 +1007,7 @@ class ChatViewModelTest {
         assertTrue(vm.sessionMissing.replayCache.isNotEmpty())
         assertNull(vm.uiState.value.error)
     }
+
 
     @Test
     fun loadCommands_failureKeepsBuiltIns_andAllowsRetryForWorkspaceCommands() = runTest {
@@ -1065,7 +1136,10 @@ class ChatViewModelTest {
     private fun ChatViewModel.currentMessages(): List<MessageWithParts> =
         messages.value
 
-    private fun sessionDto(revertMessageId: String? = null): SessionDto {
+    private fun sessionDto(
+        revertMessageId: String? = null,
+        model: SessionModelDto? = null,
+    ): SessionDto {
         return SessionDto(
             id = "session-1",
             projectID = "project-1",
@@ -1074,8 +1148,32 @@ class ChatViewModelTest {
             version = "1.0",
             time = TimeDto(created = 1, updated = 2),
             revert = revertMessageId?.let { SessionRevertDto(messageID = it) },
+            model = model,
         )
     }
+
+    private fun reasoningProviders() = dev.blazelight.p4oc.data.remote.dto.ProvidersResponseDto(
+        all = listOf(
+            dev.blazelight.p4oc.data.remote.dto.ProviderDto(
+                id = "openai",
+                name = "OpenAI",
+                source = "env",
+                models = mapOf(
+                    "gpt-5" to dev.blazelight.p4oc.data.remote.dto.ModelDto(
+                        id = "gpt-5",
+                        providerId = "openai",
+                        name = "GPT-5",
+                        variants = buildJsonObject {
+                            put("low", buildJsonObject {})
+                            put("high", buildJsonObject {})
+                        },
+                    )
+                ),
+            )
+        ),
+        default = mapOf("openai" to "gpt-5"),
+        connected = listOf("openai"),
+    )
 
     private fun userMessageDto(id: String, createdAt: Long): MessageWrapperDto {
         return MessageWrapperDto(

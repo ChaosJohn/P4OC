@@ -8,9 +8,14 @@ import dev.blazelight.p4oc.data.remote.dto.ProviderAuthAuthorizeRequest
 import dev.blazelight.p4oc.data.remote.dto.ProviderDto
 import dev.blazelight.p4oc.data.remote.dto.ProvidersResponseDto
 import dev.blazelight.p4oc.data.workspace.WorkspaceClient
+import dev.blazelight.p4oc.domain.server.ServerGeneration
+import dev.blazelight.p4oc.domain.server.ServerRef
+import dev.blazelight.p4oc.domain.workspace.Workspace
 import dev.blazelight.p4oc.ui.screens.chat.ModelSelectionCoordinator
+import dev.blazelight.p4oc.ui.screens.chat.ScopedModelSelectionChange
 import io.mockk.coEvery
 import io.mockk.coVerify
+import io.mockk.every
 import io.mockk.mockk
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.ExperimentalCoroutinesApi
@@ -35,6 +40,9 @@ class ProviderConfigViewModelTest {
     @Before
     fun setUp() {
         Dispatchers.setMain(dispatcher)
+        every { workspaceClient.workspace } returns
+            Workspace(ServerRef.fromEndpointKey("http://test.local"), "/test")
+        every { workspaceClient.generation } returns ServerGeneration(2L)
         coEvery { workspaceClient.getProviderAuthMethods() } returns emptyMap()
     }
 
@@ -64,7 +72,11 @@ class ProviderConfigViewModelTest {
     @Test
     fun setModel_publishesCoordinatorChangeOnlyAfterUpdateConfigSucceeds() = runTest(dispatcher) {
         val coordinator = ModelSelectionCoordinator()
-        val publishedModels = mutableListOf<ModelInput>()
+        val workspace = Workspace(ServerRef.fromEndpointKey("http://test.local"), "/test")
+        val generation = ServerGeneration(2L)
+        every { workspaceClient.workspace } returns workspace
+        every { workspaceClient.generation } returns generation
+        val publishedModels = mutableListOf<ScopedModelSelectionChange>()
         val collectJob = backgroundScope.launch {
             coordinator.activeModelChanges.collect(publishedModels::add)
         }
@@ -78,14 +90,23 @@ class ProviderConfigViewModelTest {
 
         viewModel.setModel("anthropic", "claude-3")
         runCurrent()
-        assertEquals(emptyList<ModelInput>(), publishedModels)
+        assertEquals(emptyList<ScopedModelSelectionChange>(), publishedModels)
 
         coEvery { workspaceClient.updateConfig(ConfigDto(model = "anthropic/claude-3")) } returns
             ConfigDto(model = "anthropic/claude-3")
         viewModel.setModel("anthropic", "claude-3")
         runCurrent()
 
-        assertEquals(listOf(ModelInput(providerID = "anthropic", modelID = "claude-3")), publishedModels)
+        assertEquals(
+            listOf(
+                ScopedModelSelectionChange(
+                    workspace = workspace,
+                    generation = generation,
+                    model = ModelInput(providerID = "anthropic", modelID = "claude-3"),
+                )
+            ),
+            publishedModels,
+        )
         collectJob.cancel()
     }
 

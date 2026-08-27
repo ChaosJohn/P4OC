@@ -202,7 +202,13 @@ class ProviderConfigViewModel constructor(
                 val savedConfig = workspaceClient.updateConfig(updatedConfig)
                 val savedModel = savedConfig.model ?: newModel
                 _uiState.update { it.copy(currentModel = savedModel, error = null) }
-                parseModelInput(savedModel)?.let(modelSelectionCoordinator::publishActiveModel)
+                parseModelInput(savedModel)?.let { model ->
+                    modelSelectionCoordinator.publishActiveModel(
+                        workspaceClient.workspace,
+                        workspaceClient.generation,
+                        model,
+                    )
+                }
             } catch (e: CancellationException) {
                 throw e
             } catch (e: Exception) {
